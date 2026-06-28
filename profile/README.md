@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/argyle-labs/.github/main/assets/argyle-labs-icon.png" width="128" alt="argyle-labs" />
+</p>
+
 # Argyle Labs
 
 Local-first homelab & developer-tooling, built around **[orca](https://github.com/argyle-labs/orca)** — a single self-contained binary that orchestrates infrastructure, services, and AI agents, with everything else shipped as standalone **orca plugins**.
