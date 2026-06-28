@@ -1,0 +1,31 @@
+name: CI
+
+# Gate for the org tooling repo. The only build artifact here is the `labs`
+# multi-repo management script, so "build + test" means: it parses, and it
+# passes shellcheck. Runs on every PR (no path filter) so the required `ci`
+# check always reports a result and never leaves a PR stuck "Expected".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint shell tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check (bash -n)
+        run: bash -n bin/labs
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./bin
