@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+#
+# labs — unified management for every repo in the argyle-labs org.
+#
+# Discovers repos live from GitHub (`gh repo list argyle-labs`), so new plugin
+# repos appear automatically with no manifest to maintain. Operates over the
+# whole fleet or a filtered subset: clone, pull, branch, commit, push, open PRs,
+# or run an arbitrary command in each repo.
+#
+# Workspace: $LABS_HOME (default ~/code/argyle-labs). Each repo is a sibling
+# directory there, matching its GitHub name.
+#
+# Safety: commit/push refuse to act on a repo's default branch (main/master)
+# unless --allow-default is passed — the org standard is branch + PR, never
+# push directly to protected main.
+#
+set -euo pipefail
+
+ORG="${LABS_ORG:-argyle-labs}"
+LABS_HOME="${LABS_HOME:-$HOME/code/$ORG}"
+
+# ── styling ──────────────────────────────────────────────────────────────────
+if [[ -t 1 ]]; then
+  C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RED=$'\033[31m'
+  C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_CYN=$'\033[36m'; C_RST=$'\033[0m'
+else
+  C_DIM=""; C_BOLD=""; C_RED=""; C_GRN=""; C_YEL=""; C_CYN=""; C_RST=""
+fi
+hdr()  { printf '%s\n' "${C_BOLD}${C_CYN}── $* ──${C_RST}"; }
+info() { printf '%s\n' "${C_DIM}$*${C_RST}"; }
+ok()   { printf '%s\n' "${C_GRN}$*${C_RST}"; }
+warn() { printf '%s\n' "${C_YEL}$*${C_RST}" >&2; }
+die()  { printf '%s\n' "${C_RED}error:${C_RST} $*" >&2; exit 1; }
+
+command -v gh  >/dev/null || die "gh CLI not found — install GitHub CLI"
+command -v git >/dev/null || die "git not found"
+
+# ── repo discovery ───────────────────────────────────────────────────────────
+# Repos that are NOT plugins. Everything else discovered in the org is treated
+# as a plugin repo (the standalone-plugin fleet). Classification is used only
+# for the --plugins / --core / --meta filters; discovery itself is dynamic.
+NON_PLUGIN_CORE=(orca)
+NON_PLUGIN_META=(.github homelab-docs fastlane orca-private-archive)
+
+# Cache the org listing for the lifetime of one invocation.
+_REPO_TSV=""
+discover() {
+  [[ -n "$_REPO_TSV" ]] && { printf '%s' "$_REPO_TSV"; return; }
+  _REPO_TSV="$(gh repo list "$ORG" --no-archived --limit 200 \
+    --json name,visibility,defaultBranchRef \
+    --jq '.[] | [.name, .visibility, (.defaultBranchRef.name // "main")] | @tsv' \
+    | sort)"
+  printf '%s' "$_REPO_TSV"
+}
+
+in_list() { local x="$1"; shift; for e in "$@"; do [[ "$e" == "$x" ]] && return 0; done; return 1; }
+
+classify() { # name -> core|meta|plugin
+  local n="$1"
+  in_list "$n" "${NON_PLUGIN_CORE[@]}" && { echo core; return; }
+  in_list "$n" "${NON_PLUGIN_META[@]}" && { echo meta; return; }
+  echo plugin
+}
+
+# Emit repo names matching the active filter. Sets globals via stdout.
+# Filters: --all (default), --public, --private, --plugins, --core, --meta,
+# or an explicit list of repo names after the subcommand.
+select_repos() {
+  local filter="all" explicit=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all|--public|--private|--plugins|--core|--meta) filter="${1#--}";;
+      --*) ;; # ignore unknown flags here; handled by caller
+      *) explicit+=("$1");;
+    esac
+    shift
+  done
+  if [[ ${#explicit[@]} -gt 0 ]]; then printf '%s\n' "${explicit[@]}"; return; fi
+  local name vis _branch
+  while IFS=$'\t' read -r name vis _branch; do
+    [[ -z "$name" ]] && continue
+    case "$filter" in
+      all)     ;;
+      public)  [[ "$vis" == "PUBLIC"  ]] || continue;;
+      private) [[ "$vis" == "PRIVATE" ]] || continue;;
+      plugins) [[ "$(classify "$name")" == plugin ]] || continue;;
+      core)    [[ "$(classify "$name")" == core   ]] || continue;;
+      meta)    [[ "$(classify "$name")" == meta   ]] || continue;;
+    esac
+    printf '%s\n' "$name"
+  done <<<"$(discover)"
+}
+
+default_branch_of() {
+  local name vis branch
+  while IFS=$'\t' read -r name vis branch; do
+    [[ "$name" == "$1" ]] && { printf '%s' "$branch"; return; }
+  done <<<"$(discover)"
+  printf 'main'
+}
+
+repo_dir()  { printf '%s/%s' "$LABS_HOME" "$1"; }
+have_repo() { [[ -d "$(repo_dir "$1")/.git" ]]; }
+cur_branch(){ git -C "$(repo_dir "$1")" rev-parse --abbrev-ref HEAD 2>/dev/null; }
+
+# Run a git command in a repo, prefixed with the repo name.
+on_repo() { local r="$1"; shift; ( cd "$(repo_dir "$r")" && "$@" ); }
+
+# ── subcommands ──────────────────────────────────────────────────────────────
+
+cmd_list() {
+  hdr "$ORG repos"
+  local name vis branch tag present
+  while IFS=$'\t' read -r name vis branch; do
+    [[ -z "$name" ]] && continue
+    tag="$(classify "$name")"
+    if have_repo "$name"; then present="${C_GRN}✓${C_RST} $(cur_branch "$name")"; else present="${C_DIM}—${C_RST}"; fi
+    printf '  %-22s %-8s %-7s %-7s %b\n' "$name" "$vis" "$tag" "$branch" "$present"
+  done <<<"$(discover)"
+}
+
+cmd_clone() {
+  local repos; mapfile -t repos < <(select_repos "$@")
+  mkdir -p "$LABS_HOME"
+  hdr "clone → $LABS_HOME"
+  for r in "${repos[@]}"; do
+    if have_repo "$r"; then info "  $r — already present"; continue; fi
+    printf '  cloning %s … ' "$r"
+    if gh repo clone "$ORG/$r" "$(repo_dir "$r")" -- -q 2>/dev/null; then ok "done"; else warn "FAILED"; fi
+  done
+}
+
+cmd_pull() {
+  local repos; mapfile -t repos < <(select_repos "$@")
+  hdr "pull"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || { info "  $r — not cloned, skipping"; continue; }
+    printf '  %-22s ' "$r"
+    if on_repo "$r" git pull --ff-only --quiet 2>/dev/null; then ok "✓ $(cur_branch "$r")"; else warn "needs attention (non-ff or dirty)"; fi
+  done
+}
+
+cmd_status() {
+  local repos; mapfile -t repos < <(select_repos "$@")
+  hdr "status"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || continue
+    local b dirty; b="$(cur_branch "$r")"
+    dirty="$(on_repo "$r" git status --porcelain | wc -l | tr -d ' ')"
+    if [[ "$dirty" != "0" ]]; then
+      printf '  %-22s %b%s%b  %s%s changed%s\n' "$r" "$C_YEL" "$b" "$C_RST" "$C_YEL" "$dirty" "$C_RST"
+    else
+      printf '  %-22s %s  %sclean%s\n' "$r" "$b" "$C_DIM" "$C_RST"
+    fi
+  done
+}
+
+cmd_branch() {
+  local name="" allow_default=0; local rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in --allow-default) allow_default=1;; --*) rest+=("$1");; *) [[ -z "$name" ]] && name="$1" || rest+=("$1");; esac; shift
+  done
+  [[ -n "$name" ]] || die "usage: labs branch <name> [filter|repos...]"
+  local repos; mapfile -t repos < <(select_repos "${rest[@]}")
+  hdr "branch $name"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || { info "  $r — not cloned, skipping"; continue; }
+    printf '  %-22s ' "$r"
+    if on_repo "$r" git show-ref --verify --quiet "refs/heads/$name"; then
+      on_repo "$r" git checkout --quiet "$name" && ok "✓ switched"
+    else
+      on_repo "$r" git checkout --quiet -b "$name" && ok "✓ created"
+    fi
+  done
+}
+
+cmd_switch() { # checkout an existing branch (e.g. back to default)
+  local name="${1:-}"; shift || true
+  [[ -n "$name" ]] || die "usage: labs switch <branch> [filter|repos...]"
+  local repos; mapfile -t repos < <(select_repos "$@")
+  hdr "switch → $name"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || continue
+    printf '  %-22s ' "$r"
+    if on_repo "$r" git checkout --quiet "$name" 2>/dev/null; then ok "✓"; else info "no such branch"; fi
+  done
+}
+
+_guard_default() { # repo, allow_default -> 0 ok to write, 1 blocked
+  local r="$1" allow="$2" b def; b="$(cur_branch "$r")"; def="$(default_branch_of "$r")"
+  if [[ "$b" == "$def" && "$allow" != "1" ]]; then
+    warn "  $r — on default branch '$b'; refusing (use --allow-default to override)"; return 1
+  fi
+  return 0
+}
+
+cmd_commit() {
+  local msg="" allow_default=0; local rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -m|--message) msg="$2"; shift;;
+      --allow-default) allow_default=1;;
+      *) rest+=("$1");;
+    esac; shift
+  done
+  [[ -n "$msg" ]] || die "usage: labs commit -m <message> [filter|repos...]"
+  local repos; mapfile -t repos < <(select_repos "${rest[@]}")
+  hdr "commit"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || continue
+    [[ -n "$(on_repo "$r" git status --porcelain)" ]] || { info "  $r — nothing to commit"; continue; }
+    _guard_default "$r" "$allow_default" || continue
+    printf '  %-22s ' "$r"
+    on_repo "$r" git add -A
+    on_repo "$r" git commit --quiet -m "$msg" && ok "✓ committed on $(cur_branch "$r")"
+  done
+}
+
+cmd_push() {
+  local allow_default=0; local rest=()
+  while [[ $# -gt 0 ]]; do case "$1" in --allow-default) allow_default=1;; *) rest+=("$1");; esac; shift; done
+  local repos; mapfile -t repos < <(select_repos "${rest[@]}")
+  hdr "push"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || continue
+    local b; b="$(cur_branch "$r")"
+    # Only push repos that have unpushed commits or no upstream yet.
+    if on_repo "$r" git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+      [[ -z "$(on_repo "$r" git log '@{u}..HEAD' --oneline 2>/dev/null)" ]] && { info "  $r — up to date"; continue; }
+    fi
+    _guard_default "$r" "$allow_default" || continue
+    printf '  %-22s ' "$r"
+    if on_repo "$r" git push --quiet -u origin "$b" 2>/dev/null; then ok "✓ pushed $b"; else warn "FAILED"; fi
+  done
+}
+
+cmd_pr() {
+  local title="" body="" base="" draft="" allow_default=0; local rest=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t|--title) title="$2"; shift;;
+      -b|--body)  body="$2"; shift;;
+      --base)     base="$2"; shift;;
+      --draft)    draft="--draft";;
+      --allow-default) allow_default=1;;
+      *) rest+=("$1");;
+    esac; shift
+  done
+  local repos; mapfile -t repos < <(select_repos "${rest[@]}")
+  hdr "open PRs"
+  for r in "${repos[@]}"; do
+    have_repo "$r" || continue
+    local b def; b="$(cur_branch "$r")"; def="${base:-$(default_branch_of "$r")}"
+    [[ "$b" == "$def" && "$allow_default" != "1" ]] && { info "  $r — on default branch, no PR"; continue; }
+    # Skip if branch has no commits ahead of base.
+    on_repo "$r" git fetch --quiet origin "$def" 2>/dev/null || true
+    printf '  %-22s ' "$r"
+    local args=(pr create --head "$b" --base "$def" --fill)
+    [[ -n "$title" ]] && args=(pr create --head "$b" --base "$def" --title "$title" --body "${body:-}")
+    [[ -n "$draft" ]] && args+=("$draft")
+    local url
+    if url="$(on_repo "$r" gh "${args[@]}" 2>&1)"; then ok "$url"; else info "skip (${url##*$'\n'})"; fi
+  done
+}
+
+cmd_foreach() { # labs foreach [filter] -- cmd args...
+  local rest=() cmd=()
+  local seen_dd=0
+  for a in "$@"; do
+    if [[ $seen_dd == 0 && "$a" == "--" ]]; then seen_dd=1; continue; fi
+    if [[ $seen_dd == 1 ]]; then cmd+=("$a"); else rest+=("$a"); fi
+  done
+  [[ ${#cmd[@]} -gt 0 ]] || die "usage: labs foreach [filter|repos...] -- <command>"
+  local repos; mapfile -t repos < <(select_repos "${rest[@]}")
+  for r in "${repos[@]}"; do
+    have_repo "$r" || continue
+    hdr "$r"
+    ( cd "$(repo_dir "$r")" && "${cmd[@]}" ) || warn "  (exit $?)"
+  done
+}
+
+cmd_sync() { hdr "sync = clone missing + pull"; cmd_clone "$@"; cmd_pull "$@"; }
+
+# Apply the org-standard branch protection to each repo's default branch:
+#   • direct pushes restricted to a single user (the override actor)
+#   • enforce_admins = false  → that user can bypass the PR requirement
+#   • PRs required (0 approvals so the solo maintainer can self-merge)
+#   • existing required status checks (e.g. `ci`) are preserved
+#   • force-pushes and branch deletion disabled
+# Private repos on the Free plan return 403 (protection needs Pro) and are
+# reported as skipped — they pick this up automatically once made public.
+cmd_protect() {
+  command -v jq >/dev/null || die "jq required for protect"
+  local override="${LABS_ADMIN:-$(gh api user --jq .login)}" rest=() force_checks=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --user)  override="$2"; shift;;
+      --check) force_checks+=("$2"); shift;;
+      *) rest+=("$1");;
+    esac; shift
+  done
+  local repos; mapfile -t repos < <(select_repos "${rest[@]}")
+  hdr "protect default branches (override: $override)"
+  for r in "${repos[@]}"; do
+    local branch ctx body out; branch="$(default_branch_of "$r")"
+    printf '  %-22s %-7s ' "$r" "$branch"
+    # Preserve any existing required status checks; default to none.
+    ctx="$(gh api "repos/$ORG/$r/branches/$branch/protection" \
+            --jq '.required_status_checks.contexts // []' 2>/dev/null || echo '[]')"
+    [[ "$ctx" =~ ^\[ ]] || ctx='[]'
+    # Union in any --check contexts the caller insists on requiring.
+    for c in "${force_checks[@]:-}"; do
+      [[ -z "$c" ]] && continue
+      ctx="$(printf '%s' "$ctx" | jq --arg c "$c" '. + [$c] | unique')"
+    done
+    body="$(jq -n --arg u "$override" --argjson ctx "$ctx" '{
+      required_status_checks: (if ($ctx|length) > 0 then {strict:true, contexts:$ctx} else null end),
+      enforce_admins: false,
+      required_pull_request_reviews: {required_approving_review_count: 0, dismiss_stale_reviews: false, require_code_owner_reviews: false},
+      restrictions: {users: [$u], teams: [], apps: []},
+      allow_force_pushes: false,
+      allow_deletions: false,
+      required_linear_history: false
+    }')"
+    if out="$(printf '%s' "$body" | gh api -X PUT "repos/$ORG/$r/branches/$branch/protection" \
+              -H 'Accept: application/vnd.github+json' --input - 2>&1)"; then
+      local checks; checks="$(printf '%s' "$ctx" | jq -r 'join(",") // ""')"
+      ok "✓ protected${checks:+ (checks: $checks)}"
+    elif printf '%s' "$out" | grep -q 'Upgrade to GitHub Pro'; then
+      info "skip — private repo, protection needs Pro (auto-applies when public)"
+    else
+      warn "FAILED — ${out##*$'\n'}"
+    fi
+  done
+}
+
+usage() {
+  cat <<EOF
+${C_BOLD}labs${C_RST} — unified management for every repo in the ${C_CYN}$ORG${C_RST} org.
+
+  Workspace: $LABS_HOME   (override with \$LABS_HOME)
+
+${C_BOLD}Commands${C_RST}
+  list                        Show all org repos: visibility, group, clone state
+  clone   [filter|repos...]   Clone any missing repos into the workspace
+  pull    [filter|repos...]   Fast-forward pull each cloned repo
+  sync    [filter|repos...]   clone missing, then pull everything
+  status  [filter|repos...]   Per-repo branch + dirty-file count
+  branch  <name> [filter...]  Create (or switch to) a branch in each repo
+  switch  <name> [filter...]  Switch to an existing branch (e.g. back to main)
+  commit  -m <msg> [filter]   git add -A && commit in repos with changes
+  push    [filter|repos...]   Push current branch (sets upstream)
+  pr      [opts] [filter]     Open a PR per repo from its current branch
+  protect [--user <login>]    Lock default branches: PR-required, push
+          [--check <ctx>...]  restricted to one override user (default: you).
+          [filter]            --check force-requires a named status check.
+  foreach [filter] -- <cmd>   Run an arbitrary command in each repo
+
+${C_BOLD}Filters${C_RST} (default: --all)
+  --all  --public  --private  --plugins  --core  --meta
+  …or list explicit repo names instead.
+
+${C_BOLD}Safety${C_RST}
+  commit/push/pr refuse to act on a repo's default branch (main/master).
+  Pass --allow-default to override (rarely what you want).
+
+${C_BOLD}pr options${C_RST}
+  -t <title>  -b <body>  --base <branch>  --draft
+
+${C_BOLD}Examples${C_RST}
+  labs clone --plugins
+  labs branch feat/deploy-target --plugins
+  labs foreach --plugins -- cargo fmt --all
+  labs commit -m "feat: add deploy-target trait" --plugins
+  labs push --plugins
+  labs pr -t "Add deploy-target trait" -b "See orca#NNN" --plugins
+  labs switch main --all && labs pull
+EOF
+}
+
+main() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    list)    cmd_list "$@";;
+    clone)   cmd_clone "$@";;
+    pull)    cmd_pull "$@";;
+    sync)    cmd_sync "$@";;
+    status)  cmd_status "$@";;
+    branch)  cmd_branch "$@";;
+    switch)  cmd_switch "$@";;
+    commit)  cmd_commit "$@";;
+    push)    cmd_push "$@";;
+    pr)      cmd_pr "$@";;
+    protect) cmd_protect "$@";;
+    foreach) cmd_foreach "$@";;
+    ""|-h|--help|help) usage;;
+    *) die "unknown command '$sub' (try: labs --help)";;
+  esac
+}
+
+main "$@"
