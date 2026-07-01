@@ -2,9 +2,32 @@
 
 Org-level GitHub config and **fleet tooling** for the argyle-labs org.
 
-- [`profile/README.md`](profile/README.md) — the public org profile page.
+- [`profile/README.md`](profile/README.md) — the public org profile page. **Generated** — do not hand-edit (see below).
 - [`bin/labs`](bin/labs) — unified multi-repo management CLI (below).
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — lints `bin/labs`.
+- [`.github/workflows/profile.yml`](.github/workflows/profile.yml) — regenerates the org index daily.
+
+## The org index is generated, not maintained
+
+`profile/README.md` is built by `labs profile` from each repo's **own metadata** —
+there is no hand-curated plugin list to drift. For every public plugin repo:
+
+- **icon** ← `assets/icon-256.png` (referenced by raw URL, rendered live)
+- **name** ← the repo name (links to the repo)
+- **description** ← `[package].description` in the repo's `Cargo.toml`
+- **category** ← `[package.metadata.orca].category` in `Cargo.toml`
+  (`infra` · `networking` · `storage` · `media` · `downloads` · `ai` · `home` ·
+  `monitoring`; non-plugin repos fall under *workstation*)
+
+```sh
+labs meta       # push each plugin's Cargo.toml description + category → GitHub
+                # repo description + topics (orca-plugin, orca-<category>)
+labs profile    # regenerate profile/README.md from that metadata + icons
+```
+
+A new plugin appears in the index automatically once it carries an icon,
+a `description`, and an `orca` category in its `Cargo.toml` — the daily
+`profile` workflow (or `labs profile`) picks it up with no edits here.
 
 ## `labs` — fleet management
 
