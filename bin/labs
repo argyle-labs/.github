@@ -349,7 +349,7 @@ INDEX_EXCLUDE=(llm battlenet-umu-setup)
 WORKSTATION=(raccoon beaver)
 
 # Category slug -> section title, in display order.
-CAT_ORDER=(infra networking storage media downloads ai home monitoring workstation)
+CAT_ORDER=(infra networking storage media downloads ai agents home monitoring workstation)
 cat_title() {
   case "$1" in
     infra)       echo "Infrastructure & hosts";;
@@ -358,6 +358,7 @@ cat_title() {
     media)       echo "Media servers";;
     downloads)   echo "Media acquisition";;
     ai)          echo "AI & models";;
+    agents)      echo "Agents & automation";;
     home)        echo "Home automation";;
     monitoring)  echo "Monitoring & notifications";;
     workstation) echo "Workstation & gaming tooling";;
