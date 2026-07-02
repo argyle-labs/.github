@@ -64,7 +64,11 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 | Plugin | What it does |
 |--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/assets/icon-256.png" width="28" align="top" alt="" /> [arr](https://github.com/argyle-labs/arr) | The *arr stack — Sonarr, Radarr, Prowlarr, Lidarr, Readarr as individual orca plugins |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/lidarr/assets/icon-256.png" width="28" align="top" alt="" /> [lidarr](https://github.com/argyle-labs/arr/tree/main/crates/lidarr) | Lidarr — music automation (orca cdylib plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/prowlarr/assets/icon-256.png" width="28" align="top" alt="" /> [prowlarr](https://github.com/argyle-labs/arr/tree/main/crates/prowlarr) | Prowlarr — indexer manager for the *arr apps (orca cdylib plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/radarr/assets/icon-256.png" width="28" align="top" alt="" /> [radarr](https://github.com/argyle-labs/arr/tree/main/crates/radarr) | Radarr — movie automation (orca cdylib plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/readarr/assets/icon-256.png" width="28" align="top" alt="" /> [readarr](https://github.com/argyle-labs/arr/tree/main/crates/readarr) | Readarr — book & audiobook automation (orca cdylib plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/sonarr/assets/icon-256.png" width="28" align="top" alt="" /> [sonarr](https://github.com/argyle-labs/arr/tree/main/crates/sonarr) | Sonarr — TV series automation (orca cdylib plugin) |
 | <img src="https://raw.githubusercontent.com/argyle-labs/lazylibrarian/main/assets/icon-256.png" width="28" align="top" alt="" /> [lazylibrarian](https://github.com/argyle-labs/lazylibrarian) | LazyLibrarian book (ebook/audiobook) downloader & manager — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/libation/main/assets/icon-256.png" width="28" align="top" alt="" /> [libation](https://github.com/argyle-labs/libation) | Audible library downloader — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/mylar3/main/assets/icon-256.png" width="28" align="top" alt="" /> [mylar3](https://github.com/argyle-labs/mylar3) | Mylar3 comic book (CBR/CBZ) downloader & manager — orca service-backend |
