@@ -366,8 +366,11 @@ cat_title() {
 }
 
 # Read a plugin's Cargo.toml (local clone preferred, else raw from GitHub) and
-# emit "category\tdescription". Empty fields if not found.
-_toml_get() { # file, key -> value (bare [package] key)
+# emit "category\tdescription". Empty fields if not found. Works for both a
+# single-package plugin (`[package]` + `[package.metadata.orca]`) and a
+# workspace-of-plugins repo like `arr` (`[workspace.package].description` +
+# `[workspace.metadata.orca].category`) — the loose grep/awk match either form.
+_toml_get() { # file, key -> value (first bare `key = "…"`, package or workspace.package)
   grep -m1 "^$2 = " "$1" 2>/dev/null | sed -E "s/^$2 = \"(.*)\"$/\1/"
 }
 plugin_meta() { # repo -> category<TAB>description
@@ -379,7 +382,7 @@ plugin_meta() { # repo -> category<TAB>description
       | base64 -d >"$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
   fi
   desc="$(_toml_get "$f" description)"
-  cat="$(awk -F' = ' '/^\[package\.metadata\.orca\]/{o=1;next} /^\[/{o=0} o&&/^category/{gsub(/"/,"",$2);print $2;exit}' "$f")"
+  cat="$(awk -F' = ' '/^\[(package|workspace)\.metadata\.orca\]/{o=1;next} /^\[/{o=0} o&&/^category/{gsub(/"/,"",$2);print $2;exit}' "$f")"
   [[ -n "${tmp:-}" ]] && rm -f "$tmp"
   printf '%s\t%s' "$cat" "$desc"
 }
