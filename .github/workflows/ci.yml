@@ -16,8 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # No `name:` — the check run must report as `ci` to satisfy the required
+  # status check of the same name in branch protection. A display name overrides
+  # the check-run name and leaves every PR stuck "Expected — ci".
   ci:
-    name: Lint shell tooling
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
