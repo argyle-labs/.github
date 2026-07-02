@@ -387,6 +387,60 @@ plugin_meta() { # repo -> category<TAB>description
   printf '%s\t%s' "$cat" "$desc"
 }
 
+# ── workspace-of-plugins support ──────────────────────────────────────────────
+# A repo like `arr` is a Cargo workspace that builds one cdylib plugin per member
+# crate under crates/. The index lists each such crate as its own plugin (icon +
+# description + link to the crate), not one umbrella row for the repo. Support
+# crates (e.g. a shared `arr-base` rlib) carry no icon and are skipped.
+
+# True if the repo's root Cargo.toml declares a [workspace].
+repo_is_workspace() {
+  local r="$1" f; f="$(repo_dir "$r")/Cargo.toml"
+  if [[ -f "$f" ]]; then
+    grep -q '^\[workspace\]' "$f"
+  else
+    gh api "repos/$ORG/$r/contents/Cargo.toml" --jq '.content' 2>/dev/null \
+      | base64 -d 2>/dev/null | grep -q '^\[workspace\]'
+  fi
+}
+
+# Emit each member crate name (dir under crates/), one per line. Local clone
+# preferred, else GitHub API.
+repo_crates() {
+  local r="$1" d p; d="$(repo_dir "$r")"
+  if [[ -d "$d/crates" ]]; then
+    for p in "$d"/crates/*/Cargo.toml; do [[ -f "$p" ]] && basename "$(dirname "$p")"; done
+  else
+    gh api "repos/$ORG/$r/contents/crates" --jq '.[] | select(.type=="dir") | .name' 2>/dev/null
+  fi
+}
+
+# True if crates/<crate>/assets/icon-256.png exists — the marker of a real plugin
+# crate (vs a support crate). Local clone preferred, else GitHub API.
+crate_has_icon() {
+  local r="$1" c="$2" d; d="$(repo_dir "$r")"
+  if [[ -d "$d/crates/$c" ]]; then
+    [[ -f "$d/crates/$c/assets/icon-256.png" ]]
+  else
+    gh api "repos/$ORG/$r/contents/crates/$c/assets/icon-256.png" --jq '.name' >/dev/null 2>&1
+  fi
+}
+
+# category<TAB>description for a single member crate's Cargo.toml.
+crate_meta() {
+  local r="$1" c="$2" f cat desc tmp
+  f="$(repo_dir "$r")/crates/$c/Cargo.toml"
+  if [[ ! -f "$f" ]]; then
+    tmp="$(mktemp)"; f="$tmp"
+    gh api "repos/$ORG/$r/contents/crates/$c/Cargo.toml" --jq '.content' 2>/dev/null \
+      | base64 -d >"$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  fi
+  desc="$(_toml_get "$f" description)"
+  cat="$(awk -F' = ' '/^\[(package|workspace)\.metadata\.orca\]/{o=1;next} /^\[/{o=0} o&&/^category/{gsub(/"/,"",$2);print $2;exit}' "$f")"
+  [[ -n "${tmp:-}" ]] && rm -f "$tmp"
+  printf '%s\t%s' "$cat" "$desc"
+}
+
 cmd_meta() { # sync each plugin's Cargo.toml -> GitHub description + topics
   local repos; mapfile -t repos < <(select_repos "$@")
   hdr "sync metadata → GitHub (description + topics)"
@@ -424,6 +478,20 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
     if in_list "$name" "${WORKSTATION[@]}"; then
       cat="workstation"
       desc="$(gh repo view "$ORG/$name" --json description --jq '.description // ""' 2>/dev/null)"
+    elif repo_is_workspace "$name"; then
+      # workspace-of-plugins: emit one row per member plugin crate, not the repo.
+      local wcat crate cm ccat cdesc cicon
+      wcat="$(plugin_meta "$name")"; wcat="${wcat%%$'\t'*}"
+      while IFS= read -r crate; do
+        [[ -z "$crate" ]] && continue
+        crate_has_icon "$name" "$crate" || continue   # skip support crates (no icon)
+        cm="$(crate_meta "$name" "$crate")" || continue
+        ccat="${cm%%$'\t'*}"; cdesc="${cm#*$'\t'}"
+        [[ -n "$ccat" ]] || ccat="${wcat:-other}"
+        cicon="$raw/$name/$branch/crates/$crate/assets/icon-256.png"
+        BUCKET[$ccat]+="| <img src=\"$cicon\" width=\"28\" align=\"top\" alt=\"\" /> [$crate](https://github.com/$ORG/$name/tree/$branch/crates/$crate) | ${cdesc:-—} |"$'\n'
+      done < <(repo_crates "$name")
+      continue
     else
       m="$(plugin_meta "$name")" || continue
       cat="${m%%$'\t'*}"; desc="${m#*$'\t'}"
