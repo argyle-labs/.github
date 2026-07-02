@@ -84,6 +84,12 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 | <img src="https://raw.githubusercontent.com/argyle-labs/ollama/main/assets/icon-256.png" width="28" align="top" alt="" /> [ollama](https://github.com/argyle-labs/ollama) | Local LLM runner — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/whisper-ai/main/assets/icon-256.png" width="28" align="top" alt="" /> [whisper-ai](https://github.com/argyle-labs/whisper-ai) | Whisper speech-to-text (Wyoming/ASR) — orca service-backend |
 
+### Agents & automation
+
+| Plugin | What it does |
+|--------|--------------|
+| <img src="https://raw.githubusercontent.com/argyle-labs/agents/main/assets/icon-256.png" width="28" align="top" alt="" /> [agents](https://github.com/argyle-labs/agents) | Registers orca's base agent roster, slash-commands, and hooks as an AgentProvider |
+
 ### Home automation
 
 | Plugin | What it does |
