@@ -64,7 +64,7 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 | Plugin | What it does |
 |--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/assets/icon-256.png" width="28" align="top" alt="" /> [arr](https://github.com/argyle-labs/arr) | The *arr stack — Sonarr, Radarr, Prowlarr, Lidarr — in one orca cdylib |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/assets/icon-256.png" width="28" align="top" alt="" /> [arr](https://github.com/argyle-labs/arr) | The *arr stack — Sonarr, Radarr, Prowlarr, Lidarr, Readarr as individual orca plugins |
 | <img src="https://raw.githubusercontent.com/argyle-labs/lazylibrarian/main/assets/icon-256.png" width="28" align="top" alt="" /> [lazylibrarian](https://github.com/argyle-labs/lazylibrarian) | LazyLibrarian book (ebook/audiobook) downloader & manager — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/libation/main/assets/icon-256.png" width="28" align="top" alt="" /> [libation](https://github.com/argyle-labs/libation) | Audible library downloader — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/mylar3/main/assets/icon-256.png" width="28" align="top" alt="" /> [mylar3](https://github.com/argyle-labs/mylar3) | Mylar3 comic book (CBR/CBZ) downloader & manager — orca service-backend |
