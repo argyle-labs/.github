@@ -261,7 +261,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: release-${{ github.repository }}-${{ needs.version.outputs.tag }}
+      group: release-${{ github.repository }}-${{ inputs.channel }}-${{ inputs.bump }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
