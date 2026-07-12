@@ -1,0 +1,291 @@
+name: Plugin release (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable release workflow for orca dynamic (subprocess) plugins.
+#
+# Every retired plugin now ships as a Rust `[[bin]]` orca spawns and speaks the
+# UDS wire protocol to — NOT a dlopened `cdylib`. So the artifact is the release
+# executable `target/<triple>/release/<bin>`, plus a `.sha256`. This is the fix
+# for the fleet-wide RC failure where the old workflows looked for a
+# `lib<name>.so` that retired (rlib + [[bin]]) crates no longer emit.
+#
+# One caller per plugin repo does:
+#
+#   jobs:
+#     release:
+#       uses: argyle-labs/.github/.github/workflows/plugin-release.yml@main
+#       secrets: inherit
+#       with:
+#         channel: ${{ inputs.channel }}
+#         bump:    ${{ inputs.bump }}
+#
+# Version math (mirrors orca's compute_rc_version, one logic across all repos):
+#   • base = highest `vX.Y.Z` stable tag (v0.0.0 if none), bumped by `bump`
+#     (patch | minor | major).
+#   • channel=rc     → `v<base>-rc.<n>`, n = next free rc index for that base
+#     (prerelease).
+#   • channel=stable → `v<base>` (full release).
+# The computed version is written into Cargo.toml at build time so each binary
+# embeds the right CARGO_PKG_VERSION; the git tag is the source of truth, so the
+# committed Cargo.toml version is never hand-managed.
+#
+# Multi-target: `targets` is a JSON array of Rust triples (default: one glibc
+# x86_64 job). Repos that ship for multiple hosts (glibc + musl) pass both; each
+# builds in its own parallel matrix job (cross-compiled with cargo-zigbuild for
+# non-host targets) and uploads its asset, then one release gathers them all.
+#
+# Multi-bin workspaces (e.g. `arr`, which builds one plugin per *arr app): pass
+# `bins` as a JSON array of bin names. Single-package repos leave it empty and
+# the bin name is derived from `cargo metadata` (the crate's sole bin target).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: "Release channel: rc (prerelease) or stable"
+        required: true
+        type: string
+      bump:
+        description: "Version bump from latest stable tag: patch | minor | major"
+        required: true
+        type: string
+      targets:
+        description: 'JSON array of Rust target triples to build. Default: ["x86_64-unknown-linux-gnu"]'
+        required: false
+        type: string
+        default: '["x86_64-unknown-linux-gnu"]'
+      bins:
+        description: 'JSON array of bin names to build+publish. Empty ([]) = derive the crate''s sole bin from cargo metadata.'
+        required: false
+        type: string
+        default: "[]"
+      notes:
+        description: "Extra release notes (optional)"
+        required: false
+        type: string
+        default: ""
+      size_budget_mib:
+        description: "Thinness budget (MiB). Over this, the build emits a warning (soft gate)."
+        required: false
+        type: number
+        default: 20
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  # ── Compute the version/tag once, shared by every build job + the release. ──
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      prerelease: ${{ steps.ver.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version from tags
+        id: ver
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet || true
+          latest_stable=$(git tag -l 'v[0-9]*' \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | sort -V | tail -1)
+          latest_stable=${latest_stable:-v0.0.0}
+          IFS='.' read -r major minor patch <<< "${latest_stable#v}"
+          case "${{ inputs.bump }}" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+            *) echo "::error::bump must be patch|minor|major (got '${{ inputs.bump }}')"; exit 1 ;;
+          esac
+          base="${major}.${minor}.${patch}"
+          case "${{ inputs.channel }}" in
+            stable)
+              version="$base"; tag="v$base"; prerelease=false ;;
+            rc)
+              latest_rc=$(git tag -l "v${base}-rc.*" | sort -V | tail -1)
+              if [ -z "$latest_rc" ]; then n=1; else n=${latest_rc##*rc.}; n=$((n+1)); fi
+              version="${base}-rc.${n}"; tag="v${version}"; prerelease=true ;;
+            *)
+              echo "::error::channel must be rc|stable (got '${{ inputs.channel }}')"; exit 1 ;;
+          esac
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "→ ${{ inputs.channel }} (${{ inputs.bump }}) from ${latest_stable}: $tag"
+
+  # ── One parallel job per (target). Each builds every requested bin and
+  #    uploads its asset(s). Bin list is resolved once here from cargo metadata
+  #    when the caller passes bins=[].                                        ──
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Drop local-dev cargo patch
+        run: rm -f .cargo/config.toml
+
+      - name: Authenticate private orca git dependency
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - name: Write computed version into Cargo.toml
+        run: |
+          set -euo pipefail
+          # Matches both `[package].version` and `[workspace.package].version`
+          # (both are `version = "…"` at column 0 in these repos).
+          sed -i 's/^version = ".*"/version = "${{ needs.version.outputs.version }}"/' Cargo.toml
+          grep -m1 '^version = ' Cargo.toml
+
+      - name: Resolve bin list
+        id: bins
+        run: |
+          set -euo pipefail
+          requested='${{ inputs.bins }}'
+          if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
+            # Caller supplied an explicit bin list (JSON array) — use it verbatim.
+            bins=$(echo "$requested" | jq -r '.[]')
+          else
+            # Derive the crate's bin target(s) from cargo metadata. For a single
+            # subprocess plugin this is exactly one bin (name == crate name).
+            bins=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          fi
+          if [ -z "$bins" ]; then
+            echo "::error::no bin targets found — is this a [[bin]] plugin crate?"; exit 1
+          fi
+          {
+            echo "list<<EOF"
+            echo "$bins"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "bins: $(echo "$bins" | paste -sd, -)"
+
+      - name: Install cross toolchain (zig + cargo-zigbuild)
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user cargo-zigbuild ziglang
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Add rust target
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Build release binaries
+        env:
+          # musl: disable crt-static so a dynamically-linked musl daemon can spawn
+          # the plugin like any other host binary (mirrors the old cdylib rule).
+          RUSTFLAGS: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-C target-feature=-crt-static' || '' }}
+        run: |
+          set -euo pipefail
+          # Host glibc builds with plain cargo; cross targets use cargo-zigbuild
+          # (zig as the C toolchain) exactly as the previous per-repo workflows did.
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            builder="cargo build"
+          else
+            builder="cargo zigbuild"
+          fi
+          # Build every requested bin (`--bin` per name keeps it explicit and lets
+          # multi-bin workspaces like `arr` build one plugin per *arr app).
+          bin_flags=""
+          while IFS= read -r b; do
+            [ -n "$b" ] && bin_flags="$bin_flags --bin $b"
+          done <<< '${{ steps.bins.outputs.list }}'
+          # shellcheck disable=SC2086
+          $builder --release --target "${{ matrix.target }}" $bin_flags
+
+      - name: Stage artifacts (+ thinness report)
+        id: stage
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          budget="${{ inputs.size_budget_mib }}"
+          while IFS= read -r bin; do
+            [ -z "$bin" ] && continue
+            path="target/${{ matrix.target }}/release/${bin}"
+            if [ ! -f "$path" ]; then
+              echo "::error::binary not found at $path"
+              ls -la "target/${{ matrix.target }}/release" || true
+              exit 1
+            fi
+            asset="${bin}-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
+            cp "$path" "dist/$asset"
+            ( cd dist && sha256sum "$asset" > "${asset}.sha256" )
+
+            # ── Thinness gate (soft) ──────────────────────────────────────────
+            # A plugin should be logic + generated types + serde, delegating heavy
+            # capabilities to orca — not bundling the runtime. Report every release
+            # and warn (don't fail) over budget so bloat stays visible per build.
+            bytes=$(stat -c%s "dist/$asset")
+            mib=$(( bytes / 1048576 ))
+            echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
+            echo "plugin binary ${asset} = ${mib} MiB"
+            if [ "$mib" -gt "$budget" ]; then
+              echo "::warning title=Plugin over size budget::${asset} is ${mib} MiB (budget ${budget} MiB). Delegate more to orca / shed bundled deps to slim it."
+            fi
+          done <<< '${{ steps.bins.outputs.list }}'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.target }}
+          path: dist/*
+          retention-days: 3
+
+  # ── Gather every target's artifacts and publish one (pre)release. ──
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.repository }}-${{ needs.version.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all target artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: plugin-*
+          merge-multiple: true
+
+      - name: Create GitHub Release (pipeline-tagged)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          flags=""
+          [ "${{ needs.version.outputs.prerelease }}" = "true" ] && flags="--prerelease"
+          notes="${{ inputs.notes }}"
+          [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${{ github.repository }}\`, built against orca \`main\`. Plugin binary + sha256 per host target."
+          ls -la dist
+          gh release create "${{ needs.version.outputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --title "${{ needs.version.outputs.tag }}" \
+            --notes "$notes" \
+            $flags \
+            dist/*
