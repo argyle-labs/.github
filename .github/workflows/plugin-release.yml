@@ -11,6 +11,8 @@ name: Plugin release (reusable)
 #
 # One caller per plugin repo does:
 #
+#   permissions:
+#     contents: write            # REQUIRED — see note below.
 #   jobs:
 #     release:
 #       uses: argyle-labs/.github/.github/workflows/plugin-release.yml@main
@@ -18,6 +20,17 @@ name: Plugin release (reusable)
 #       with:
 #         channel: ${{ inputs.channel }}
 #         bump:    ${{ inputs.bump }}
+#
+# ⚠ Caller `permissions:` is mandatory. The `release` job below requests
+# `contents: write` (to create the GitHub Release). A reusable workflow can only
+# be granted permissions the CALLER's GITHUB_TOKEN already holds — GitHub
+# validates this when it builds the run graph, BEFORE any job starts. The org
+# (and every plugin repo) defaults `default_workflow_permissions` to `read`, so
+# a caller with no `permissions:` block hands this workflow a read-only token.
+# The requested `contents: write` then exceeds the grant and GitHub aborts the
+# whole run with `startup_failure` — no jobs, no logs, no annotations. Granting
+# `contents: write` on the caller (as above) is what makes the graph valid.
+# `secrets: inherit` does NOT carry permissions; only secrets.
 #
 # Version math (mirrors orca's compute_rc_version, one logic across all repos):
 #   • base = highest `vX.Y.Z` stable tag (v0.0.0 if none), bumped by `bump`
