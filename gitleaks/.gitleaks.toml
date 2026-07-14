@@ -1,0 +1,55 @@
+# argyle-labs shared secret/PII scan config (single source of truth).
+# Consumed by .github/workflows/gitleaks-reusable.yml and by each repo's
+# local pre-commit hook. Extends gitleaks' built-in credential rules.
+[extend]
+useDefault = true
+
+# ---- Org-specific PII / infra rules (not covered by gitleaks defaults) ----
+
+[[rules]]
+id = "argyle-lan-ipv4"
+description = "Internal RFC1918 LAN address (10.10.10.0/24 fleet range)"
+regex = '''\b10\.10\.10\.\d{1,3}\b'''
+tags = ["pii", "infra"]
+
+[[rules]]
+id = "argyle-tailscale-ipv4"
+description = "Tailscale CGNAT address (100.64.0.0/10)"
+regex = '''\b100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b'''
+tags = ["pii", "infra"]
+
+[[rules]]
+id = "argyle-personal-email"
+description = "Personal / non-org email address"
+regex = '''\b(scottdkey@gmail\.com|scott\.key@(gmail\.com|rebuyengine\.com))\b'''
+tags = ["pii"]
+
+[[rules]]
+id = "argyle-db-key-material"
+description = "SQLCipher raw key material (hex applied via PRAGMA key)"
+regex = '''PRAGMA\s+key\s*=\s*["']x'[0-9a-fA-F]{16,}'["']'''
+tags = ["secret"]
+
+# NOTE: an "argyle-fleet-hostname" rule (hemlock/bragi/baldur/…) was evaluated
+# and dropped — it matched common English words (thor/loki/maple) with high
+# false-positive rate and low value (hostnames aren't secrets). Re-add per-repo
+# if a specific repo needs it.
+
+# ---- Allowlist: known-safe occurrences ----
+[allowlist]
+description = "Global allowlist for known false positives"
+paths = [
+  '''(.*/)?CHANGELOG\.md''',
+  '''(.*/)?go\.sum''',
+  '''(.*/)?Cargo\.lock''',
+  '''(.*/)?package-lock\.json''',
+  '''(.*/)?pnpm-lock\.yaml''',
+]
+regexes = [
+  # RFC5737 documentation/example ranges are safe in tests & docs
+  '''192\.0\.2\.\d{1,3}''',
+  '''198\.51\.100\.\d{1,3}''',
+  '''203\.0\.113\.\d{1,3}''',
+  # *.example are documentation placeholders
+  '''\b\w+\.example\b''',
+]

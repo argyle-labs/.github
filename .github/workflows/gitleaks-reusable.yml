@@ -1,0 +1,24 @@
+# Reusable secret/PII scan. Every argyle-labs repo calls this from its own
+# .github/workflows/secret-scan.yml so rules live in one place.
+name: gitleaks-reusable
+on:
+  workflow_call:
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # full history so the whole PR range is scanned
+      - name: Fetch shared gitleaks config
+        run: |
+          curl -fsSL --max-time 30 \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/argyle-labs/.github/contents/gitleaks/.gitleaks.toml?ref=main" \
+            -o .gitleaks.shared.toml
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.shared.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
