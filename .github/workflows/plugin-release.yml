@@ -217,7 +217,10 @@ jobs:
           set -euo pipefail
           # Matches both `[package].version` and `[workspace.package].version`
           # (both are `version = "…"` at column 0 in these repos).
-          sed -i 's/^version = ".*"/version = "${{ needs.version.outputs.version }}"/' Cargo.toml
+          # perl -i behaves identically on GNU (ubuntu) and BSD (macOS/self-hosted)
+          # runners; `sed -i` is not portable — BSD sed treats the file as the
+          # command arg without a backup suffix and fails ("invalid command code").
+          perl -i -pe 's/^version = ".*"/version = "${{ needs.version.outputs.version }}"/' Cargo.toml
           grep -m1 '^version = ' Cargo.toml
 
       - name: Resolve bin list
