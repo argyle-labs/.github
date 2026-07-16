@@ -42,7 +42,6 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 | Plugin | What it does |
 |--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/nfs-gateway/main/assets/icon-256.png" width="28" align="top" alt="" /> [nfs-gateway](https://github.com/argyle-labs/nfs-gateway) | HA NFS gateway with failover — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/nfs/main/assets/icon-256.png" width="28" align="top" alt="" /> [nfs](https://github.com/argyle-labs/nfs) | NFS StorageBackend with stale-mount self-heal — backend-only orca plugin |
 | <img src="https://raw.githubusercontent.com/argyle-labs/smb/main/assets/icon-256.png" width="28" align="top" alt="" /> [smb](https://github.com/argyle-labs/smb) | SMB/CIFS StorageBackend for orca's storage domain — backend-only plugin |
 | <img src="https://raw.githubusercontent.com/argyle-labs/syncthing/main/assets/icon-256.png" width="28" align="top" alt="" /> [syncthing](https://github.com/argyle-labs/syncthing) | Syncthing file synchronization — orca service-backend |
@@ -64,11 +63,11 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 | Plugin | What it does |
 |--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/lidarr/assets/icon-256.png" width="28" align="top" alt="" /> [lidarr](https://github.com/argyle-labs/arr/tree/main/crates/lidarr) | Lidarr — music automation (orca cdylib plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/prowlarr/assets/icon-256.png" width="28" align="top" alt="" /> [prowlarr](https://github.com/argyle-labs/arr/tree/main/crates/prowlarr) | Prowlarr — indexer manager for the *arr apps (orca cdylib plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/radarr/assets/icon-256.png" width="28" align="top" alt="" /> [radarr](https://github.com/argyle-labs/arr/tree/main/crates/radarr) | Radarr — movie automation (orca cdylib plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/readarr/assets/icon-256.png" width="28" align="top" alt="" /> [readarr](https://github.com/argyle-labs/arr/tree/main/crates/readarr) | Readarr — book & audiobook automation (orca cdylib plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/sonarr/assets/icon-256.png" width="28" align="top" alt="" /> [sonarr](https://github.com/argyle-labs/arr/tree/main/crates/sonarr) | Sonarr — TV series automation (orca cdylib plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/lidarr/assets/icon-256.png" width="28" align="top" alt="" /> [lidarr](https://github.com/argyle-labs/arr/tree/main/crates/lidarr) | Lidarr — music automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/prowlarr/assets/icon-256.png" width="28" align="top" alt="" /> [prowlarr](https://github.com/argyle-labs/arr/tree/main/crates/prowlarr) | Prowlarr — indexer manager for the *arr apps (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/radarr/assets/icon-256.png" width="28" align="top" alt="" /> [radarr](https://github.com/argyle-labs/arr/tree/main/crates/radarr) | Radarr — movie automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/readarr/assets/icon-256.png" width="28" align="top" alt="" /> [readarr](https://github.com/argyle-labs/arr/tree/main/crates/readarr) | Readarr — book & audiobook automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/sonarr/assets/icon-256.png" width="28" align="top" alt="" /> [sonarr](https://github.com/argyle-labs/arr/tree/main/crates/sonarr) | Sonarr — TV series automation (orca plugin) |
 | <img src="https://raw.githubusercontent.com/argyle-labs/lazylibrarian/main/assets/icon-256.png" width="28" align="top" alt="" /> [lazylibrarian](https://github.com/argyle-labs/lazylibrarian) | LazyLibrarian book (ebook/audiobook) downloader & manager — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/libation/main/assets/icon-256.png" width="28" align="top" alt="" /> [libation](https://github.com/argyle-labs/libation) | Audible library downloader — orca service-backend |
 | <img src="https://raw.githubusercontent.com/argyle-labs/mylar3/main/assets/icon-256.png" width="28" align="top" alt="" /> [mylar3](https://github.com/argyle-labs/mylar3) | Mylar3 comic book (CBR/CBZ) downloader & manager — orca service-backend |
@@ -88,7 +87,7 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 | Plugin | What it does |
 |--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/agents/main/assets/icon-256.png" width="28" align="top" alt="" /> [agents](https://github.com/argyle-labs/agents) | Registers orca's base agent roster, slash-commands, and hooks as an AgentProvider |
+| <img src="https://raw.githubusercontent.com/argyle-labs/agents/main/assets/icon-256.png" width="28" align="top" alt="" /> [agents](https://github.com/argyle-labs/agents) | Canonical base-agent-roster registrant: registers orca's base agents, slash-commands, and hooks via plugin_toolkit::agents against orca core |
 
 ### Home automation
 
@@ -113,6 +112,7 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 |--------|--------------|
 | <img src="https://raw.githubusercontent.com/argyle-labs/beaver/main/assets/icon-256.png" width="28" align="top" alt="" /> [beaver](https://github.com/argyle-labs/beaver) | Reproducible backup/restore for Linux workstations (Bazzite + CachyOS) via restic to NAS/external/cloud |
 | <img src="https://raw.githubusercontent.com/argyle-labs/raccoon/main/assets/icon-256.png" width="28" align="top" alt="" /> [raccoon](https://github.com/argyle-labs/raccoon) | Reproducible Linux gaming setup/restore: Steam, Heroic, Battle.net (NSL), gamescope, MangoHud, controller wake (Bazzite + CachyOS) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/walrus/main/assets/icon-256.png" width="28" align="top" alt="" /> [walrus](https://github.com/argyle-labs/walrus) | macOS workstation provisioning diagnostics/repair for orca — Homebrew toolchain (formulae + casks), Node, Claude Code |
 
 ## Developing a plugin
 
