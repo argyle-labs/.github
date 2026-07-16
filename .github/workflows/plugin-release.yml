@@ -64,10 +64,19 @@ on:
         required: true
         type: string
       targets:
-        description: 'JSON array of Rust target triples to build. Default: ["x86_64-unknown-linux-gnu"]'
+        description: >-
+          JSON array of Rust target triples to build. Default: the six
+          first-party release triples — linux glibc (x86_64 + aarch64), linux
+          musl (x86_64 + aarch64, built static so one binary runs on both musl
+          and glibc hosts), and apple darwin (x86_64 + aarch64). Every non-host
+          target cross-compiles with cargo-zigbuild. Keep this list in sync with
+          orca core's TARGET_TRIPLES single source of truth
+          (projects/system/src/release_targets.rs) — the two are asserted equal
+          by an orca test; do not diverge them by hand.
         required: false
         type: string
-        default: '["x86_64-unknown-linux-gnu"]'
+        default: >-
+          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","aarch64-apple-darwin","x86_64-apple-darwin"]
       bins:
         description: 'JSON array of bin names to build+publish. Empty ([]) = derive the crate''s sole bin from cargo metadata.'
         required: false
@@ -209,9 +218,16 @@ jobs:
 
       - name: Build release binaries
         env:
-          # musl: disable crt-static so a dynamically-linked musl daemon can spawn
-          # the plugin like any other host binary (mirrors the old cdylib rule).
-          RUSTFLAGS: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-C target-feature=-crt-static' || '' }}
+          # musl: build FULLY STATIC (crt-static is already the musl default in
+          # rustc; we assert it explicitly). A static musl binary carries its own
+          # libc and so runs on BOTH musl (Alpine) and glibc hosts — that is the
+          # whole reason we ship musl at all, and it lets orca's linux asset
+          # resolver prefer the musl-static asset with a gnu fallback (see orca
+          # core release_targets::linux_asset_preference). Now that plugins are
+          # spawned as subprocesses (not dlopened into the daemon), the old
+          # "disable crt-static so the daemon can dlopen it" rule no longer
+          # applies — a static executable spawns fine.
+          RUSTFLAGS: ${{ contains(matrix.target, '-musl') && '-C target-feature=+crt-static' || '' }}
         run: |
           set -euo pipefail
           # Host glibc builds with plain cargo; cross targets use cargo-zigbuild
