@@ -255,6 +255,13 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Add rust target
+        # Install std for the matrix triple on EVERY leg, including both darwin
+        # triples on the arm64 mint runner. aarch64-apple-darwin is the host so
+        # this is a no-op there, but x86_64-apple-darwin is a genuine CROSS
+        # target on an arm64 host: without `rustup target add x86_64-apple-darwin`
+        # cargo has no x86_64 std and the build fails. Paired with the explicit
+        # per-triple --target below, this pins the artifact to the single,
+        # matrix-derived output path the staging step reads.
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build release binaries
@@ -289,6 +296,17 @@ jobs:
           while IFS= read -r b; do
             [ -n "$b" ] && bin_flags="$bin_flags --bin $b"
           done <<< '${{ steps.bins.outputs.list }}'
+          # `--target` is LOAD-BEARING for the output path. With it, cargo (and
+          # cargo-zigbuild) always emit to `target/<triple>/release/<bin>` — even
+          # when <triple> equals the host — which is exactly where the staging
+          # step below reads. Drop it and a host build lands in `target/release/`
+          # instead and staging fails with "binary not found". We ALSO export
+          # CARGO_BUILD_TARGET as belt-and-suspenders so a stray host-default on
+          # the persistent self-hosted runner can't redirect the output dir; the
+          # explicit flag and the env agree, so every leg (native + zig) resolves
+          # to the same target/<triple>/release path.
+          export CARGO_BUILD_TARGET="${{ matrix.target }}"
+          echo "→ $builder --release --target ${{ matrix.target }}$bin_flags"
           # shellcheck disable=SC2086
           $builder --release --target "${{ matrix.target }}" $bin_flags
 
@@ -303,7 +321,13 @@ jobs:
             path="target/${{ matrix.target }}/release/${bin}"
             if [ ! -f "$path" ]; then
               echo "::error::binary not found at $path"
-              ls -la "target/${{ matrix.target }}/release" || true
+              echo "── expected (target-triple) dir ──"
+              ls -la "target/${{ matrix.target }}/release" || echo "  (missing)"
+              # If a build ever dropped --target the artifact would land here.
+              # Surface it so the failure names the exact mismatch instead of
+              # leaving the next re-cut to guess.
+              echo "── host (no-triple) dir — should NOT contain the bin ──"
+              ls -la "target/release" || echo "  (missing)"
               exit 1
             fi
             asset="${bin}-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
