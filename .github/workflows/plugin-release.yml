@@ -344,13 +344,17 @@ jobs:
             fi
             asset="${bin}-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
             cp "$path" "dist/$asset"
-            ( cd dist && sha256sum "$asset" > "${asset}.sha256" )
+            # shasum -a 256 is present on both ubuntu and macOS runners with
+            # identical `<hash>  <file>` output; sha256sum is GNU-only (absent
+            # on macOS) and broke the darwin legs.
+            ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
 
             # ── Thinness gate (soft) ──────────────────────────────────────────
             # A plugin should be logic + generated types + serde, delegating heavy
             # capabilities to orca — not bundling the runtime. Report every release
             # and warn (don't fail) over budget so bloat stays visible per build.
-            bytes=$(stat -c%s "dist/$asset")
+            # wc -c is POSIX/portable; `stat -c%s` is GNU-only (macOS uses -f%z).
+            bytes=$(wc -c < "dist/$asset" | tr -d '[:space:]')
             mib=$(( bytes / 1048576 ))
             echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
             echo "plugin binary ${asset} = ${mib} MiB"
