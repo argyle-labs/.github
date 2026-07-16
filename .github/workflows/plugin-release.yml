@@ -144,16 +144,54 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "→ ${{ inputs.channel }} (${{ inputs.bump }}) from ${latest_stable}: $tag"
 
+  # ── Derive the build matrix from the caller-passed `targets`. ───────────────
+  # Callers still pass a flat JSON array of triples (backward-compatible — their
+  # `with.targets` input is untouched). This job maps each triple → the runner it
+  # must build on and the build method, so the darwin legs run NATIVELY on the
+  # self-hosted Apple runner (real macOS SDK → the Security/CoreFoundation
+  # frameworks rustls-platform-verifier links against exist) instead of
+  # cross-compiling on ubuntu with cargo-zigbuild (no macOS SDK there → link fails).
+  #
+  # Mapping (keep in sync with orca release_targets):
+  #   *-apple-darwin  → runner [self-hosted, macOS, ARM64], method "native"
+  #                     (aarch64 = host build; x86_64 = `rustup target add` + the
+  #                      same native Apple SDK — still cross, but real frameworks,
+  #                      no zig).
+  #   *-linux-*       → runner ubuntu-latest, method "zig" (x86_64-gnu is the host
+  #                     so plain `cargo build`; every other linux triple keeps
+  #                     cargo-zigbuild + static musl — UNCHANGED from today).
+  matrix:
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.gen.outputs.include }}
+    steps:
+      - name: Build target→runner→method matrix
+        id: gen
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+          include=$(echo "$TARGETS" | jq -c '[ .[] | {
+            target: .,
+            runner: (if endswith("-apple-darwin")
+                     then "[\"self-hosted\", \"macOS\", \"ARM64\"]"
+                     else "[\"ubuntu-latest\"]" end),
+            method: (if endswith("-apple-darwin") then "native" else "zig" end)
+          } ]')
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+          echo "$include" | jq .
+
   # ── One parallel job per (target). Each builds every requested bin and
   #    uploads its asset(s). Bin list is resolved once here from cargo metadata
   #    when the caller passes bins=[].                                        ──
   build:
-    needs: version
-    runs-on: ubuntu-latest
+    needs: [version, matrix]
+    runs-on: ${{ fromJSON(matrix.runner) }}
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets) }}
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -207,7 +245,7 @@ jobs:
           echo "bins: $(echo "$bins" | paste -sd, -)"
 
       - name: Install cross toolchain (zig + cargo-zigbuild)
-        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        if: matrix.method == 'zig' && matrix.target != 'x86_64-unknown-linux-gnu'
         run: |
           set -euo pipefail
           python3 -m pip install --user cargo-zigbuild ziglang
@@ -230,9 +268,14 @@ jobs:
           RUSTFLAGS: ${{ contains(matrix.target, '-musl') && '-C target-feature=+crt-static' || '' }}
         run: |
           set -euo pipefail
-          # Host glibc builds with plain cargo; cross targets use cargo-zigbuild
-          # (zig as the C toolchain) exactly as the previous per-repo workflows did.
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+          # Build method comes from the derived matrix:
+          #   native → real toolchain (darwin on the mint runner; the Apple SDK is
+          #            present so the Security/CoreFoundation frameworks link). Both
+          #            the host aarch64 build and the x86_64 cross use plain cargo.
+          #   zig    → linux legs (UNCHANGED): host x86_64-gnu uses plain cargo,
+          #            every other linux triple uses cargo-zigbuild (+ static musl).
+          if [ "${{ matrix.method }}" = "native" ] \
+             || [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             builder="cargo build"
           else
             builder="cargo zigbuild"
