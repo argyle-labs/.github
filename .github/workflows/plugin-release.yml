@@ -147,19 +147,30 @@ jobs:
   # ── Derive the build matrix from the caller-passed `targets`. ───────────────
   # Callers still pass a flat JSON array of triples (backward-compatible — their
   # `with.targets` input is untouched). This job maps each triple → the runner it
-  # must build on and the build method, so the darwin legs run NATIVELY on the
-  # self-hosted Apple runner (real macOS SDK → the Security/CoreFoundation
+  # must build on and the build method, so the darwin legs run NATIVELY on
+  # GitHub-hosted macOS runners (real macOS SDK → the Security/CoreFoundation
   # frameworks rustls-platform-verifier links against exist) instead of
   # cross-compiling on ubuntu with cargo-zigbuild (no macOS SDK there → link fails).
+  # GitHub-hosted macOS runners are FREE for public repos (all plugin repos are
+  # public), match each target's native arch, and parallelize — replacing the
+  # self-hosted mint runner's serialization + flakiness.
   #
   # Mapping (keep in sync with orca release_targets):
-  #   *-apple-darwin  → runner [self-hosted, macOS, ARM64], method "native"
-  #                     (aarch64 = host build; x86_64 = `rustup target add` + the
-  #                      same native Apple SDK — still cross, but real frameworks,
-  #                      no zig).
-  #   *-linux-*       → runner ubuntu-latest, method "zig" (x86_64-gnu is the host
-  #                     so plain `cargo build`; every other linux triple keeps
-  #                     cargo-zigbuild + static musl — UNCHANGED from today).
+  #   aarch64-apple-darwin → runner "macos-14" (Apple Silicon, native arm64 host),
+  #                          method "native" (plain `cargo build --target`).
+  #   x86_64-apple-darwin  → runner "macos-13" (Intel, native x86_64 host),
+  #                          method "native" (plain `cargo build --target`).
+  #                          Each hosted runner matches its target's native arch,
+  #                          so `--target` resolves and the Apple SDK/frameworks
+  #                          are present — real frameworks, no zig.
+  #   *-linux-*            → runner ubuntu-latest, method "zig" (x86_64-gnu is the
+  #                          host so plain `cargo build`; every other linux triple
+  #                          keeps cargo-zigbuild + static musl — UNCHANGED).
+  #
+  # Runner value shape: darwin legs emit a JSON-encoded STRING ("\"macos-14\""),
+  # so `fromJSON(matrix.runner)` yields the plain string `macos-14` (a valid
+  # runs-on). Linux legs emit a JSON array string ("[\"ubuntu-latest\"]") →
+  # `["ubuntu-latest"]`. Both are valid runs-on values.
   matrix:
     needs: version
     runs-on: ubuntu-latest
@@ -174,8 +185,8 @@ jobs:
           set -euo pipefail
           include=$(echo "$TARGETS" | jq -c '[ .[] | {
             target: .,
-            runner: (if endswith("-apple-darwin")
-                     then "[\"self-hosted\", \"macOS\", \"ARM64\"]"
+            runner: (if . == "aarch64-apple-darwin" then "\"macos-14\""
+                     elif . == "x86_64-apple-darwin" then "\"macos-13\""
                      else "[\"ubuntu-latest\"]" end),
             method: (if endswith("-apple-darwin") then "native" else "zig" end)
           } ]')
@@ -255,13 +266,13 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Add rust target
-        # Install std for the matrix triple on EVERY leg, including both darwin
-        # triples on the arm64 mint runner. aarch64-apple-darwin is the host so
-        # this is a no-op there, but x86_64-apple-darwin is a genuine CROSS
-        # target on an arm64 host: without `rustup target add x86_64-apple-darwin`
-        # cargo has no x86_64 std and the build fails. Paired with the explicit
-        # per-triple --target below, this pins the artifact to the single,
-        # matrix-derived output path the staging step reads.
+        # Install std for the matrix triple on EVERY leg. On the GitHub-hosted
+        # macOS runners each darwin triple is the HOST arch (aarch64 on macos-14,
+        # x86_64 on macos-13), so `rustup target add` is a no-op there — but it is
+        # kept unconditional so the explicit per-triple --target below always has
+        # matching std and pins the artifact to the single, matrix-derived output
+        # path (target/<triple>/release) the staging step reads. On linux legs it
+        # installs std for the cross musl/gnu triples as before.
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build release binaries
@@ -279,9 +290,10 @@ jobs:
         run: |
           set -euo pipefail
           # Build method comes from the derived matrix:
-          #   native → real toolchain (darwin on the mint runner; the Apple SDK is
-          #            present so the Security/CoreFoundation frameworks link). Both
-          #            the host aarch64 build and the x86_64 cross use plain cargo.
+          #   native → real toolchain (darwin on GitHub-hosted macOS runners; the
+          #            Apple SDK is present so the Security/CoreFoundation frameworks
+          #            link). Each hosted runner is its target's native arch, so the
+          #            build uses plain cargo with --target.
           #   zig    → linux legs (UNCHANGED): host x86_64-gnu uses plain cargo,
           #            every other linux triple uses cargo-zigbuild (+ static musl).
           if [ "${{ matrix.method }}" = "native" ] \
@@ -301,8 +313,8 @@ jobs:
           # when <triple> equals the host — which is exactly where the staging
           # step below reads. Drop it and a host build lands in `target/release/`
           # instead and staging fails with "binary not found". We ALSO export
-          # CARGO_BUILD_TARGET as belt-and-suspenders so a stray host-default on
-          # the persistent self-hosted runner can't redirect the output dir; the
+          # CARGO_BUILD_TARGET as belt-and-suspenders so a stray host-default
+          # can't redirect the output dir; the
           # explicit flag and the env agree, so every leg (native + zig) resolves
           # to the same target/<triple>/release path.
           export CARGO_BUILD_TARGET="${{ matrix.target }}"
