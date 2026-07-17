@@ -43,6 +43,7 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 | Plugin | What it does |
 |--------|--------------|
 | <img src="https://raw.githubusercontent.com/argyle-labs/nfs/main/assets/icon-256.png" width="28" align="top" alt="" /> [nfs](https://github.com/argyle-labs/nfs) | NFS StorageBackend with stale-mount self-heal — backend-only orca plugin |
+| <img src="https://raw.githubusercontent.com/argyle-labs/s3/main/assets/icon-256.png" width="28" align="top" alt="" /> [s3](https://github.com/argyle-labs/s3) | S3-compatible object-store StorageBackend (userspace FUSE mount) — backend-only orca plugin |
 | <img src="https://raw.githubusercontent.com/argyle-labs/smb/main/assets/icon-256.png" width="28" align="top" alt="" /> [smb](https://github.com/argyle-labs/smb) | SMB/CIFS StorageBackend for orca's storage domain — backend-only plugin |
 | <img src="https://raw.githubusercontent.com/argyle-labs/syncthing/main/assets/icon-256.png" width="28" align="top" alt="" /> [syncthing](https://github.com/argyle-labs/syncthing) | Syncthing file synchronization — orca service-backend |
 
