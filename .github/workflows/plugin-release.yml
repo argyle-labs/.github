@@ -374,6 +374,13 @@ jobs:
   release:
     needs: [version, build]
     runs-on: ubuntu-latest
+    # Human-approval gate, mirroring orca's own release.yml (publish-rc /
+    # publish-stable sit behind the release-rc / release-stable environments).
+    # A reusable-workflow `environment:` is evaluated in the CALLER repo's
+    # context, so each plugin repo must define release-rc / release-stable with
+    # a required reviewer — otherwise the gate is a no-op. channel picks which.
+    environment:
+      name: ${{ inputs.channel == 'stable' && 'release-stable' || 'release-rc' }}
     permissions:
       contents: write
     concurrency:
