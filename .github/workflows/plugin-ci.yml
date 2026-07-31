@@ -82,7 +82,12 @@ jobs:
             "https://github.com/"
 
       - name: Sync orca dep to main tip
-        run: cargo update -p plugin-toolkit
+        # Advance the orca git source to main HEAD before lint/test. If the
+        # committed lock is in local-dev PATH form (plugin-toolkit resolved from
+        # ../orca, so there's no git package to target), `cargo update -p` errors
+        # `did not match any packages` — fall back to regenerating the lock fresh
+        # from Cargo.toml, which resolves plugin-toolkit from git at main tip.
+        run: cargo update -p plugin-toolkit || cargo generate-lockfile
 
       - name: Formatting
         run: cargo fmt --all -- --check
