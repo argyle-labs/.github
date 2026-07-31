@@ -490,7 +490,8 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
         ccat="${cm%%$'\t'*}"; cdesc="${cm#*$'\t'}"
         [[ -n "$ccat" ]] || ccat="${wcat:-other}"
         cicon="$raw/$name/$branch/crates/$crate/assets/icon-256.png"
-        BUCKET[$ccat]+="| <img src=\"$cicon\" width=\"28\" align=\"top\" alt=\"\" /> [$crate](https://github.com/$ORG/$name/tree/$branch/crates/$crate) | ${cdesc:-—} |"$'\n'
+        cdesc="${cdesc//|/\\|}"   # escape pipes so they don't split the table cell
+        BUCKET[$ccat]+="| <img src=\"$cicon\" width=\"28\" alt=\"\" /> | [$crate](https://github.com/$ORG/$name/tree/$branch/crates/$crate) | ${cdesc:-—} |"$'\n'
       done < <(repo_crates "$name")
       continue
     else
@@ -499,7 +500,8 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
       [[ -n "$cat" ]] || cat="other"
     fi
     icon="$raw/$name/$branch/assets/icon-256.png"
-    BUCKET[$cat]+="| <img src=\"$icon\" width=\"28\" align=\"top\" alt=\"\" /> [$name](https://github.com/$ORG/$name) | ${desc:-—} |"$'\n'
+    desc="${desc//|/\\|}"   # escape pipes so they don't split the table cell
+    BUCKET[$cat]+="| <img src=\"$icon\" width=\"28\" alt=\"\" /> | [$name](https://github.com/$ORG/$name) | ${desc:-—} |"$'\n'
   done <<<"$(discover)"
 
   {
@@ -537,7 +539,7 @@ HDR
     local c
     for c in "${CAT_ORDER[@]}"; do
       [[ -n "${BUCKET[$c]:-}" ]] || continue
-      printf '\n### %s\n\n| Plugin | What it does |\n|--------|--------------|\n' "$(cat_title "$c")"
+      printf '\n### %s\n\n| | Plugin | What it does |\n|:--:|--------|--------------|\n' "$(cat_title "$c")"
       printf '%s' "${BUCKET[$c]}" | sort
     done
     cat <<'FTR'
