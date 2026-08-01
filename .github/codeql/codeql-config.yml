@@ -1,0 +1,19 @@
+# Shared CodeQL configuration for every argyle-labs Rust repo (orca core +
+# all plugins). Referenced remotely by security.yml as
+#   config-file: argyle-labs/.github/.github/codeql/codeql-config.yml@main
+# so the scan rules live in ONE place and can't drift per repo.
+#
+# Rust's CodeQL extractor ONLY supports build-mode: none (it resolves the crate
+# graph itself; manual/autobuild are rejected). Analysis quality comes from
+# making the pinned toolchain + fetched dependencies available before
+# extraction, not from a separate compile — security.yml does that.
+name: "argyle-labs CodeQL"
+
+# Test code is excluded. Integration tests intentionally embed fixture
+# credentials (e.g. seed_admin("alice", "hunter2")) which
+# rust/hard-coded-cryptographic-value flags as critical false positives. These
+# paths carry no production secrets.
+paths-ignore:
+  - "**/tests/**"
+  - "**/benches/**"
+  - "scratch/**"

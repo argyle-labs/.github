@@ -1,13 +1,10 @@
 name: Plugin CI (reusable)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reusable CI workflow for orca dynamic (subprocess) plugins.
+# Reusable CI for orca dynamic (subprocess) plugins. ONE definition of "does
+# this plugin format, lint, test, AND meet its coverage floor?". Every plugin
+# repo is a thin caller:
 #
-# ONE source of truth for "does this plugin build, lint, and test against LIVE
-# orca `main`?". Every plugin repo drops its hand-rolled ci.yml and becomes a
-# thin caller:
-#
-#   # .github/workflows/ci.yml
 #   name: CI
 #   on:
 #     push:         { branches: [main] }
@@ -20,26 +17,29 @@ name: Plugin CI (reusable)
 #       uses: argyle-labs/.github/.github/workflows/plugin-ci.yml@main
 #       secrets: inherit
 #
-# The caller's `ci` job calling this reusable `ci` job surfaces the check as
-# `ci / ci` — require that context in branch protection (uniform across repos).
+# The caller's `ci` job calling this reusable `ci` job surfaces as `ci / ci` —
+# require that context in branch protection (uniform across all repos).
 #
-# Why the steps below are non-obvious:
+# DETERMINISTIC BY DEFAULT (see [[orca-published-crate-plugin-compat-range]]):
+# plugins build against the orca git rev pinned in their committed lockfile
+# (the current stable orca tag). CI reflects only the plugin's own diff —
+# reproducible, and one breaking orca merge can no longer turn the whole fleet
+# red on unrelated PRs. Testing against orca `main` is the CANARY's job
+# (plugin-canary.yml / fleet-canary.yml), opt-in via `sync_orca_main: true`.
+#
+# COVERAGE IS MANDATORY, NOT A KNOB. Every plugin measures and gates line
+# coverage of its OWN crates (cargo-llvm-cov instruments workspace members
+# only — never the orca dependency). The floor is the single value in the
+# repo's `.coverage-floor` file; ratchet it up as tests land, never down. A
+# repo without the file gates at 0 (still measured + reported) so adoption is
+# safe before a floor is seeded.
 #
 #  • Drop local-dev patch: plugin repos carry a developer-only `[patch]` in
 #    `.cargo/config.toml` redirecting plugin-toolkit to a local `../orca`
-#    checkout, which doesn't exist in CI. Remove it so the git dependency
-#    (private argyle-labs/orca) is used. `rm -f` is a no-op if absent.
-#
-#  • Sync orca dep to main tip: the committed lockfile pins a CONCRETE orca git
-#    rev (or a stale path-form entry). A plain `cargo build` HONORS that locked
-#    rev and would silently validate against OLD orca — the exact trap that let
-#    a fleet of plugins pass CI while broken against live orca. `cargo update -p
-#    plugin-toolkit` advances the shared orca git source to current `main` HEAD
-#    before we lint/test, so CI always reflects live orca.
+#    checkout. Remove it so the git dependency is used. `rm -f` no-ops if absent.
 #
 #  • ORCA_FETCH_TOKEN (via `secrets: inherit`) authenticates the private orca
-#    git fetch through git's tokenized `insteadOf` rewrite. Swap to a 1Password
-#    service-account / fine-grained PAT later; the wiring stays the same.
+#    git fetch through git's tokenized `insteadOf` rewrite.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -50,6 +50,15 @@ on:
         required: false
         type: string
         default: "stable"
+      sync_orca_main:
+        description: >-
+          Advance the orca dependency to `main` HEAD before lint/test instead of
+          honoring the committed lockfile pin. FALSE on the PR hot path
+          (deterministic). The canary workflows set this TRUE to detect drift
+          against live orca.
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -70,6 +79,10 @@ jobs:
           toolchain: ${{ inputs.toolchain }}
           components: clippy, rustfmt
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Drop local-dev cargo patch
@@ -81,12 +94,12 @@ jobs:
             url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
             "https://github.com/"
 
-      - name: Sync orca dep to main tip
-        # Advance the orca git source to main HEAD before lint/test. If the
-        # committed lock is in local-dev PATH form (plugin-toolkit resolved from
-        # ../orca, so there's no git package to target), `cargo update -p` errors
-        # `did not match any packages` — fall back to regenerating the lock fresh
-        # from Cargo.toml, which resolves plugin-toolkit from git at main tip.
+      # Deterministic by default: build exactly what the committed lockfile
+      # pins. Only when sync_orca_main is set (canary) do we advance the orca
+      # source to main HEAD. The `|| cargo generate-lockfile` fallback handles a
+      # lock still in local-dev PATH form (no git package to target).
+      - name: Sync orca dep to main tip (canary only)
+        if: ${{ inputs.sync_orca_main }}
         run: cargo update -p plugin-toolkit || cargo generate-lockfile
 
       - name: Formatting
@@ -95,5 +108,10 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Tests
-        run: cargo test
+      # Coverage IS the test step — nextest engine under llvm-cov, gated on the
+      # repo's floor. Measures workspace crates only (the plugin's own code).
+      - name: Test + coverage gate (line coverage ≥ floor)
+        run: |
+          floor="$(cat .coverage-floor 2>/dev/null || echo 0)"
+          echo "Coverage floor for this repo: ${floor}%"
+          cargo llvm-cov nextest --no-fail-fast --fail-under-lines "$floor"
