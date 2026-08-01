@@ -1,0 +1,167 @@
+name: Fleet canary (orca main)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ONE scheduled job that builds + tests EVERY first-party plugin against orca
+# `main`, so the fleet learns about orca breaking changes centrally instead of
+# each plugin discovering it on an unrelated PR. On any failure it opens/updates
+# a single tracking issue in this repo and pings argyle-labs admins — kept to
+# once daily (03:00 MST) to cut noise. Bump the second cron line to move to
+# twice daily if drift becomes frequent.
+#
+# The roster is DERIVED, never hand-listed: public, non-archived argyle-labs
+# repos whose root Cargo.toml declares `[package.metadata.orca]` (same marker
+# orca's plugin-catalog sync uses). New plugins are covered automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 10 * * *"        # 03:00 MST (UTC-7). Drifts to 04:00 in MDT.
+    # - cron: "0 22 * * *"      # uncomment for a second (evening) sweep.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: fleet-canary
+  cancel-in-progress: true
+
+jobs:
+  # ── Discover the plugin roster from the org ───────────────────────────────
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      repos: ${{ steps.list.outputs.repos }}
+    steps:
+      - id: list
+        env:
+          GH_TOKEN: ${{ secrets.ORCA_FETCH_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          # Every non-archived argyle-labs repo that declares the orca plugin
+          # marker in its root Cargo.toml.
+          repos=()
+          while read -r name; do
+            [ -z "$name" ] && continue
+            if gh api "repos/argyle-labs/$name/contents/Cargo.toml" \
+                 --jq '.content' 2>/dev/null | base64 -d 2>/dev/null \
+                 | grep -q '\[package.metadata.orca\]'; then
+              repos+=("$name")
+            fi
+          done < <(gh repo list argyle-labs --no-archived --limit 200 --json name --jq '.[].name')
+          printf 'Discovered %s plugin repos\n' "${#repos[@]}"
+          json=$(printf '%s\n' "${repos[@]}" | jq -R . | jq -cs .)
+          echo "repos=$json" >> "$GITHUB_OUTPUT"
+
+  # ── Build+test each plugin against orca main (parallel matrix) ────────────
+  canary:
+    needs: discover
+    if: ${{ needs.discover.outputs.repos != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.discover.outputs.repos) }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout ${{ matrix.repo }}
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/${{ matrix.repo }}
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fleet-canary-${{ matrix.repo }}
+
+      - name: Authenticate private orca git dependency
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - name: Build + test against orca main
+        id: run
+        run: |
+          set -euo pipefail
+          rm -f .cargo/config.toml
+          cargo update -p plugin-toolkit || cargo generate-lockfile
+          cargo clippy --all-targets -- -D warnings
+          cargo build --release --locked || cargo build --release
+          cargo nextest run --no-fail-fast
+
+      # Record a per-repo status file (pass OR fail) for the report job to
+      # aggregate. `if: always()` so failures are captured too.
+      - name: Record status
+        if: always()
+        run: |
+          mkdir -p status
+          echo "${{ steps.run.outcome }}" > "status/${{ matrix.repo }}.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-status-${{ matrix.repo }}
+          path: status/
+          retention-days: 3
+
+  # ── Aggregate + alert admins if anything failed ───────────────────────────
+  report:
+    needs: canary
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: canary-status-*
+          path: status
+          merge-multiple: true
+
+      - name: Compute failing plugins
+        id: fail
+        run: |
+          set -euo pipefail
+          failed=()
+          for f in status/*.txt; do
+            [ -e "$f" ] || continue
+            name="$(basename "$f" .txt)"
+            [ "$(cat "$f")" = "failure" ] && failed+=("$name")
+          done
+          if [ "${#failed[@]}" -eq 0 ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            { echo "list<<EOF"; printf -- '- %s\n' "${failed[@]}"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      # Open (or update) a single tracking issue so repeat failures don't spam.
+      - name: Alert admins on drift
+        if: ${{ steps.fail.outputs.any == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="🐤 Fleet canary: plugins failing against orca main"
+          # shellcheck disable=SC2016  # literal backticks are intended markdown, not expansion
+          body="$(printf 'These plugins no longer build/test against orca \`main\` as of the latest fleet canary:\n\n%s\n\nRun: %s\n\n_Deterministic PR CI is unaffected (plugins build against the pinned stable orca). This is an early-warning canary._' \
+            "${{ steps.fail.outputs.list }}" "$RUN_URL")"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "in:title Fleet canary" --json number --jq '.[0].number' || true)"
+          if [ -n "${existing:-}" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" \
+              --label "canary" 2>/dev/null \
+              || gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

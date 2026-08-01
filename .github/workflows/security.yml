@@ -1,0 +1,94 @@
+name: Security (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ONE security scan for every argyle-labs Rust repo — orca core AND all plugins.
+# Runs CodeQL (Rust) + gitleaks (secret/PII) from a single caller so the fleet
+# can never have a repo that is silently unscanned.
+#
+# Caller (drop-in `.github/workflows/security.yml` in each repo):
+#
+#   name: Security
+#   on:
+#     push:         { branches: [main] }
+#     pull_request: { branches: [main] }
+#     schedule:     [{ cron: "27 3 * * 1" }]   # weekly baseline
+#   permissions:
+#     security-events: write
+#     contents: read
+#     actions: read
+#   jobs:
+#     security:
+#       uses: argyle-labs/.github/.github/workflows/security.yml@main
+#       secrets: inherit
+#
+# The caller MUST grant `security-events: write` (CodeQL upload) — a reusable
+# workflow can only receive permissions the caller's token already holds.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Rust toolchain for the CodeQL dependency pre-fetch."
+        required: false
+        type: string
+        default: "stable"
+
+jobs:
+  # ── CodeQL (Rust) ─────────────────────────────────────────────────────────
+  codeql:
+    name: CodeQL (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      # Install the toolchain and fetch deps so the Rust extractor resolves
+      # types/call targets from real dependency source (the lever for Rust
+      # analysis quality; manual build mode is unavailable). Honors a repo's
+      # rust-toolchain.toml when present, otherwise the input default.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: codeql-rust
+          cache-on-failure: true
+
+      # Private orca git dependency (plugins) needs tokenized fetch; harmless
+      # for core. `|| true` so a repo without the secret still fetches public
+      # deps and CodeQL proceeds.
+      - name: Authenticate private orca git dependency
+        env:
+          ORCA_FETCH_TOKEN: ${{ secrets.ORCA_FETCH_TOKEN }}
+        run: |
+          if [ -n "${ORCA_FETCH_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${ORCA_FETCH_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+          fi
+
+      - name: Fetch Rust dependencies
+        run: cargo fetch --locked || cargo fetch
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: none
+          config-file: argyle-labs/.github/.github/codeql/codeql-config.yml@main
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
+
+  # ── Secret / PII scan ─────────────────────────────────────────────────────
+  # Nested reuse of the existing gitleaks workflow so its rules stay in one
+  # place. (Reusable workflows may call other reusable workflows.)
+  gitleaks:
+    name: gitleaks
+    uses: argyle-labs/.github/.github/workflows/gitleaks-reusable.yml@main
+    secrets: inherit
