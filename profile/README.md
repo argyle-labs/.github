@@ -32,101 +32,101 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/docker/main/assets/icon-256.png" width="48" alt="" /> | [docker](https://github.com/argyle-labs/docker) | Adapts Docker Engine + Compose into orca's containers domain |
-| <img src="https://raw.githubusercontent.com/argyle-labs/dockge/main/assets/icon-256.png" width="48" alt="" /> | [dockge](https://github.com/argyle-labs/dockge) | Dockge self-hosted Compose stack manager — orca plugin + deploy assets |
-| <img src="https://raw.githubusercontent.com/argyle-labs/gitea/main/assets/icon-256.png" width="48" alt="" /> | [gitea](https://github.com/argyle-labs/gitea) | Gitea plugin for orca — full REST API surface + dual-substrate (lxc\|docker) deploy + gitea-dump backup/restore |
-| <img src="https://raw.githubusercontent.com/argyle-labs/pbs/main/assets/icon-256.png" width="48" alt="" /> | [pbs](https://github.com/argyle-labs/pbs) | Proxmox Backup Server — orca service-backend for backup datastores and jobs |
-| <img src="https://raw.githubusercontent.com/argyle-labs/proxmox/main/assets/icon-256.png" width="48" alt="" /> | [proxmox](https://github.com/argyle-labs/proxmox) | Proxmox VE plugin for orca — cluster nodes/guests with cluster_roster + topology ABI backends |
-| <img src="https://raw.githubusercontent.com/argyle-labs/unraid/main/assets/icon-256.png" width="48" alt="" /> | [unraid](https://github.com/argyle-labs/unraid) | Adapts an Unraid host's GraphQL API into orca — typed queries, topology, schema-drift detection |
+| <img src="https://raw.githubusercontent.com/argyle-labs/docker/main/assets/icon-256.png" width="28" alt="" /> | [docker](https://github.com/argyle-labs/docker) | Adapts Docker Engine + Compose into orca's containers domain |
+| <img src="https://raw.githubusercontent.com/argyle-labs/dockge/main/assets/icon-256.png" width="28" alt="" /> | [dockge](https://github.com/argyle-labs/dockge) | Dockge self-hosted Compose stack manager — orca plugin + deploy assets |
+| <img src="https://raw.githubusercontent.com/argyle-labs/gitea/main/assets/icon-256.png" width="28" alt="" /> | [gitea](https://github.com/argyle-labs/gitea) | Gitea plugin for orca — full REST API surface + dual-substrate (lxc\|docker) deploy + gitea-dump backup/restore |
+| <img src="https://raw.githubusercontent.com/argyle-labs/pbs/main/assets/icon-256.png" width="28" alt="" /> | [pbs](https://github.com/argyle-labs/pbs) | Proxmox Backup Server — orca service-backend for backup datastores and jobs |
+| <img src="https://raw.githubusercontent.com/argyle-labs/proxmox/main/assets/icon-256.png" width="28" alt="" /> | [proxmox](https://github.com/argyle-labs/proxmox) | Proxmox VE plugin for orca — cluster nodes/guests with cluster_roster + topology ABI backends |
+| <img src="https://raw.githubusercontent.com/argyle-labs/unraid/main/assets/icon-256.png" width="28" alt="" /> | [unraid](https://github.com/argyle-labs/unraid) | Adapts an Unraid host's GraphQL API into orca — typed queries, topology, schema-drift detection |
 
 ### Networking
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/adguard/main/assets/icon-256.png" width="48" alt="" /> | [adguard](https://github.com/argyle-labs/adguard) | AdGuard Home DNS sinkhole — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/caddy/main/assets/icon-256.png" width="48" alt="" /> | [caddy](https://github.com/argyle-labs/caddy) | Caddy reverse proxy — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/mikrotik/main/assets/icon-256.png" width="48" alt="" /> | [mikrotik](https://github.com/argyle-labs/mikrotik) | MikroTik RouterOS device management — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/openvpn/main/assets/icon-256.png" width="48" alt="" /> | [openvpn](https://github.com/argyle-labs/openvpn) | OpenVPN server — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/opnsense/main/assets/icon-256.png" width="48" alt="" /> | [opnsense](https://github.com/argyle-labs/opnsense) | OPNsense firewall/router appliance — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/traefik/main/assets/icon-256.png" width="48" alt="" /> | [traefik](https://github.com/argyle-labs/traefik) | Traefik reverse proxy / ingress — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/unifi/main/assets/icon-256.png" width="48" alt="" /> | [unifi](https://github.com/argyle-labs/unifi) | UniFi network controller — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/adguard/main/assets/icon-256.png" width="28" alt="" /> | [adguard](https://github.com/argyle-labs/adguard) | AdGuard Home DNS sinkhole — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/caddy/main/assets/icon-256.png" width="28" alt="" /> | [caddy](https://github.com/argyle-labs/caddy) | Caddy reverse proxy — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/mikrotik/main/assets/icon-256.png" width="28" alt="" /> | [mikrotik](https://github.com/argyle-labs/mikrotik) | MikroTik RouterOS device management — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/openvpn/main/assets/icon-256.png" width="28" alt="" /> | [openvpn](https://github.com/argyle-labs/openvpn) | OpenVPN server — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/opnsense/main/assets/icon-256.png" width="28" alt="" /> | [opnsense](https://github.com/argyle-labs/opnsense) | OPNsense firewall/router appliance — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/traefik/main/assets/icon-256.png" width="28" alt="" /> | [traefik](https://github.com/argyle-labs/traefik) | Traefik reverse proxy / ingress — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/unifi/main/assets/icon-256.png" width="28" alt="" /> | [unifi](https://github.com/argyle-labs/unifi) | UniFi network controller — orca service-backend |
 
 ### Storage & sync
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/nfs/main/assets/icon-256.png" width="48" alt="" /> | [nfs](https://github.com/argyle-labs/nfs) | NFS StorageBackend with stale-mount self-heal — backend-only orca plugin |
-| <img src="https://raw.githubusercontent.com/argyle-labs/s3/main/assets/icon-256.png" width="48" alt="" /> | [s3](https://github.com/argyle-labs/s3) | S3-compatible object-store StorageBackend (userspace FUSE mount) — backend-only orca plugin |
-| <img src="https://raw.githubusercontent.com/argyle-labs/smb/main/assets/icon-256.png" width="48" alt="" /> | [smb](https://github.com/argyle-labs/smb) | SMB/CIFS StorageBackend for orca's storage domain — backend-only plugin |
-| <img src="https://raw.githubusercontent.com/argyle-labs/syncthing/main/assets/icon-256.png" width="48" alt="" /> | [syncthing](https://github.com/argyle-labs/syncthing) | Syncthing file synchronization — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/nfs/main/assets/icon-256.png" width="28" alt="" /> | [nfs](https://github.com/argyle-labs/nfs) | NFS StorageBackend with stale-mount self-heal — backend-only orca plugin |
+| <img src="https://raw.githubusercontent.com/argyle-labs/s3/main/assets/icon-256.png" width="28" alt="" /> | [s3](https://github.com/argyle-labs/s3) | S3-compatible object-store StorageBackend (userspace FUSE mount) — backend-only orca plugin |
+| <img src="https://raw.githubusercontent.com/argyle-labs/smb/main/assets/icon-256.png" width="28" alt="" /> | [smb](https://github.com/argyle-labs/smb) | SMB/CIFS StorageBackend for orca's storage domain — backend-only plugin |
+| <img src="https://raw.githubusercontent.com/argyle-labs/syncthing/main/assets/icon-256.png" width="28" alt="" /> | [syncthing](https://github.com/argyle-labs/syncthing) | Syncthing file synchronization — orca service-backend |
 
 ### Media servers
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/audiobookshelf/main/assets/icon-256.png" width="48" alt="" /> | [audiobookshelf](https://github.com/argyle-labs/audiobookshelf) | Audiobook + podcast server — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/calibre-web/main/assets/icon-256.png" width="48" alt="" /> | [calibre-web](https://github.com/argyle-labs/calibre-web) | Ebook web library/reader — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/immich/main/assets/icon-256.png" width="48" alt="" /> | [immich](https://github.com/argyle-labs/immich) | Self-hosted photo/video (multi-service) — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/jellyfin/main/assets/icon-256.png" width="48" alt="" /> | [jellyfin](https://github.com/argyle-labs/jellyfin) | Self-hosted Jellyfin with GPU hardware transcoding — orca lifecycle/diagnostics |
-| <img src="https://raw.githubusercontent.com/argyle-labs/kavita/main/assets/icon-256.png" width="48" alt="" /> | [kavita](https://github.com/argyle-labs/kavita) | Manga/ebook/comics server — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/komga/main/assets/icon-256.png" width="48" alt="" /> | [komga](https://github.com/argyle-labs/komga) | Comics/manga server — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/navidrome/main/assets/icon-256.png" width="48" alt="" /> | [navidrome](https://github.com/argyle-labs/navidrome) | Music streaming (Subsonic API) — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/plex/main/assets/icon-256.png" width="48" alt="" /> | [plex](https://github.com/argyle-labs/plex) | Self-hosted Plex Media Server with GPU hardware transcoding — orca lifecycle/diagnostics |
+| <img src="https://raw.githubusercontent.com/argyle-labs/audiobookshelf/main/assets/icon-256.png" width="28" alt="" /> | [audiobookshelf](https://github.com/argyle-labs/audiobookshelf) | Audiobook + podcast server — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/calibre-web/main/assets/icon-256.png" width="28" alt="" /> | [calibre-web](https://github.com/argyle-labs/calibre-web) | Ebook web library/reader — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/immich/main/assets/icon-256.png" width="28" alt="" /> | [immich](https://github.com/argyle-labs/immich) | Self-hosted photo/video (multi-service) — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/jellyfin/main/assets/icon-256.png" width="28" alt="" /> | [jellyfin](https://github.com/argyle-labs/jellyfin) | Self-hosted Jellyfin with GPU hardware transcoding — orca lifecycle/diagnostics |
+| <img src="https://raw.githubusercontent.com/argyle-labs/kavita/main/assets/icon-256.png" width="28" alt="" /> | [kavita](https://github.com/argyle-labs/kavita) | Manga/ebook/comics server — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/komga/main/assets/icon-256.png" width="28" alt="" /> | [komga](https://github.com/argyle-labs/komga) | Comics/manga server — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/navidrome/main/assets/icon-256.png" width="28" alt="" /> | [navidrome](https://github.com/argyle-labs/navidrome) | Music streaming (Subsonic API) — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/plex/main/assets/icon-256.png" width="28" alt="" /> | [plex](https://github.com/argyle-labs/plex) | Self-hosted Plex Media Server with GPU hardware transcoding — orca lifecycle/diagnostics |
 
 ### Media acquisition
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/lidarr/assets/icon-256.png" width="48" alt="" /> | [lidarr](https://github.com/argyle-labs/arr/tree/main/crates/lidarr) | Lidarr — music automation (orca plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/prowlarr/assets/icon-256.png" width="48" alt="" /> | [prowlarr](https://github.com/argyle-labs/arr/tree/main/crates/prowlarr) | Prowlarr — indexer manager for the *arr apps (orca plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/radarr/assets/icon-256.png" width="48" alt="" /> | [radarr](https://github.com/argyle-labs/arr/tree/main/crates/radarr) | Radarr — movie automation (orca plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/readarr/assets/icon-256.png" width="48" alt="" /> | [readarr](https://github.com/argyle-labs/arr/tree/main/crates/readarr) | Readarr — book & audiobook automation (orca plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/sonarr/assets/icon-256.png" width="48" alt="" /> | [sonarr](https://github.com/argyle-labs/arr/tree/main/crates/sonarr) | Sonarr — TV series automation (orca plugin) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/lazylibrarian/main/assets/icon-256.png" width="48" alt="" /> | [lazylibrarian](https://github.com/argyle-labs/lazylibrarian) | LazyLibrarian book (ebook/audiobook) downloader & manager — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/libation/main/assets/icon-256.png" width="48" alt="" /> | [libation](https://github.com/argyle-labs/libation) | Audible library downloader — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/mylar3/main/assets/icon-256.png" width="48" alt="" /> | [mylar3](https://github.com/argyle-labs/mylar3) | Mylar3 comic book (CBR/CBZ) downloader & manager — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/qbittorrent/main/assets/icon-256.png" width="48" alt="" /> | [qbittorrent](https://github.com/argyle-labs/qbittorrent) | qBittorrent torrent client — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/sabnzbd/main/assets/icon-256.png" width="48" alt="" /> | [sabnzbd](https://github.com/argyle-labs/sabnzbd) | SABnzbd usenet client — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/lidarr/assets/icon-256.png" width="28" alt="" /> | [lidarr](https://github.com/argyle-labs/arr/tree/main/crates/lidarr) | Lidarr — music automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/prowlarr/assets/icon-256.png" width="28" alt="" /> | [prowlarr](https://github.com/argyle-labs/arr/tree/main/crates/prowlarr) | Prowlarr — indexer manager for the *arr apps (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/radarr/assets/icon-256.png" width="28" alt="" /> | [radarr](https://github.com/argyle-labs/arr/tree/main/crates/radarr) | Radarr — movie automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/readarr/assets/icon-256.png" width="28" alt="" /> | [readarr](https://github.com/argyle-labs/arr/tree/main/crates/readarr) | Readarr — book & audiobook automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/arr/main/crates/sonarr/assets/icon-256.png" width="28" alt="" /> | [sonarr](https://github.com/argyle-labs/arr/tree/main/crates/sonarr) | Sonarr — TV series automation (orca plugin) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/lazylibrarian/main/assets/icon-256.png" width="28" alt="" /> | [lazylibrarian](https://github.com/argyle-labs/lazylibrarian) | LazyLibrarian book (ebook/audiobook) downloader & manager — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/libation/main/assets/icon-256.png" width="28" alt="" /> | [libation](https://github.com/argyle-labs/libation) | Audible library downloader — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/mylar3/main/assets/icon-256.png" width="28" alt="" /> | [mylar3](https://github.com/argyle-labs/mylar3) | Mylar3 comic book (CBR/CBZ) downloader & manager — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/qbittorrent/main/assets/icon-256.png" width="28" alt="" /> | [qbittorrent](https://github.com/argyle-labs/qbittorrent) | qBittorrent torrent client — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/sabnzbd/main/assets/icon-256.png" width="28" alt="" /> | [sabnzbd](https://github.com/argyle-labs/sabnzbd) | SABnzbd usenet client — orca service-backend |
 
 ### AI & models
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/lmstudio/main/assets/icon-256.png" width="48" alt="" /> | [lmstudio](https://github.com/argyle-labs/lmstudio) | LM Studio local LLM runner — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/mcp/main/assets/icon-256.png" width="48" alt="" /> | [mcp](https://github.com/argyle-labs/mcp) | Federates MCP servers (stdio + HTTP/SSE) into orca's tool surface — an MCP client |
-| <img src="https://raw.githubusercontent.com/argyle-labs/ollama/main/assets/icon-256.png" width="48" alt="" /> | [ollama](https://github.com/argyle-labs/ollama) | Local LLM runner — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/whisper-ai/main/assets/icon-256.png" width="48" alt="" /> | [whisper-ai](https://github.com/argyle-labs/whisper-ai) | Whisper speech-to-text (Wyoming/ASR) — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/lmstudio/main/assets/icon-256.png" width="28" alt="" /> | [lmstudio](https://github.com/argyle-labs/lmstudio) | LM Studio local LLM runner — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/mcp/main/assets/icon-256.png" width="28" alt="" /> | [mcp](https://github.com/argyle-labs/mcp) | Federates MCP servers (stdio + HTTP/SSE) into orca's tool surface — an MCP client |
+| <img src="https://raw.githubusercontent.com/argyle-labs/ollama/main/assets/icon-256.png" width="28" alt="" /> | [ollama](https://github.com/argyle-labs/ollama) | Local LLM runner — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/whisper-ai/main/assets/icon-256.png" width="28" alt="" /> | [whisper-ai](https://github.com/argyle-labs/whisper-ai) | Whisper speech-to-text (Wyoming/ASR) — orca service-backend |
 
 ### Agents & automation
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/agents/main/assets/icon-256.png" width="48" alt="" /> | [agents](https://github.com/argyle-labs/agents) | Canonical base-agent-roster registrant: registers orca's base agents, slash-commands, and hooks via plugin_toolkit::agents against orca core |
+| <img src="https://raw.githubusercontent.com/argyle-labs/agents/main/assets/icon-256.png" width="28" alt="" /> | [agents](https://github.com/argyle-labs/agents) | Canonical base-agent-roster registrant: registers orca's base agents, slash-commands, and hooks via plugin_toolkit::agents against orca core |
 
 ### Home automation
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/homeassistant/main/assets/icon-256.png" width="48" alt="" /> | [homeassistant](https://github.com/argyle-labs/homeassistant) | Home Assistant — orca plugin + deploy assets: lifecycle + entities/automations/service API |
-| <img src="https://raw.githubusercontent.com/argyle-labs/mqtt/main/assets/icon-256.png" width="48" alt="" /> | [mqtt](https://github.com/argyle-labs/mqtt) | Mosquitto MQTT broker — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/zigbee2mqtt/main/assets/icon-256.png" width="48" alt="" /> | [zigbee2mqtt](https://github.com/argyle-labs/zigbee2mqtt) | Zigbee-to-MQTT bridge — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/zwave-js-ui/main/assets/icon-256.png" width="48" alt="" /> | [zwave-js-ui](https://github.com/argyle-labs/zwave-js-ui) | Z-Wave JS UI bridge — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/homeassistant/main/assets/icon-256.png" width="28" alt="" /> | [homeassistant](https://github.com/argyle-labs/homeassistant) | Home Assistant — orca plugin + deploy assets: lifecycle + entities/automations/service API |
+| <img src="https://raw.githubusercontent.com/argyle-labs/mqtt/main/assets/icon-256.png" width="28" alt="" /> | [mqtt](https://github.com/argyle-labs/mqtt) | Mosquitto MQTT broker — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/zigbee2mqtt/main/assets/icon-256.png" width="28" alt="" /> | [zigbee2mqtt](https://github.com/argyle-labs/zigbee2mqtt) | Zigbee-to-MQTT bridge — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/zwave-js-ui/main/assets/icon-256.png" width="28" alt="" /> | [zwave-js-ui](https://github.com/argyle-labs/zwave-js-ui) | Z-Wave JS UI bridge — orca service-backend |
 
 ### Monitoring & notifications
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/ntfy/main/assets/icon-256.png" width="48" alt="" /> | [ntfy](https://github.com/argyle-labs/ntfy) | ntfy push notifications — orca notifications backend + self-host deploy lifecycle |
-| <img src="https://raw.githubusercontent.com/argyle-labs/nut/main/assets/icon-256.png" width="48" alt="" /> | [nut](https://github.com/argyle-labs/nut) | Network UPS Tools — orca service-backend |
-| <img src="https://raw.githubusercontent.com/argyle-labs/uptime-kuma/main/assets/icon-256.png" width="48" alt="" /> | [uptime-kuma](https://github.com/argyle-labs/uptime-kuma) | Uptime monitoring — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/ntfy/main/assets/icon-256.png" width="28" alt="" /> | [ntfy](https://github.com/argyle-labs/ntfy) | ntfy push notifications — orca notifications backend + self-host deploy lifecycle |
+| <img src="https://raw.githubusercontent.com/argyle-labs/nut/main/assets/icon-256.png" width="28" alt="" /> | [nut](https://github.com/argyle-labs/nut) | Network UPS Tools — orca service-backend |
+| <img src="https://raw.githubusercontent.com/argyle-labs/uptime-kuma/main/assets/icon-256.png" width="28" alt="" /> | [uptime-kuma](https://github.com/argyle-labs/uptime-kuma) | Uptime monitoring — orca service-backend |
 
 ### Workstation & gaming tooling
 
 | | Plugin | What it does |
 |:--:|--------|--------------|
-| <img src="https://raw.githubusercontent.com/argyle-labs/beaver/main/assets/icon-256.png" width="48" alt="" /> | [beaver](https://github.com/argyle-labs/beaver) | Reproducible backup/restore for Linux workstations (Bazzite + CachyOS) via restic to NAS/external/cloud |
-| <img src="https://raw.githubusercontent.com/argyle-labs/raccoon/main/assets/icon-256.png" width="48" alt="" /> | [raccoon](https://github.com/argyle-labs/raccoon) | Reproducible Linux gaming setup/restore: Steam, Heroic, Battle.net (NSL), gamescope, MangoHud, controller wake (Bazzite + CachyOS) |
-| <img src="https://raw.githubusercontent.com/argyle-labs/walrus/main/assets/icon-256.png" width="48" alt="" /> | [walrus](https://github.com/argyle-labs/walrus) | macOS workstation provisioning diagnostics/repair for orca — Homebrew toolchain (formulae + casks), Node, Claude Code |
+| <img src="https://raw.githubusercontent.com/argyle-labs/beaver/main/assets/icon-256.png" width="28" alt="" /> | [beaver](https://github.com/argyle-labs/beaver) | Reproducible backup/restore for Linux workstations (Bazzite + CachyOS) via restic to NAS/external/cloud |
+| <img src="https://raw.githubusercontent.com/argyle-labs/raccoon/main/assets/icon-256.png" width="28" alt="" /> | [raccoon](https://github.com/argyle-labs/raccoon) | Reproducible Linux gaming setup/restore: Steam, Heroic, Battle.net (NSL), gamescope, MangoHud, controller wake (Bazzite + CachyOS) |
+| <img src="https://raw.githubusercontent.com/argyle-labs/walrus/main/assets/icon-256.png" width="28" alt="" /> | [walrus](https://github.com/argyle-labs/walrus) | macOS workstation provisioning diagnostics/repair for orca — Homebrew toolchain (formulae + casks), Node, Claude Code |
 
 ## Developing a plugin
 
