@@ -1,9 +1,9 @@
 name: Security (reusable)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ONE security scan for every argyle-labs Rust repo — orca core AND all plugins.
-# Runs CodeQL (Rust) + gitleaks (secret/PII) from a single caller so the fleet
-# can never have a repo that is silently unscanned.
+# ONE security scan for every argyle-labs repo — orca core AND all plugins.
+# Runs CodeQL + gitleaks (secret/PII) from a single caller so the fleet can
+# never have a repo that is silently unscanned.
 #
 # Caller (drop-in `.github/workflows/security.yml` in each repo):
 #
@@ -20,6 +20,8 @@ name: Security (reusable)
 #     security:
 #       uses: argyle-labs/.github/.github/workflows/security.yml@main
 #       secrets: inherit
+#       # Plugins omit `with:` (defaults to rust). orca core passes its full set:
+#       # with: { languages: '["rust","python","actions"]' }
 #
 # The caller MUST grant `security-events: write` (CodeQL upload) — a reusable
 # workflow can only receive permissions the caller's token already holds.
@@ -28,6 +30,13 @@ name: Security (reusable)
 on:
   workflow_call:
     inputs:
+      languages:
+        description: >-
+          JSON array of CodeQL languages to scan. Default: rust (the only
+          language plugins contain). orca core passes rust + python + actions.
+        required: false
+        type: string
+        default: '["rust"]'
       toolchain:
         description: "Rust toolchain for the CodeQL dependency pre-fetch."
         required: false
@@ -35,34 +44,43 @@ on:
         default: "stable"
 
 jobs:
-  # ── CodeQL (Rust) ─────────────────────────────────────────────────────────
+  # ── CodeQL (matrix over the caller's languages) ───────────────────────────
   codeql:
-    name: CodeQL (rust)
+    name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
       security-events: write
       actions: read
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
     steps:
       - uses: actions/checkout@v5
 
-      # Install the toolchain and fetch deps so the Rust extractor resolves
-      # types/call targets from real dependency source (the lever for Rust
-      # analysis quality; manual build mode is unavailable). Honors a repo's
-      # rust-toolchain.toml when present, otherwise the input default.
-      - uses: dtolnay/rust-toolchain@master
+      # Rust-only: install the toolchain and fetch deps so the extractor
+      # resolves types/call targets from real dependency source (the lever for
+      # Rust analysis quality; manual build mode is unavailable). Honors a
+      # repo's rust-toolchain.toml when present, else the input default. Python
+      # and actions need no setup — they extract under build-mode none directly.
+      - name: Install Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.toolchain }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Rust dependencies
+        if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: codeql-rust
           cache-on-failure: true
 
       # Private orca git dependency (plugins) needs tokenized fetch; harmless
-      # for core. `|| true` so a repo without the secret still fetches public
-      # deps and CodeQL proceeds.
+      # for core. Skipped when the secret is absent so public deps still fetch.
       - name: Authenticate private orca git dependency
+        if: matrix.language == 'rust'
         env:
           ORCA_FETCH_TOKEN: ${{ secrets.ORCA_FETCH_TOKEN }}
         run: |
@@ -73,17 +91,18 @@ jobs:
           fi
 
       - name: Fetch Rust dependencies
+        if: matrix.language == 'rust'
         run: cargo fetch --locked || cargo fetch
 
       - uses: github/codeql-action/init@v3
         with:
-          languages: rust
+          languages: ${{ matrix.language }}
           build-mode: none
           config-file: argyle-labs/.github/.github/codeql/codeql-config.yml@main
 
       - uses: github/codeql-action/analyze@v3
         with:
-          category: "/language:rust"
+          category: "/language:${{ matrix.language }}"
 
   # ── Secret / PII scan ─────────────────────────────────────────────────────
   # Nested reuse of the existing gitleaks workflow so its rules stay in one
