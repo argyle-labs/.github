@@ -491,7 +491,7 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
         [[ -n "$ccat" ]] || ccat="${wcat:-other}"
         cicon="$raw/$name/$branch/crates/$crate/assets/icon-256.png"
         cdesc="${cdesc//|/\\|}"   # escape pipes so they don't split the table cell
-        BUCKET[$ccat]+="| <img src=\"$cicon\" width=\"28\" alt=\"\" /> | [$crate](https://github.com/$ORG/$name/tree/$branch/crates/$crate) | ${cdesc:-—} |"$'\n'
+        BUCKET[$ccat]+="| <img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /> | [$crate](https://github.com/$ORG/$name/tree/$branch/crates/$crate) | ${cdesc:-—} |"$'\n'
       done < <(repo_crates "$name")
       continue
     else
@@ -501,7 +501,7 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
     fi
     icon="$raw/$name/$branch/assets/icon-256.png"
     desc="${desc//|/\\|}"   # escape pipes so they don't split the table cell
-    BUCKET[$cat]+="| <img src=\"$icon\" width=\"28\" alt=\"\" /> | [$name](https://github.com/$ORG/$name) | ${desc:-—} |"$'\n'
+    BUCKET[$cat]+="| <img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /> | [$name](https://github.com/$ORG/$name) | ${desc:-—} |"$'\n'
   done <<<"$(discover)"
 
   {
