@@ -110,8 +110,11 @@ jobs:
 
       # Coverage IS the test step — nextest engine under llvm-cov, gated on the
       # repo's floor. Measures workspace crates only (the plugin's own code).
+      # `--no-tests=pass`: stub plugins with no tests yet must not fail CI (a
+      # test-less repo simply has 0% covered against a 0 floor); nextest
+      # otherwise exits non-zero on an empty test set.
       - name: Test + coverage gate (line coverage ≥ floor)
         run: |
           floor="$(cat .coverage-floor 2>/dev/null || echo 0)"
           echo "Coverage floor for this repo: ${floor}%"
-          cargo llvm-cov nextest --no-fail-fast --fail-under-lines "$floor"
+          cargo llvm-cov nextest --no-fail-fast --no-tests=pass --fail-under-lines "$floor"
