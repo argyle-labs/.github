@@ -1,0 +1,75 @@
+name: Plugin canary (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# On-demand "does this plugin still build + test against orca `main`?" flow.
+# This is the OPT-IN bleeding-edge check — NOT the PR gate (that's plugin-ci.yml,
+# which is deterministic against the pinned stable orca).
+#
+# Every plugin repo drops a thin caller so any owner can run it by hand:
+#
+#   name: Canary (orca main)
+#   on:
+#     workflow_dispatch:
+#   jobs:
+#     canary:
+#       uses: argyle-labs/.github/.github/workflows/plugin-canary.yml@main
+#       secrets: inherit
+#
+# The org's fleet-canary.yml runs the SAME logic across every plugin nightly and
+# alerts admins — so individual repos don't each need a cron. This caller exists
+# for on-demand "is my change orca-main-clean?" checks.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Rust toolchain to install (rustup channel)."
+        required: false
+        type: string
+        default: "stable"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: clippy
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: canary-orca-main
+
+      - name: Drop local-dev cargo patch
+        run: rm -f .cargo/config.toml
+
+      - name: Authenticate private orca git dependency
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      # The whole point of the canary: advance the orca source to main HEAD.
+      - name: Sync orca dep to main tip
+        run: cargo update -p plugin-toolkit || cargo generate-lockfile
+
+      - name: Lint (clippy) against orca main
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Release build against orca main
+        run: cargo build --release --locked || cargo build --release
+
+      - name: Test against orca main
+        run: cargo nextest run --no-fail-fast

@@ -1,0 +1,113 @@
+name: Security (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ONE security scan for every argyle-labs repo — orca core AND all plugins.
+# Runs CodeQL + gitleaks (secret/PII) from a single caller so the fleet can
+# never have a repo that is silently unscanned.
+#
+# Caller (drop-in `.github/workflows/security.yml` in each repo):
+#
+#   name: Security
+#   on:
+#     push:         { branches: [main] }
+#     pull_request: { branches: [main] }
+#     schedule:     [{ cron: "27 3 * * 1" }]   # weekly baseline
+#   permissions:
+#     security-events: write
+#     contents: read
+#     actions: read
+#   jobs:
+#     security:
+#       uses: argyle-labs/.github/.github/workflows/security.yml@main
+#       secrets: inherit
+#       # Plugins omit `with:` (defaults to rust). orca core passes its full set:
+#       # with: { languages: '["rust","python","actions"]' }
+#
+# The caller MUST grant `security-events: write` (CodeQL upload) — a reusable
+# workflow can only receive permissions the caller's token already holds.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: >-
+          JSON array of CodeQL languages to scan. Default: rust (the only
+          language plugins contain). orca core passes rust + python + actions.
+        required: false
+        type: string
+        default: '["rust"]'
+      toolchain:
+        description: "Rust toolchain for the CodeQL dependency pre-fetch."
+        required: false
+        type: string
+        default: "stable"
+
+jobs:
+  # ── CodeQL (matrix over the caller's languages) ───────────────────────────
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Rust-only: install the toolchain and fetch deps so the extractor
+      # resolves types/call targets from real dependency source (the lever for
+      # Rust analysis quality; manual build mode is unavailable). Honors a
+      # repo's rust-toolchain.toml when present, else the input default. Python
+      # and actions need no setup — they extract under build-mode none directly.
+      - name: Install Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Cache Rust dependencies
+        if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: codeql-rust
+          cache-on-failure: true
+
+      # Private orca git dependency (plugins) needs tokenized fetch; harmless
+      # for core. Skipped when the secret is absent so public deps still fetch.
+      - name: Authenticate private orca git dependency
+        if: matrix.language == 'rust'
+        env:
+          ORCA_FETCH_TOKEN: ${{ secrets.ORCA_FETCH_TOKEN }}
+        run: |
+          if [ -n "${ORCA_FETCH_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${ORCA_FETCH_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+          fi
+
+      - name: Fetch Rust dependencies
+        if: matrix.language == 'rust'
+        run: cargo fetch --locked || cargo fetch
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: argyle-labs/.github/.github/codeql/codeql-config.yml@main
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ── Secret / PII scan ─────────────────────────────────────────────────────
+  # Nested reuse of the existing gitleaks workflow so its rules stay in one
+  # place. (Reusable workflows may call other reusable workflows.)
+  gitleaks:
+    name: gitleaks
+    uses: argyle-labs/.github/.github/workflows/gitleaks-reusable.yml@main
+    secrets: inherit
