@@ -85,7 +85,7 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 </tbody>
 </table>
 
-### Media acquisition
+### Media library & automation
 
 <table>
 <thead><tr><th></th><th>Plugin</th><th>What it does</th></tr></thead>
