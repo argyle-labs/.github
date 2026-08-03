@@ -356,7 +356,7 @@ cat_title() {
     networking)  echo "Networking";;
     storage)     echo "Storage & sync";;
     media)       echo "Media servers";;
-    downloads)   echo "Media acquisition";;
+    downloads)   echo "Media library & automation";;
     ai)          echo "AI & models";;
     agents)      echo "Agents & automation";;
     home)        echo "Home automation";;
