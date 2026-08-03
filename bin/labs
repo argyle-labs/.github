@@ -461,6 +461,12 @@ cmd_meta() { # sync each plugin's Cargo.toml -> GitHub description + topics
   done
 }
 
+html_escape() { # escape &, <, > for safe interpolation into a raw HTML table cell
+  local s="$1"
+  s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"
+  printf '%s' "$s"
+}
+
 cmd_profile() { # regenerate profile/README.md from live repo metadata
   local out="${LABS_HOME}/.github/profile/README.md"
   [[ -d "${LABS_HOME}/.github" ]] || out="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/profile/README.md"
@@ -490,8 +496,8 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
         ccat="${cm%%$'\t'*}"; cdesc="${cm#*$'\t'}"
         [[ -n "$ccat" ]] || ccat="${wcat:-other}"
         cicon="$raw/$name/$branch/crates/$crate/assets/icon-256.png"
-        cdesc="${cdesc//|/\\|}"   # escape pipes so they don't split the table cell
-        BUCKET[$ccat]+="| <img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /> | [$crate](https://github.com/$ORG/$name/tree/$branch/crates/$crate) | ${cdesc:-—} |"$'\n'
+        cdesc="$(html_escape "$cdesc")"   # HTML table cell — escape & < >
+        BUCKET[$ccat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name/tree/$branch/crates/$crate\">$crate</a></td><td>${cdesc:-—}</td></tr>"$'\n'
       done < <(repo_crates "$name")
       continue
     else
@@ -500,8 +506,8 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
       [[ -n "$cat" ]] || cat="other"
     fi
     icon="$raw/$name/$branch/assets/icon-256.png"
-    desc="${desc//|/\\|}"   # escape pipes so they don't split the table cell
-    BUCKET[$cat]+="| <img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /> | [$name](https://github.com/$ORG/$name) | ${desc:-—} |"$'\n'
+    desc="$(html_escape "$desc")"   # HTML table cell — escape & < >
+    BUCKET[$cat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name\">$name</a></td><td>${desc:-—}</td></tr>"$'\n'
   done <<<"$(discover)"
 
   {
@@ -539,8 +545,9 @@ HDR
     local c
     for c in "${CAT_ORDER[@]}"; do
       [[ -n "${BUCKET[$c]:-}" ]] || continue
-      printf '\n### %s\n\n| | Plugin | What it does |\n|:--:|--------|--------------|\n' "$(cat_title "$c")"
+      printf '\n### %s\n\n<table>\n<thead><tr><th></th><th>Plugin</th><th>What it does</th></tr></thead>\n<tbody>\n' "$(cat_title "$c")"
       printf '%s' "${BUCKET[$c]}" | sort
+      printf '</tbody>\n</table>\n'
     done
     cat <<'FTR'
 
