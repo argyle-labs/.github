@@ -234,7 +234,13 @@ jobs:
         if: ${{ !endsWith(matrix.target, '-apple-darwin') && matrix.target != 'x86_64-unknown-linux-gnu' }}
         run: |
           set -euo pipefail
-          python3 -m pip install --user cargo-zigbuild ziglang
+          # --break-system-packages: Gitea's runner image is Debian 12, whose
+          # system Python enforces PEP 668 (externally-managed-environment) and
+          # rejects a plain `pip install --user`. The flag makes the install
+          # proceed in the ephemeral CI container; on GitHub's ubuntu-latest
+          # (not externally-managed) it is an accepted no-op, so this runs on
+          # both forges.
+          python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Add rust target
