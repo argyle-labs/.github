@@ -156,21 +156,22 @@ jobs:
   # `matrix.target: ${{ fromJSON(inputs.targets) }}` is the portable single-key
   # matrix pattern that runs identically on GitHub and Gitea.
   #
-  # Runner + build method are DERIVED from the triple inline (no matrix fields);
-  # keep the mapping in sync with orca release_targets:
-  #   *-apple-darwin → runs-on macos-14 (Apple Silicon, native macOS SDK so the
-  #                    Security/CoreFoundation frameworks rustls-platform-verifier
-  #                    links against exist; x86_64-apple-darwin cross-builds from
-  #                    arm64 with just `--target` — no zig). GitHub retired the
-  #                    macos-13 image (last hosted Intel Mac); pinned jobs hang.
-  #                    macOS runners are FREE for public repos, native-arch, and
-  #                    parallelize — replacing the flaky self-hosted mint runner.
-  #   *-linux-*      → runs-on ubuntu-latest; x86_64-gnu is the host (plain
-  #                    `cargo build`); every other linux triple uses
-  #                    cargo-zigbuild + static musl (UNCHANGED).
+  # EVERY target builds on a single Linux runner (ubuntu-latest) via
+  # cargo-zigbuild — including the apple-darwin triples, which zig
+  # cross-compiles from Linux. This is deliberate:
+  #   • Gitea's act runs an entire matrix on the ONE runner that claimed the
+  #     job; it does NOT honour a per-leg `runs-on` expression to fan darwin
+  #     legs onto a macOS runner (unlike GitHub). A matrix that mixes
+  #     ubuntu-latest and macos-14 therefore runs every leg on whichever runner
+  #     grabbed it — darwin legs land on Linux and native `cargo build` fails.
+  #   • Cross-compiling all targets on Linux with zig means the release needs
+  #     NO self-hosted macOS runner at all — nothing has to run on a laptop.
+  # Build method DERIVED from the triple inline: the host x86_64-gnu builds with
+  # plain `cargo build`; every other triple (linux musl/aarch64 AND both darwin)
+  # uses `cargo zigbuild`. musl stays static (crt-static) as before.
   build:
     needs: [version]
-    runs-on: ${{ endsWith(matrix.target, '-apple-darwin') && 'macos-14' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -231,7 +232,9 @@ jobs:
           echo "bins: $(echo "$bins" | paste -sd, -)"
 
       - name: Install cross toolchain (zig + cargo-zigbuild)
-        if: ${{ !endsWith(matrix.target, '-apple-darwin') && matrix.target != 'x86_64-unknown-linux-gnu' }}
+        # Needed for every non-host target — all linux cross triples AND both
+        # apple-darwin triples (zig cross-compiles darwin from Linux).
+        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
         run: |
           set -euo pipefail
           # --break-system-packages: Gitea's runner image is Debian 12, whose
@@ -244,13 +247,12 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Add rust target
-        # Install std for the matrix triple on EVERY leg. Both darwin triples
-        # build on macos-14 (arm64): aarch64 is the host (no-op add), while
-        # x86_64-apple-darwin is a cross-arch build that REQUIRES this std —
-        # Apple's toolchain links it natively, no zig. Keeping it unconditional
-        # also pins the artifact to the single, matrix-derived output path
-        # (target/<triple>/release) the staging step reads. On linux legs it
-        # installs std for the cross musl/gnu triples as before.
+        # Install std for the matrix triple on EVERY leg. The host
+        # x86_64-unknown-linux-gnu is a no-op add; every cross triple (linux
+        # musl/aarch64 and both apple-darwin) needs its std for the zig
+        # cross-compile. Keeping it unconditional also pins the artifact to the
+        # single matrix-derived output path (target/<triple>/release) the
+        # staging step reads.
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build release binaries
@@ -267,15 +269,14 @@ jobs:
           RUSTFLAGS: ${{ contains(matrix.target, '-musl') && '-C target-feature=+crt-static' || '' }}
         run: |
           set -euo pipefail
-          # Build method is derived from the target triple (no matrix field):
-          #   native (plain cargo) → darwin legs on GitHub-hosted macOS runners
-          #            (Apple SDK present so Security/CoreFoundation link; each
-          #            hosted runner is native-arch, x86_64 cross-builds from arm64
-          #            with just --target), AND the host x86_64-gnu linux leg.
-          #   zig    → every other linux triple: cargo-zigbuild (+ static musl).
+          # Build method derived from the target triple (no matrix field):
+          #   plain cargo build → ONLY the host x86_64-unknown-linux-gnu leg.
+          #   cargo zigbuild    → every other triple: linux musl/aarch64 AND both
+          #                       apple-darwin (zig cross-compiles darwin from
+          #                       Linux, so no macOS runner is required).
           case "${{ matrix.target }}" in
-            *-apple-darwin | x86_64-unknown-linux-gnu) builder="cargo build" ;;
-            *)                                         builder="cargo zigbuild" ;;
+            x86_64-unknown-linux-gnu) builder="cargo build" ;;
+            *)                        builder="cargo zigbuild" ;;
           esac
           # Build every requested bin (`--bin` per name keeps it explicit and lets
           # multi-bin workspaces like `arr` build one plugin per *arr app).
@@ -290,8 +291,8 @@ jobs:
           # instead and staging fails with "binary not found". We ALSO export
           # CARGO_BUILD_TARGET as belt-and-suspenders so a stray host-default
           # can't redirect the output dir; the
-          # explicit flag and the env agree, so every leg (native + zig) resolves
-          # to the same target/<triple>/release path.
+          # explicit flag and the env agree, so every leg resolves to the same
+          # target/<triple>/release path.
           export CARGO_BUILD_TARGET="${{ matrix.target }}"
           echo "→ $builder --release --target ${{ matrix.target }}$bin_flags"
           # shellcheck disable=SC2086
