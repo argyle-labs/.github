@@ -1,89 +1,84 @@
 name: Plugin CI (reusable)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reusable CI for orca dynamic (subprocess) plugins. ONE definition of "does
-# this plugin format, lint, test, AND meet its coverage floor?". Every plugin
-# repo is a thin caller:
+# Reusable CI workflow for orca dynamic (subprocess) plugins — the PR gate.
 #
-#   name: CI
+# The pipeline model (Gitea-canonical, see [[gitea-canonical-github-mirror-only]]):
+#
+#   • On a PR to main AND on push to main, a plugin caller runs THIS workflow:
+#       test        → cargo test (fail = block the PR)
+#       build       → cross-compile the release binaries for every target
+#                     (fail = block the PR)
+#     Branch protection on `main` marks `test` + `build` as required checks, so
+#     "tests pass + release builds" IS the merge gate. On merge to main the same
+#     two jobs re-run as post-merge validation.
+#
+#   • Releasing is a SEPARATE, manually-triggered step. `plugin-release.yml` is
+#     reached only via a caller `workflow_dispatch` (channel=rc, then
+#     channel=stable). That deliberate operator trigger is the approval gate for
+#     each cut — Gitea has no `environment:` protection-rule feature, so the
+#     manual dispatch is the portable gate. See plugin-release.yml.
+#
+# This workflow deliberately mirrors plugin-release.yml's build steps (same
+# toolchain install, same zig cross-compile, same macOS SDK provisioning, same
+# artifact path discipline) so a green PR build is a faithful predictor of a
+# green release build. It differs only in that it: (a) adds a `test` job, (b)
+# does NOT compute/write a release version — it builds at the committed
+# Cargo.toml version, and (c) does NOT tag or publish anything.
+#
+# One caller per plugin repo does:
+#
 #   on:
-#     push:         { branches: [main] }
-#     pull_request: { branches: [main] }
-#   concurrency:
-#     group: ci-${{ github.ref }}
-#     cancel-in-progress: true
+#     pull_request:
+#       branches: [main]
+#     push:
+#       branches: [main]
 #   jobs:
 #     ci:
 #       uses: argyle-labs/.github/.github/workflows/plugin-ci.yml@main
-#       secrets: inherit
+#       secrets: inherit           # carries ORCA_FETCH_TOKEN for the private dep
 #
-# The caller's `ci` job calling this reusable `ci` job surfaces as `ci / ci` —
-# require that context in branch protection (uniform across all repos).
-#
-# DETERMINISTIC BY DEFAULT (see [[orca-published-crate-plugin-compat-range]]):
-# plugins build against the orca git rev pinned in their committed lockfile
-# (the current stable orca tag). CI reflects only the plugin's own diff —
-# reproducible, and one breaking orca merge can no longer turn the whole fleet
-# red on unrelated PRs. Testing against orca `main` is the CANARY's job
-# (plugin-canary.yml / fleet-canary.yml), opt-in via `sync_orca_main: true`.
-#
-# COVERAGE IS MANDATORY, NOT A KNOB. Every plugin measures and gates line
-# coverage of its OWN crates (cargo-llvm-cov instruments workspace members
-# only — never the orca dependency). The floor is the single value in the
-# repo's `.coverage-floor` file; ratchet it up as tests land, never down. A
-# repo without the file gates at 0 (still measured + reported) so adoption is
-# safe before a floor is seeded.
-#
-#  • Drop local-dev patch: plugin repos carry a developer-only `[patch]` in
-#    `.cargo/config.toml` redirecting plugin-toolkit to a local `../orca`
-#    checkout. Remove it so the git dependency is used. `rm -f` no-ops if absent.
-#
-#  • ORCA_FETCH_TOKEN (via `secrets: inherit`) authenticates the private orca
-#    git fetch through git's tokenized `insteadOf` rewrite.
+# No `permissions:` block is required on the caller — CI neither tags nor
+# publishes, so the default read-only token is sufficient.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_call:
     inputs:
-      toolchain:
-        description: "Rust toolchain to install (rustup channel)."
+      targets:
+        description: >-
+          JSON array of Rust target triples to build. Default: the six
+          first-party release triples — kept identical to plugin-release.yml so
+          the PR build covers exactly what a release would build. Every non-host
+          target cross-compiles with cargo-zigbuild.
         required: false
         type: string
-        default: "stable"
-      sync_orca_main:
-        description: >-
-          Advance the orca dependency to `main` HEAD before lint/test instead of
-          honoring the committed lockfile pin. FALSE on the PR hot path
-          (deterministic). The canary workflows set this TRUE to detect drift
-          against live orca.
+        default: >-
+          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","aarch64-apple-darwin","x86_64-apple-darwin"]
+      bins:
+        description: 'JSON array of bin names to build. Empty ([]) = derive the crate''s sole bin from cargo metadata.'
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: "[]"
 
 env:
   CARGO_TERM_COLOR: always
-  # Resolve git deps via the git CLI so the tokenized `insteadOf` rewrite is
-  # honored when fetching the private orca dependency.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
-  # No `name:` — the check run must report as `ci` so callers surface `ci / ci`
-  # and branch protection can require one uniform context across all plugins.
-  ci:
+  # ── Unit/integration tests. First required check. ──
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ inputs.toolchain }}
           components: clippy, rustfmt
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest,cargo-llvm-cov
-
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
 
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
@@ -94,27 +89,119 @@ jobs:
             url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
             "https://github.com/"
 
-      # Deterministic by default: build exactly what the committed lockfile
-      # pins. Only when sync_orca_main is set (canary) do we advance the orca
-      # source to main HEAD. The `|| cargo generate-lockfile` fallback handles a
-      # lock still in local-dev PATH form (no git package to target).
-      - name: Sync orca dep to main tip (canary only)
-        if: ${{ inputs.sync_orca_main }}
-        run: cargo update -p plugin-toolkit || cargo generate-lockfile
+      - name: Format check
+        run: cargo fmt --all --check
 
-      - name: Formatting
-        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Lint (clippy)
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --all-features --workspace
 
-      # Coverage IS the test step — nextest engine under llvm-cov, gated on the
-      # repo's floor. Measures workspace crates only (the plugin's own code).
-      # `--no-tests=pass`: stub plugins with no tests yet must not fail CI (a
-      # test-less repo simply has 0% covered against a 0 floor); nextest
-      # otherwise exits non-zero on an empty test set.
-      - name: Test + coverage gate (line coverage ≥ floor)
+  # ── Build the release binaries for every target. Second required check. ──
+  #    Mirrors plugin-release.yml's `build` job exactly (see file header). The
+  #    only difference: no computed-version write — it builds at the committed
+  #    Cargo.toml version, and nothing is published.
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Drop local-dev cargo patch
+        run: rm -f .cargo/config.toml
+
+      - name: Authenticate private orca git dependency
         run: |
-          floor="$(cat .coverage-floor 2>/dev/null || echo 0)"
-          echo "Coverage floor for this repo: ${floor}%"
-          cargo llvm-cov nextest --no-fail-fast --no-tests=pass --fail-under-lines "$floor"
+          git config --global \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - name: Resolve bin list
+        id: bins
+        run: |
+          set -euo pipefail
+          requested='${{ inputs.bins }}'
+          if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
+            bins=$(echo "$requested" | jq -r '.[]')
+          else
+            bins=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          fi
+          if [ -z "$bins" ]; then
+            echo "::error::no bin targets found — is this a [[bin]] plugin crate?"; exit 1
+          fi
+          {
+            echo "list<<EOF"
+            echo "$bins"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "bins: $(echo "$bins" | paste -sd, -)"
+
+      - name: Install cross toolchain (zig + cargo-zigbuild)
+        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Provision macOS SDK (darwin framework linking)
+        if: ${{ endsWith(matrix.target, '-apple-darwin') }}
+        env:
+          MACOS_SDK_VERSION: "14.5"
+        run: |
+          set -euo pipefail
+          url="https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz"
+          dest="$HOME/macos-sdk"
+          mkdir -p "$dest"
+          echo "→ fetching macOS SDK ${MACOS_SDK_VERSION}"
+          curl -fsSL --retry 5 --retry-connrefused "$url" | tar -xJ -C "$dest"
+          sdkroot="$dest/MacOSX${MACOS_SDK_VERSION}.sdk"
+          test -d "$sdkroot/System/Library/Frameworks/Security.framework" \
+            || { echo "::error::macOS SDK missing Security.framework at $sdkroot"; exit 1; }
+          echo "SDKROOT=$sdkroot" >> "$GITHUB_ENV"
+          echo "provisioned $sdkroot"
+
+      - name: Add rust target
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Build release binaries
+        env:
+          RUSTFLAGS: ${{ contains(matrix.target, '-musl') && '-C target-feature=+crt-static' || '' }}
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu) builder="cargo build" ;;
+            *)                        builder="cargo zigbuild" ;;
+          esac
+          bin_flags=""
+          while IFS= read -r b; do
+            [ -n "$b" ] && bin_flags="$bin_flags --bin $b"
+          done <<< '${{ steps.bins.outputs.list }}'
+          export CARGO_BUILD_TARGET="${{ matrix.target }}"
+          echo "→ $builder --release --target ${{ matrix.target }}$bin_flags"
+          # shellcheck disable=SC2086
+          $builder --release --target "${{ matrix.target }}" $bin_flags
+
+      - name: Assert binaries built
+        run: |
+          set -euo pipefail
+          while IFS= read -r bin; do
+            [ -z "$bin" ] && continue
+            path="target/${{ matrix.target }}/release/${bin}"
+            if [ ! -f "$path" ]; then
+              echo "::error::binary not found at $path"
+              ls -la "target/${{ matrix.target }}/release" || echo "  (missing)"
+              exit 1
+            fi
+            echo "ok: $path"
+          done <<< '${{ steps.bins.outputs.list }}'

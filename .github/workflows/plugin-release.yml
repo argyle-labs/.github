@@ -372,13 +372,21 @@ jobs:
   release:
     needs: [version, build]
     runs-on: ubuntu-latest
-    # Human-approval gate, mirroring orca's own release.yml (publish-rc /
-    # publish-stable sit behind the release-rc / release-stable environments).
-    # A reusable-workflow `environment:` is evaluated in the CALLER repo's
-    # context, so each plugin repo must define release-rc / release-stable with
-    # a required reviewer — otherwise the gate is a no-op. channel picks which.
-    environment:
-      name: ${{ inputs.channel == 'stable' && 'release-stable' || 'release-rc' }}
+    # ── Approval gate = the manual `workflow_dispatch` trigger. ──
+    # This release workflow is only ever reached via a caller's
+    # `workflow_dispatch` (an operator deliberately picking channel=rc or
+    # channel=stable and clicking Run). That deliberate human trigger IS the
+    # approval gate for the RC and for the stable cut.
+    #
+    # We do NOT use a GitHub `environment:` protection rule here. Gitea (act) —
+    # our canonical CI, see [[gitea-canonical-github-mirror-only]] — has no
+    # environments/deployment-protection feature at all (the environments API
+    # 404s on Gitea 1.27). A job carrying `environment:` on Gitea never becomes
+    # runnable, so the whole build would go green while this `release` job is
+    # silently skipped and NOTHING publishes — exactly the failure that produced
+    # a successful run with no tag and no release. Removing it makes the publish
+    # actually run; the workflow_dispatch trigger is the portable gate that works
+    # identically on Gitea and GitHub.
     permissions:
       contents: write
     concurrency:
