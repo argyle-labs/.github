@@ -246,6 +246,29 @@ jobs:
           python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Provision macOS SDK (darwin framework linking)
+        # The apple-darwin legs cross-compile on Linux via zig, but the dep tree
+        # links Apple frameworks (Security + CoreFoundation, pulled by
+        # rustls-platform-verifier via reqwest 0.13) that zig cannot satisfy
+        # without a real macOS SDK. Fetch one and point cargo-zigbuild at it via
+        # SDKROOT so `-framework Security/CoreFoundation` resolves — no macOS
+        # runner required. Pinned SDK version; bump deliberately.
+        if: ${{ endsWith(matrix.target, '-apple-darwin') }}
+        env:
+          MACOS_SDK_VERSION: "14.5"
+        run: |
+          set -euo pipefail
+          url="https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz"
+          dest="$HOME/macos-sdk"
+          mkdir -p "$dest"
+          echo "→ fetching macOS SDK ${MACOS_SDK_VERSION}"
+          curl -fsSL --retry 5 --retry-connrefused "$url" | tar -xJ -C "$dest"
+          sdkroot="$dest/MacOSX${MACOS_SDK_VERSION}.sdk"
+          test -d "$sdkroot/System/Library/Frameworks/Security.framework" \
+            || { echo "::error::macOS SDK missing Security.framework at $sdkroot"; exit 1; }
+          echo "SDKROOT=$sdkroot" >> "$GITHUB_ENV"
+          echo "provisioned $sdkroot"
+
       - name: Add rust target
         # Install std for the matrix triple on EVERY leg. The host
         # x86_64-unknown-linux-gnu is a no-op add; every cross triple (linux
