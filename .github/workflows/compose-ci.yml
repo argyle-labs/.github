@@ -1,0 +1,112 @@
+name: Compose CI (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable CI workflow for orca docker-compose plugins — the PR gate for repos
+# whose deliverable is a compose stack (not a Rust [[bin]]). Gitea-canonical,
+# see [[gitea-canonical-github-mirror-only]].
+#
+# A compose plugin ships one or more compose files (compose.yml / compose.yaml /
+# docker-compose.yml) plus assets/docs — there is no crate to `cargo test`, so
+# the Rust plugin-ci.yml does not apply. This workflow's gate is: every compose
+# file is (a) well-formed YAML and (b) a valid compose spec.
+#
+# One caller per compose-plugin repo does:
+#
+#   name: CI
+#   on:
+#     pull_request: { branches: [main] }
+#     push:         { branches: [main] }
+#   jobs:
+#     ci:
+#       uses: argyle-labs/.github/.github/workflows/compose-ci.yml@main
+#       secrets: inherit
+#
+# No `permissions:` block is required — this gate neither tags nor publishes,
+# so the default read-only token is sufficient.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: >-
+          Newline- or space-separated glob(s) of compose files to validate.
+          Default: the repo-root compose files. Override for repos that keep
+          stacks in subdirectories.
+        required: false
+        type: string
+        default: "compose.yml compose.yaml docker-compose.yml docker-compose.yaml"
+
+jobs:
+  # ── Validate every compose file. Required check. ──
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover compose files
+        id: find
+        run: |
+          set -euo pipefail
+          found=""
+          for pat in ${{ inputs.paths }}; do
+            for f in $pat; do
+              [ -f "$f" ] && found="$found $f"
+            done
+          done
+          found="$(echo "$found" | xargs -n1 2>/dev/null | sort -u | xargs 2>/dev/null || true)"
+          if [ -z "$found" ]; then
+            echo "::error::no compose files found (looked for: ${{ inputs.paths }})"
+            exit 1
+          fi
+          echo "files=$found" >> "$GITHUB_OUTPUT"
+          echo "validating: $found"
+
+      - name: YAML well-formedness (always available)
+        # Guaranteed structural gate: python3 ships on every runner image, needs
+        # no docker daemon. Catches malformed YAML even if the compose CLI is
+        # absent on a given runner image. PyYAML is pip-installed here so the gate
+        # never depends on the base image shipping it (--break-system-packages
+        # mirrors the Debian-12/PEP-668 handling in plugin-ci.yml).
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --break-system-packages pyyaml >/dev/null 2>&1 \
+            || pip install --user --break-system-packages pyyaml >/dev/null 2>&1 || true
+          python3 - <<'PY'
+          import sys, glob, yaml
+          files = "${{ steps.find.outputs.files }}".split()
+          bad = 0
+          for f in files:
+              try:
+                  with open(f) as fh:
+                      yaml.safe_load(fh)
+                  print(f"yaml ok: {f}")
+              except Exception as e:
+                  print(f"::error file={f}::invalid YAML: {e}")
+                  bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Compose spec validation (docker compose config)
+        # Primary spec gate. `docker compose config -q` parses and validates the
+        # compose schema WITHOUT contacting the docker daemon (no images pulled,
+        # no containers started), so it runs on a plain runner. Unresolved ${VARS}
+        # substitute to empty and only warn — a structurally invalid stack fails.
+        # Guarded on CLI presence so the job still reports green (via the YAML
+        # gate above) on a runner image that lacks the compose plugin, while
+        # still failing hard when the CLI IS present and the stack is invalid.
+        run: |
+          set -euo pipefail
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "::warning::docker compose CLI not present on this runner — relying on the YAML gate. Install the compose plugin on the runner image for full spec validation."
+            exit 0
+          fi
+          rc=0
+          for f in ${{ steps.find.outputs.files }}; do
+            echo "→ docker compose -f $f config -q"
+            if ! docker compose -f "$f" config -q; then
+              echo "::error file=$f::invalid compose spec"
+              rc=1
+            fi
+          done
+          exit $rc
