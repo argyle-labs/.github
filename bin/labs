@@ -32,7 +32,14 @@ ok()   { printf '%s\n' "${C_GRN}$*${C_RST}"; }
 warn() { printf '%s\n' "${C_YEL}$*${C_RST}" >&2; }
 die()  { printf '%s\n' "${C_RED}error:${C_RST} $*" >&2; exit 1; }
 
-command -v gh  >/dev/null || die "gh CLI not found — install GitHub CLI"
+# gh is only needed for GitHub-backed discovery and mutation subcommands. In
+# Gitea-native CI mode the caller supplies $LABS_REPO_TSV_FILE (repos enumerated
+# from the Gitea API) and every metadata read prefers the local clone, so the
+# profile generator is fully gh-free there. Only hard-require gh when NOT in that
+# mode, otherwise this preflight aborts the Gitea runner (which has no gh).
+if [[ -z "${LABS_REPO_TSV_FILE:-}" ]]; then
+  command -v gh >/dev/null || die "gh CLI not found — install GitHub CLI"
+fi
 command -v git >/dev/null || die "git not found"
 
 # ── repo discovery ───────────────────────────────────────────────────────────
