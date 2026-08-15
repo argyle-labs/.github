@@ -46,14 +46,33 @@ NON_PLUGIN_META=(.github homelab-docs fastlane orca-private-archive)
 _REPO_TSV=""
 discover() {
   [[ -n "$_REPO_TSV" ]] && { printf '%s' "$_REPO_TSV"; return; }
-  _REPO_TSV="$(gh repo list "$ORG" --no-archived --limit 200 \
-    --json name,visibility,defaultBranchRef \
-    --jq '.[] | [.name, .visibility, (.defaultBranchRef.name // "main")] | @tsv' \
-    | sort)"
+  # Discovery source, in order of precedence:
+  #   1. $LABS_REPO_TSV_FILE — a precomputed "name<TAB>VISIBILITY<TAB>branch" table
+  #      (VISIBILITY is PUBLIC or PRIVATE). Lets CI enumerate repos from the Gitea
+  #      API instead of GitHub, so the generator runs on runners without `gh`.
+  #   2. `gh repo list` against GitHub (local/dev default).
+  if [[ -n "${LABS_REPO_TSV_FILE:-}" && -f "${LABS_REPO_TSV_FILE}" ]]; then
+    _REPO_TSV="$(sort "${LABS_REPO_TSV_FILE}")"
+  elif command -v gh >/dev/null 2>&1; then
+    _REPO_TSV="$(gh repo list "$ORG" --no-archived --limit 200 \
+      --json name,visibility,defaultBranchRef \
+      --jq '.[] | [.name, .visibility, (.defaultBranchRef.name // "main")] | @tsv' \
+      | sort)"
+  else
+    warn "discover: no repo source — set \$LABS_REPO_TSV_FILE or install gh"; return 1
+  fi
   printf '%s' "$_REPO_TSV"
 }
 
 in_list() { local x="$1"; shift; for e in "$@"; do [[ "$e" == "$x" ]] && return 0; done; return 1; }
+
+# Optional description override, keyed by repo name, from $LABS_DESC_FILE
+# (lines of "name<TAB>description"). Used by the gh-free CI path so workstation
+# repos whose blurb lives in the repo description (not Cargo.toml) still populate.
+_desc_override() {
+  [[ -n "${LABS_DESC_FILE:-}" && -f "${LABS_DESC_FILE}" ]] || return 0
+  awk -F'\t' -v n="$1" '$1==n{sub(/^[^\t]*\t/,"");print;exit}' "${LABS_DESC_FILE}"
+}
 
 classify() { # name -> core|meta|plugin
   local n="$1"
@@ -484,7 +503,15 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
     [[ "$cls" == "meta" || "$cls" == "core" ]] && continue
     if in_list "$name" "${WORKSTATION[@]}"; then
       cat="workstation"
-      desc="$(gh repo view "$ORG/$name" --json description --jq '.description // ""' 2>/dev/null)"
+      if command -v gh >/dev/null 2>&1 && [[ -z "${LABS_REPO_TSV_FILE:-}" ]]; then
+        desc="$(gh repo view "$ORG/$name" --json description --jq '.description // ""' 2>/dev/null)"
+      else
+        # gh-free (CI on Gitea): workstation repos carry their blurb in the repo
+        # description (not always in Cargo.toml), so prefer $LABS_DESC_FILE, then
+        # fall back to the local clone's Cargo.toml description.
+        desc="$(_desc_override "$name")"
+        [[ -n "$desc" ]] || { m="$(plugin_meta "$name" 2>/dev/null)" && desc="${m#*$'\t'}" || desc=""; }
+      fi
     elif repo_is_workspace "$name"; then
       # workspace-of-plugins: emit one row per member plugin crate, not the repo.
       local wcat crate cm ccat cdesc cicon
