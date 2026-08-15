@@ -1,8 +1,19 @@
 name: profile
 
-# Regenerate the org index (profile/README.md) from every repo's own metadata
-# (Cargo.toml description + [package.metadata.orca].category) and icon. New repos
-# appear automatically once they carry that metadata — nothing is hand-maintained.
+# Regenerate the org index from every repo's own metadata (Cargo.toml
+# description + [package.metadata.orca].category) and icon. New repos appear
+# automatically once they carry that metadata — nothing is hand-maintained.
+#
+# Gitea-native: the runner image has no `gh` CLI (and a Gitea token cannot talk
+# to github.com anyway), so this job enumerates + clones repos from Gitea via the
+# REST API + git, then runs `bin/labs profile` against those local clones
+# (LABS_REPO_TSV_FILE / LABS_DESC_FILE / LABS_HOME — no gh required).
+#
+# Two profiles are produced from one generation:
+#   • GitHub org profile  → .github repo, profile/README.md  (raw.githubusercontent icons)
+#   • Gitea  org profile  → .profile repo, README.md         (Gitea raw icons, same-origin)
+# The Gitea copy rewrites icon hosts because the Gitea org is private: only
+# same-origin Gitea raw URLs load for members viewing the page.
 
 on:
   schedule:
@@ -20,22 +31,97 @@ permissions:
 jobs:
   regenerate:
     runs-on: ubuntu-latest
+    env:
+      SERVER: ${{ github.server_url }}          # https://gitea.scottkey.me
+      READ_TOKEN: ${{ secrets.ORCA_FETCH_TOKEN }}   # Gitea read across the org
+      WRITE_TOKEN: ${{ secrets.GITEA_RELEASE_TOKEN }} # Gitea write to .github/.profile
     steps:
       - uses: actions/checkout@v4
 
-      - name: Regenerate profile/README.md
+      - name: Preflight — required secrets present
+        run: |
+          set -euo pipefail
+          : "${READ_TOKEN:?ORCA_FETCH_TOKEN (Gitea read) is required}"
+          : "${WRITE_TOKEN:?GITEA_RELEASE_TOKEN (Gitea write) is required}"
+
+      - name: Enumerate org repos + descriptions (Gitea API, no gh)
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          : > work/all.jsonl
+          page=1
+          while :; do
+            resp=$(curl -fsSL -H "Authorization: token ${READ_TOKEN}" \
+              "${SERVER}/api/v1/orgs/argyle-labs/repos?limit=50&page=${page}")
+            n=$(printf '%s' "$resp" | jq 'length')
+            [ "$n" -eq 0 ] && break
+            printf '%s' "$resp" | jq -c '.[]' >> work/all.jsonl
+            [ "$n" -lt 50 ] && break
+            page=$((page+1))
+          done
+          # Non-archived repos, excluding the special dot-repos (.github/.profile):
+          # cloning .github into LABS_HOME would hijack bin/labs' output path, and
+          # both are meta-excluded from the index regardless.
+          jq -rs 'sort_by(.name)[]
+                  | select(.archived|not) | select(.name|startswith(".")|not)
+                  | [.name, "PUBLIC", (.default_branch // "main")] | @tsv' \
+                  work/all.jsonl > work/repos.tsv
+          jq -rs 'sort_by(.name)[]
+                  | select(.archived|not) | select(.name|startswith(".")|not)
+                  | [.name, (.description // "")] | @tsv' \
+                  work/all.jsonl > work/desc.tsv
+          echo "enumerated $(wc -l < work/repos.tsv) repos"
+
+      - name: Clone every repo (shallow, from Gitea)
+        run: |
+          set -euo pipefail
+          host=${SERVER#https://}
+          mkdir -p work/src
+          while IFS=$'\t' read -r name vis br; do
+            git clone -q --depth 1 \
+              "https://x-access-token:${READ_TOKEN}@${host}/argyle-labs/${name}.git" \
+              "work/src/${name}"
+          done < work/repos.tsv
+
+      - name: Generate index → profile/README.md (GitHub-flavored)
         env:
-          GH_TOKEN: ${{ github.token }}
+          LABS_HOME: ${{ github.workspace }}/work/src
+          LABS_REPO_TSV_FILE: ${{ github.workspace }}/work/repos.tsv
+          LABS_DESC_FILE: ${{ github.workspace }}/work/desc.tsv
         run: bin/labs profile
 
-      - name: Commit if changed
+      - name: Commit GitHub profile (.github repo)
         run: |
-          if [[ -n "$(git status --porcelain profile/README.md)" ]]; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
+          if [[ -z "$(git status --porcelain profile/README.md)" ]]; then
+            echo "GitHub profile already up to date"
+          else
+            git config user.name  "gitea-actions[bot]"
+            git config user.email "gitea-actions[bot]@noreply.gitea.scottkey.me"
+            host=${SERVER#https://}
+            git remote set-url origin "https://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.github.git"
             git add profile/README.md
             git commit -m "chore: regenerate org index [skip ci]"
-            git push
+            git push origin HEAD:main
+          fi
+
+      - name: Publish Gitea profile (.profile repo, same-origin icons)
+        run: |
+          set -euo pipefail
+          host=${SERVER#https://}
+          git clone -q --depth 1 \
+            "https://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.profile.git" work/profile
+          # Same content, but rewrite icon hosts: raw.githubusercontent.com -> Gitea
+          # raw. The org is private, so only same-origin Gitea URLs load for members.
+          sed -E "s#https://raw\.githubusercontent\.com/argyle-labs/([^/\"]+)/([^/\"]+)/#${SERVER}/argyle-labs/\1/raw/branch/\2/#g" \
+            profile/README.md > work/profile/README.md
+          cd work/profile
+          if [[ -z "$(git status --porcelain README.md)" ]]; then
+            echo "Gitea profile already up to date"
           else
-            echo "index already up to date"
+            git config user.name  "gitea-actions[bot]"
+            git config user.email "gitea-actions[bot]@noreply.gitea.scottkey.me"
+            git add README.md
+            git commit -m "chore: regenerate org index [skip ci]"
+            git push origin HEAD:main
           fi
