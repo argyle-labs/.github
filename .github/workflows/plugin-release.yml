@@ -424,13 +424,13 @@ jobs:
         #   github.server_url → https://gitea.scottkey.me
         # Auth uses the auto per-repo token act_runner injects (github.token),
         # minted with the `contents: write` this job declares — enough to create
-        # a release and upload assets on THIS repo. GITEA_RELEASE_TOKEN overrides
+        # a release and upload assets on THIS repo. ORCA_RELEASE_TOKEN overrides
         # it if an org-wide release identity is preferred.
         #
         # Gitea asset upload differs from GitHub: it takes a multipart form field
         # `attachment` (not a raw octet-stream body to a separate uploads host).
         env:
-          GITEA_TOKEN: ${{ secrets.GITEA_RELEASE_TOKEN || github.token }}
+          GITEA_TOKEN: ${{ secrets.ORCA_RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           repo="${{ github.repository }}"

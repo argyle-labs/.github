@@ -34,7 +34,7 @@ jobs:
     env:
       SERVER: ${{ github.server_url }}          # https://gitea.scottkey.me
       READ_TOKEN: ${{ secrets.ORCA_FETCH_TOKEN }}   # Gitea read across the org
-      WRITE_TOKEN: ${{ secrets.GITEA_RELEASE_TOKEN }} # Gitea write to .github/.profile
+      WRITE_TOKEN: ${{ secrets.ORCA_RELEASE_TOKEN }} # Gitea write to .github/.profile
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${READ_TOKEN:?ORCA_FETCH_TOKEN (Gitea read) is required}"
-          : "${WRITE_TOKEN:?GITEA_RELEASE_TOKEN (Gitea write) is required}"
+          : "${WRITE_TOKEN:?ORCA_RELEASE_TOKEN (Gitea write) is required}"
 
       - name: Enumerate org repos + descriptions (Gitea API, no gh)
         run: |
