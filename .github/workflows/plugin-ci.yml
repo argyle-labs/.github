@@ -83,10 +83,13 @@ jobs:
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
 
-      - name: Authenticate private orca git dependency
+      - name: Authenticate private orca git dependency (Gitea)
         run: |
+          # See plugin-release.yml for the full rationale. orca is fetched from
+          # Gitea (host rewrite of the github.com-spelled dep). ORCA_FETCH_TOKEN
+          # must be a GITEA token with read on argyle-labs/orca.
           git config --global \
-            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@gitea.scottkey.me/".insteadOf \
             "https://github.com/"
 
       - name: Format check
@@ -120,10 +123,13 @@ jobs:
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
 
-      - name: Authenticate private orca git dependency
+      - name: Authenticate private orca git dependency (Gitea)
         run: |
+          # See plugin-release.yml for the full rationale. orca is fetched from
+          # Gitea (host rewrite of the github.com-spelled dep). ORCA_FETCH_TOKEN
+          # must be a GITEA token with read on argyle-labs/orca.
           git config --global \
-            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@gitea.scottkey.me/".insteadOf \
             "https://github.com/"
 
       - name: Resolve bin list
