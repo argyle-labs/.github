@@ -1,0 +1,127 @@
+name: Release integrity (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enforces the HARD RULE: every release goes through the pipeline and lands as a
+# release WITH ASSETS on BOTH Gitea (canonical) and GitHub (mirror). Nothing may
+# bypass the pipeline — a hand-cut `git tag vX.Y.Z-rc.N` produces a phantom
+# (tag, no binaries, not rollable, not mirrored). This is the detective control
+# that makes such a phantom fail loudly instead of sitting unnoticed.
+# See [[releases-must-go-through-pipeline-assets-on-both]].
+#
+# One caller per repo:
+#
+#   name: Release integrity
+#   on:
+#     push: { tags: ['v*'] }        # every release tag is checked as it lands
+#     schedule: [{ cron: '17 6 * * *' }]  # daily sweep catches drift / phantoms
+#     workflow_dispatch: {}
+#   jobs:
+#     verify:
+#       uses: argyle-labs/.github/.github/workflows/release-integrity.yml@main
+#       secrets: inherit
+#
+# On a `push` of a tag, only that tag is checked. On `schedule`/`dispatch` (no
+# specific tag) EVERY `v*` tag in the repo is checked — so pre-existing phantoms
+# (e.g. a hand-tagged rc) are surfaced too, not just newly-pushed ones.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Single tag to verify. Empty = verify every v* tag (sweep)."
+        required: false
+        type: string
+        default: ""
+      require_assets:
+        description: "Fail if a release exists but carries zero assets."
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  verify:
+    name: Verify release assets on Gitea + GitHub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need all tags for the sweep
+
+      - name: Verify every release tag has assets on both registries
+        env:
+          # Gitea (canonical) is reached via the ambient Actions API; GitHub
+          # (mirror) via the release token used by the publish workflow.
+          GITEA_API: ${{ github.api_url }}
+          GITEA_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REQUIRE_ASSETS: ${{ inputs.require_assets }}
+        run: |
+          set -euo pipefail
+
+          # ── which tags to check ────────────────────────────────────────────
+          if [ -n "$INPUT_TAG" ]; then
+            tags="$INPUT_TAG"
+          elif [ "$REF_TYPE" = "tag" ] && [ "${GITHUB_EVENT_NAME:-}" = "push" ]; then
+            tags="$REF_NAME"
+          else
+            tags="$(git tag -l 'v*' | sort -V)"
+          fi
+          if [ -z "$tags" ]; then
+            echo "No v* tags to verify."; exit 0
+          fi
+
+          # ── asset name set for a release, keyed on HTTP status ─────────────
+          # Prints the sentinel "MISSING" when no release exists for the tag
+          # (any non-200), else the comma-joined sorted asset names (empty string
+          # = a release with zero assets). Must key on the status code: a 404
+          # body is empty and would otherwise be indistinguishable from a real
+          # release that happens to have no assets.
+          assets_for() {
+            # $1 = full URL, $2 = full Authorization header value
+            local resp code body
+            resp="$(curl -sS -H "$2" -H "Accept: application/vnd.github+json" \
+                      -w $'\n%{http_code}' "$1" 2>/dev/null || true)"
+            code="$(printf '%s' "$resp" | tail -n1)"
+            body="$(printf '%s' "$resp" | sed '$d')"
+            if [ "$code" != "200" ]; then echo "MISSING"; return; fi
+            printf '%s' "$body" | jq -r '(.assets // [] | map(.name) | sort | join(","))' 2>/dev/null || echo "MISSING"
+          }
+          gitea_assets()  { assets_for "$GITEA_API/repos/$REPO/releases/tags/$1" "Authorization: token $GITEA_TOKEN"; }
+          github_assets() { assets_for "https://api.github.com/repos/$REPO/releases/tags/$1" "Authorization: Bearer $GH_TOKEN"; }
+
+          fail=0
+          for tag in $tags; do
+            gt="$(gitea_assets "$tag")"
+            gh="$(github_assets "$tag")"
+
+            if [ "$gt" = "MISSING" ]; then
+              echo "::error title=Phantom release::$tag has a tag but NO release on Gitea — it bypassed the pipeline."
+              fail=1; continue
+            fi
+            if [ "$gh" = "MISSING" ]; then
+              echo "::error title=Not mirrored::$tag has a Gitea release but NO release on GitHub."
+              fail=1; continue
+            fi
+            if [ "$REQUIRE_ASSETS" = "true" ] && { [ -z "$gt" ] || [ -z "$gh" ]; }; then
+              echo "::error title=No assets::$tag release exists but carries zero assets (Gitea='[$gt]' GitHub='[$gh]')."
+              fail=1; continue
+            fi
+            if [ "$gt" != "$gh" ]; then
+              echo "::error title=Asset mismatch::$tag assets differ between registries."
+              echo "  Gitea : $gt"
+              echo "  GitHub: $gh"
+              fail=1; continue
+            fi
+            echo "✓ $tag — assets match on Gitea and GitHub ($(echo "$gt" | tr ',' '\n' | grep -c . ) files)"
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::Release integrity check FAILED — a release is missing, unmirrored, or asset-incomplete. Releases must go through the pipeline and land on both Gitea and GitHub."
+            exit 1
+          fi
+          echo "All checked release tags are intact on both registries."
