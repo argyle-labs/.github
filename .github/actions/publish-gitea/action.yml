@@ -1,0 +1,98 @@
+name: Publish Gitea release (canonical)
+description: >
+  Create or update a release on Gitea (the CANONICAL forge) and upload every
+  asset in a directory. Idempotent — re-running replaces the release's assets
+  in place. Used for the rolling rc-draft, the published RC (prerelease), and
+  the promoted stable. Talks to the runner's own Gitea API ($GITHUB_API_URL on
+  act_runner), so it is instance-agnostic.
+
+inputs:
+  gitea-token:
+    description: Gitea token with write on the repo (create release + upload assets).
+    required: true
+  tag:
+    description: Tag name for the release (e.g. v0.1.8-rc.9, or "next" for the rolling draft).
+    required: true
+  name:
+    description: Release title.
+    required: true
+  body:
+    description: Release notes (markdown).
+    required: false
+    default: ""
+  target-commitish:
+    description: Commit/branch the tag points at (for draft releases where the tag does not exist yet).
+    required: false
+    default: main
+  prerelease:
+    description: "true = mark as prerelease (RC); false = stable."
+    required: false
+    default: "true"
+  draft:
+    description: "true = draft (no git tag created, not public); false = published."
+    required: false
+    default: "false"
+  assets-dir:
+    description: Directory whose files are uploaded as release assets.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Publish to Gitea
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.gitea-token }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ inputs.tag }}
+        REL_NAME: ${{ inputs.name }}
+        REL_BODY: ${{ inputs.body }}
+        TARGET: ${{ inputs.target-commitish }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        DRAFT: ${{ inputs.draft }}
+        ASSETS_DIR: ${{ inputs.assets-dir }}
+      run: |
+        set -euo pipefail
+        api="${GITHUB_API_URL:-https://gitea.scottkey.me/api/v1}"
+        auth=(-H "Authorization: token ${GITEA_TOKEN}")
+        rel_api="${api}/repos/${REPO}/releases"
+
+        # Find an existing release for this tag (idempotent re-run).
+        existing=$(curl -fsS "${auth[@]}" "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
+        rel_id=$(echo "$existing" | jq -r '.id // empty' 2>/dev/null || true)
+
+        body_json=$(jq -n \
+          --arg tag "$TAG" --arg name "$REL_NAME" --arg body "$REL_BODY" \
+          --arg target "$TARGET" \
+          --argjson pre "$PRERELEASE" --argjson draft "$DRAFT" \
+          '{tag_name:$tag, target_commitish:$target, name:$name, body:$body, prerelease:$pre, draft:$draft}')
+
+        if [ -n "$rel_id" ]; then
+          echo "→ updating existing Gitea release id=$rel_id ($TAG)"
+          curl -fsS "${auth[@]}" -X PATCH -H "Content-Type: application/json" \
+            -d "$body_json" "${rel_api}/${rel_id}" >/dev/null
+          # Drop existing assets so the upload set is authoritative.
+          for aid in $(echo "$existing" | jq -r '.assets[]?.id // empty'); do
+            curl -fsS "${auth[@]}" -X DELETE "${rel_api}/${rel_id}/assets/${aid}" >/dev/null || true
+          done
+        else
+          echo "→ creating Gitea release ($TAG)"
+          created=$(curl -fsS "${auth[@]}" -X POST -H "Content-Type: application/json" \
+            -d "$body_json" "$rel_api")
+          rel_id=$(echo "$created" | jq -r '.id')
+        fi
+        [ -n "$rel_id" ] && [ "$rel_id" != "null" ] || { echo "::error::no Gitea release id"; exit 1; }
+
+        shopt -s nullglob
+        count=0
+        for f in "$ASSETS_DIR"/*; do
+          [ -f "$f" ] || continue
+          name=$(basename "$f")
+          echo "  ↑ $name"
+          curl -fsS "${auth[@]}" -X POST \
+            -F "attachment=@${f};filename=${name}" \
+            "${rel_api}/${rel_id}/assets?name=${name}" >/dev/null
+          count=$((count+1))
+        done
+        echo "→ uploaded $count asset(s) to Gitea release $TAG (id=$rel_id)"
+        [ "$count" -gt 0 ] || echo "::warning::no assets found in ${ASSETS_DIR}"
