@@ -1,0 +1,114 @@
+name: Build one target (shared)
+description: >
+  Cross-compile the release binaries for a single target triple. Ports the
+  proven plugin-release recipe: zig + cargo-zigbuild cross-compilation with
+  darwin built FROM Linux via a provisioned macOS SDK (no macOS runner), musl
+  fully static. Optionally writes a computed version into Cargo.toml (with a
+  Cargo.lock refresh + guard) before building. Leaves binaries at
+  target/<triple>/release/<bin>; STAGING/naming is the caller's job (orca and
+  plugin asset conventions differ).
+
+inputs:
+  target:
+    description: Rust target triple, e.g. x86_64-unknown-linux-musl.
+    required: true
+  bins:
+    description: Newline-separated bin names to build (caller resolves them).
+    required: true
+  version:
+    description: >
+      Release version (no v prefix) to bake into Cargo.toml before building.
+      Empty = build at the committed version (CI build path — no write).
+    required: false
+    default: ""
+  macos-sdk-version:
+    description: macOS SDK version for darwin cross-linking.
+    required: false
+    default: "14.5"
+
+runs:
+  using: composite
+  steps:
+    - name: Write release version into Cargo.toml
+      if: ${{ inputs.version != '' }}
+      shell: bash
+      env:
+        REL_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # Replace the first workspace `version = "..."` — don't match the old
+        # value (avoids escaping pre-release strings). Portable sed (Linux CI).
+        sed -i 's/^version = ".*"/version = "'"$REL_VERSION"'"/' Cargo.toml
+        echo "workspace version → $(grep '^version' Cargo.toml | head -1)"
+        # Refresh the lock for the new version. MUST be --workspace (members are
+        # version.workspace=true). No error-swallow — an out-of-sync lock breaks
+        # every --locked build cut from the release commit.
+        cargo update --workspace
+        cargo metadata --locked --format-version=1 >/dev/null \
+          || { echo "::error::Cargo.lock out of sync after version write"; exit 1; }
+        # orca's build.rs bakes this verbatim; harmless for plugins.
+        echo "ORCA_RELEASE_VERSION=$REL_VERSION" >> "$GITHUB_ENV"
+
+    - name: Install cross toolchain (zig + cargo-zigbuild)
+      if: ${{ inputs.target != 'x86_64-unknown-linux-gnu' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Provision macOS SDK (darwin framework linking)
+      if: ${{ endsWith(inputs.target, '-apple-darwin') }}
+      shell: bash
+      env:
+        MACOS_SDK_VERSION: ${{ inputs.macos-sdk-version }}
+      run: |
+        set -euo pipefail
+        url="https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz"
+        dest="$HOME/macos-sdk"
+        mkdir -p "$dest"
+        echo "→ fetching macOS SDK ${MACOS_SDK_VERSION}"
+        curl -fsSL --retry 5 --retry-connrefused "$url" | tar -xJ -C "$dest"
+        sdkroot="$dest/MacOSX${MACOS_SDK_VERSION}.sdk"
+        test -d "$sdkroot/System/Library/Frameworks/Security.framework" \
+          || { echo "::error::macOS SDK missing Security.framework at $sdkroot"; exit 1; }
+        echo "SDKROOT=$sdkroot" >> "$GITHUB_ENV"
+        echo "provisioned $sdkroot"
+
+    - name: Add rust target
+      shell: bash
+      run: rustup target add "${{ inputs.target }}"
+
+    - name: Build release binaries
+      shell: bash
+      env:
+        RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
+      run: |
+        set -euo pipefail
+        case "${{ inputs.target }}" in
+          x86_64-unknown-linux-gnu) builder="cargo build" ;;
+          *)                        builder="cargo zigbuild" ;;
+        esac
+        bin_flags=""
+        while IFS= read -r b; do
+          [ -n "$b" ] && bin_flags="$bin_flags --bin $b"
+        done <<< '${{ inputs.bins }}'
+        export CARGO_BUILD_TARGET="${{ inputs.target }}"
+        echo "→ $builder --release --target ${{ inputs.target }}$bin_flags"
+        # shellcheck disable=SC2086
+        $builder --release --target "${{ inputs.target }}" $bin_flags
+
+    - name: Assert binaries built
+      shell: bash
+      run: |
+        set -euo pipefail
+        while IFS= read -r bin; do
+          [ -z "$bin" ] && continue
+          path="target/${{ inputs.target }}/release/${bin}"
+          if [ ! -f "$path" ]; then
+            echo "::error::binary not found at $path"
+            ls -la "target/${{ inputs.target }}/release" || echo "  (missing)"
+            exit 1
+          fi
+          echo "ok: $path"
+        done <<< '${{ inputs.bins }}'
