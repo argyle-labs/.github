@@ -156,21 +156,22 @@ jobs:
   # `matrix.target: ${{ fromJSON(inputs.targets) }}` is the portable single-key
   # matrix pattern that runs identically on GitHub and Gitea.
   #
-  # Runner + build method are DERIVED from the triple inline (no matrix fields);
-  # keep the mapping in sync with orca release_targets:
-  #   *-apple-darwin → runs-on macos-14 (Apple Silicon, native macOS SDK so the
-  #                    Security/CoreFoundation frameworks rustls-platform-verifier
-  #                    links against exist; x86_64-apple-darwin cross-builds from
-  #                    arm64 with just `--target` — no zig). GitHub retired the
-  #                    macos-13 image (last hosted Intel Mac); pinned jobs hang.
-  #                    macOS runners are FREE for public repos, native-arch, and
-  #                    parallelize — replacing the flaky self-hosted mint runner.
-  #   *-linux-*      → runs-on ubuntu-latest; x86_64-gnu is the host (plain
-  #                    `cargo build`); every other linux triple uses
-  #                    cargo-zigbuild + static musl (UNCHANGED).
+  # EVERY target builds on a single Linux runner (ubuntu-latest) via
+  # cargo-zigbuild — including the apple-darwin triples, which zig
+  # cross-compiles from Linux. This is deliberate:
+  #   • Gitea's act runs an entire matrix on the ONE runner that claimed the
+  #     job; it does NOT honour a per-leg `runs-on` expression to fan darwin
+  #     legs onto a macOS runner (unlike GitHub). A matrix that mixes
+  #     ubuntu-latest and macos-14 therefore runs every leg on whichever runner
+  #     grabbed it — darwin legs land on Linux and native `cargo build` fails.
+  #   • Cross-compiling all targets on Linux with zig means the release needs
+  #     NO self-hosted macOS runner at all — nothing has to run on a laptop.
+  # Build method DERIVED from the triple inline: the host x86_64-gnu builds with
+  # plain `cargo build`; every other triple (linux musl/aarch64 AND both darwin)
+  # uses `cargo zigbuild`. musl stays static (crt-static) as before.
   build:
     needs: [version]
-    runs-on: ${{ endsWith(matrix.target, '-apple-darwin') && 'macos-14' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -189,10 +190,20 @@ jobs:
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
 
-      - name: Authenticate private orca git dependency
+      - name: Authenticate private orca git dependency (Gitea)
         run: |
+          # orca (plugin-toolkit) is fetched from Gitea — the canonical forge
+          # ([[gitea-canonical-github-mirror-only]]). Cargo.toml still spells the
+          # dep as github.com/argyle-labs/orca; this insteadOf rewrites only the
+          # HOST to Gitea (identical org/repo path) and injects the token, so the
+          # build has NO internal dependency on GitHub. It does not affect the
+          # public actions/SDK curls (those are not git operations).
+          # NOTE: ORCA_FETCH_TOKEN must now be a GITEA token with read access to
+          # argyle-labs/orca (it was a GitHub PAT before this cutover). The
+          # auto per-repo Actions token cannot read a second repo, so a PAT-style
+          # secret is still required for the cross-repo dep fetch.
           git config --global \
-            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
+            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@gitea.scottkey.me/".insteadOf \
             "https://github.com/"
 
       - name: Write computed version into Cargo.toml
@@ -231,20 +242,50 @@ jobs:
           echo "bins: $(echo "$bins" | paste -sd, -)"
 
       - name: Install cross toolchain (zig + cargo-zigbuild)
-        if: ${{ !endsWith(matrix.target, '-apple-darwin') && matrix.target != 'x86_64-unknown-linux-gnu' }}
+        # Needed for every non-host target — all linux cross triples AND both
+        # apple-darwin triples (zig cross-compiles darwin from Linux).
+        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
         run: |
           set -euo pipefail
-          python3 -m pip install --user cargo-zigbuild ziglang
+          # --break-system-packages: Gitea's runner image is Debian 12, whose
+          # system Python enforces PEP 668 (externally-managed-environment) and
+          # rejects a plain `pip install --user`. The flag makes the install
+          # proceed in the ephemeral CI container; on GitHub's ubuntu-latest
+          # (not externally-managed) it is an accepted no-op, so this runs on
+          # both forges.
+          python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Provision macOS SDK (darwin framework linking)
+        # The apple-darwin legs cross-compile on Linux via zig, but the dep tree
+        # links Apple frameworks (Security + CoreFoundation, pulled by
+        # rustls-platform-verifier via reqwest 0.13) that zig cannot satisfy
+        # without a real macOS SDK. Fetch one and point cargo-zigbuild at it via
+        # SDKROOT so `-framework Security/CoreFoundation` resolves — no macOS
+        # runner required. Pinned SDK version; bump deliberately.
+        if: ${{ endsWith(matrix.target, '-apple-darwin') }}
+        env:
+          MACOS_SDK_VERSION: "14.5"
+        run: |
+          set -euo pipefail
+          url="https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz"
+          dest="$HOME/macos-sdk"
+          mkdir -p "$dest"
+          echo "→ fetching macOS SDK ${MACOS_SDK_VERSION}"
+          curl -fsSL --retry 5 --retry-connrefused "$url" | tar -xJ -C "$dest"
+          sdkroot="$dest/MacOSX${MACOS_SDK_VERSION}.sdk"
+          test -d "$sdkroot/System/Library/Frameworks/Security.framework" \
+            || { echo "::error::macOS SDK missing Security.framework at $sdkroot"; exit 1; }
+          echo "SDKROOT=$sdkroot" >> "$GITHUB_ENV"
+          echo "provisioned $sdkroot"
+
       - name: Add rust target
-        # Install std for the matrix triple on EVERY leg. Both darwin triples
-        # build on macos-14 (arm64): aarch64 is the host (no-op add), while
-        # x86_64-apple-darwin is a cross-arch build that REQUIRES this std —
-        # Apple's toolchain links it natively, no zig. Keeping it unconditional
-        # also pins the artifact to the single, matrix-derived output path
-        # (target/<triple>/release) the staging step reads. On linux legs it
-        # installs std for the cross musl/gnu triples as before.
+        # Install std for the matrix triple on EVERY leg. The host
+        # x86_64-unknown-linux-gnu is a no-op add; every cross triple (linux
+        # musl/aarch64 and both apple-darwin) needs its std for the zig
+        # cross-compile. Keeping it unconditional also pins the artifact to the
+        # single matrix-derived output path (target/<triple>/release) the
+        # staging step reads.
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build release binaries
@@ -261,15 +302,14 @@ jobs:
           RUSTFLAGS: ${{ contains(matrix.target, '-musl') && '-C target-feature=+crt-static' || '' }}
         run: |
           set -euo pipefail
-          # Build method is derived from the target triple (no matrix field):
-          #   native (plain cargo) → darwin legs on GitHub-hosted macOS runners
-          #            (Apple SDK present so Security/CoreFoundation link; each
-          #            hosted runner is native-arch, x86_64 cross-builds from arm64
-          #            with just --target), AND the host x86_64-gnu linux leg.
-          #   zig    → every other linux triple: cargo-zigbuild (+ static musl).
+          # Build method derived from the target triple (no matrix field):
+          #   plain cargo build → ONLY the host x86_64-unknown-linux-gnu leg.
+          #   cargo zigbuild    → every other triple: linux musl/aarch64 AND both
+          #                       apple-darwin (zig cross-compiles darwin from
+          #                       Linux, so no macOS runner is required).
           case "${{ matrix.target }}" in
-            *-apple-darwin | x86_64-unknown-linux-gnu) builder="cargo build" ;;
-            *)                                         builder="cargo zigbuild" ;;
+            x86_64-unknown-linux-gnu) builder="cargo build" ;;
+            *)                        builder="cargo zigbuild" ;;
           esac
           # Build every requested bin (`--bin` per name keeps it explicit and lets
           # multi-bin workspaces like `arr` build one plugin per *arr app).
@@ -284,8 +324,8 @@ jobs:
           # instead and staging fails with "binary not found". We ALSO export
           # CARGO_BUILD_TARGET as belt-and-suspenders so a stray host-default
           # can't redirect the output dir; the
-          # explicit flag and the env agree, so every leg (native + zig) resolves
-          # to the same target/<triple>/release path.
+          # explicit flag and the env agree, so every leg resolves to the same
+          # target/<triple>/release path.
           export CARGO_BUILD_TARGET="${{ matrix.target }}"
           echo "→ $builder --release --target ${{ matrix.target }}$bin_flags"
           # shellcheck disable=SC2086
@@ -342,13 +382,21 @@ jobs:
   release:
     needs: [version, build]
     runs-on: ubuntu-latest
-    # Human-approval gate, mirroring orca's own release.yml (publish-rc /
-    # publish-stable sit behind the release-rc / release-stable environments).
-    # A reusable-workflow `environment:` is evaluated in the CALLER repo's
-    # context, so each plugin repo must define release-rc / release-stable with
-    # a required reviewer — otherwise the gate is a no-op. channel picks which.
-    environment:
-      name: ${{ inputs.channel == 'stable' && 'release-stable' || 'release-rc' }}
+    # ── Approval gate = the manual `workflow_dispatch` trigger. ──
+    # This release workflow is only ever reached via a caller's
+    # `workflow_dispatch` (an operator deliberately picking channel=rc or
+    # channel=stable and clicking Run). That deliberate human trigger IS the
+    # approval gate for the RC and for the stable cut.
+    #
+    # We do NOT use a GitHub `environment:` protection rule here. Gitea (act) —
+    # our canonical CI, see [[gitea-canonical-github-mirror-only]] — has no
+    # environments/deployment-protection feature at all (the environments API
+    # 404s on Gitea 1.27). A job carrying `environment:` on Gitea never becomes
+    # runnable, so the whole build would go green while this `release` job is
+    # silently skipped and NOTHING publishes — exactly the failure that produced
+    # a successful run with no tag and no release. Removing it makes the publish
+    # actually run; the workflow_dispatch trigger is the portable gate that works
+    # identically on Gitea and GitHub.
     permissions:
       contents: write
     concurrency:
@@ -364,20 +412,76 @@ jobs:
           pattern: plugin-*
           merge-multiple: true
 
-      - name: Create GitHub Release (pipeline-tagged)
+      - name: Create Gitea Release (pipeline-tagged)
+        # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]])
+        # — via the Gitea REST API using curl + jq, NOT the `gh` CLI (absent on
+        # the Gitea runner image; both curl and jq are present). GitHub is now an
+        # OUTBOUND-ONLY mirror: nothing here writes to api.github.com. The mirror
+        # replicates tags/releases outward separately.
+        #
+        # Endpoints resolve from the Actions context so this is forge-portable:
+        #   github.api_url    → Gitea's API base (https://gitea.scottkey.me/api/v1)
+        #   github.server_url → https://gitea.scottkey.me
+        # Auth uses the auto per-repo token act_runner injects (github.token),
+        # minted with the `contents: write` this job declares — enough to create
+        # a release and upload assets on THIS repo. ORCA_RELEASE_TOKEN overrides
+        # it if an org-wide release identity is preferred.
+        #
+        # Gitea asset upload differs from GitHub: it takes a multipart form field
+        # `attachment` (not a raw octet-stream body to a separate uploads host).
         env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.ORCA_RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          flags=""
-          [ "${{ needs.version.outputs.prerelease }}" = "true" ] && flags="--prerelease"
+          repo="${{ github.repository }}"
+          tag="${{ needs.version.outputs.tag }}"
+          api="${{ github.api_url }}"
+          server="${{ github.server_url }}"
+          hdr_auth="Authorization: token ${GITEA_TOKEN}"
+          accept="Accept: application/json"
           notes="${{ inputs.notes }}"
-          [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${{ github.repository }}\`, built against orca \`main\`. Plugin binary + sha256 per host target."
+          [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${repo}\`, built against orca \`main\`. Plugin binary + sha256 per host target."
           ls -la dist
-          gh release create "${{ needs.version.outputs.tag }}" \
-            --repo "${{ github.repository }}" \
-            --target "${{ github.sha }}" \
-            --title "${{ needs.version.outputs.tag }}" \
-            --notes "$notes" \
-            $flags \
-            dist/*
+
+          # Create the release. Idempotent: if the tag already has a release
+          # (e.g. a re-run of the same stable cut) reuse it instead of failing.
+          payload=$(jq -n \
+            --arg tag "$tag" \
+            --arg sha "${{ github.sha }}" \
+            --arg name "$tag" \
+            --arg body "$notes" \
+            --argjson pre ${{ needs.version.outputs.prerelease }} \
+            '{tag_name:$tag, target_commitish:$sha, name:$name, body:$body, prerelease:$pre, draft:false}')
+          resp=$(curl -fsSL -X POST -H "$hdr_auth" -H "$accept" -H "Content-Type: application/json" \
+            "$api/repos/$repo/releases" -d "$payload" 2>/dev/null || true)
+          rid=$(printf '%s' "$resp" | jq -r '.id // empty')
+          if [ -z "$rid" ]; then
+            echo "→ create did not return an id; looking up existing release for $tag"
+            rid=$(curl -fsSL -H "$hdr_auth" -H "$accept" \
+              "$api/repos/$repo/releases/tags/$tag" | jq -r '.id // empty')
+          fi
+          if [ -z "$rid" ]; then
+            echo "::error::could not create or find release $tag"
+            echo "$resp"
+            exit 1
+          fi
+          echo "release id: $rid"
+
+          # Upload every staged asset (binary + .sha256) to the release. Gitea's
+          # asset endpoint takes a multipart `attachment` field; name= sets the
+          # stored filename.
+          for f in dist/*; do
+            name=$(basename "$f")
+            echo "→ uploading $name"
+            code=$(curl -sS -X POST -H "$hdr_auth" \
+              -F "attachment=@${f};filename=${name}" \
+              -o /tmp/upload_resp.json -w '%{http_code}' \
+              "$api/repos/$repo/releases/$rid/assets?name=$name")
+            if [ "$code" -ge 300 ]; then
+              echo "::error::asset upload failed for $name (HTTP $code)"
+              cat /tmp/upload_resp.json || true
+              exit 1
+            fi
+          done
+          set -- dist/*
+          echo "published $tag with $# files → ${server}/$repo/releases/tag/$tag"

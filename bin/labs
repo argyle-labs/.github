@@ -32,7 +32,14 @@ ok()   { printf '%s\n' "${C_GRN}$*${C_RST}"; }
 warn() { printf '%s\n' "${C_YEL}$*${C_RST}" >&2; }
 die()  { printf '%s\n' "${C_RED}error:${C_RST} $*" >&2; exit 1; }
 
-command -v gh  >/dev/null || die "gh CLI not found — install GitHub CLI"
+# gh is only needed for GitHub-backed discovery and mutation subcommands. In
+# Gitea-native CI mode the caller supplies $LABS_REPO_TSV_FILE (repos enumerated
+# from the Gitea API) and every metadata read prefers the local clone, so the
+# profile generator is fully gh-free there. Only hard-require gh when NOT in that
+# mode, otherwise this preflight aborts the Gitea runner (which has no gh).
+if [[ -z "${LABS_REPO_TSV_FILE:-}" ]]; then
+  command -v gh >/dev/null || die "gh CLI not found — install GitHub CLI"
+fi
 command -v git >/dev/null || die "git not found"
 
 # ── repo discovery ───────────────────────────────────────────────────────────
@@ -46,14 +53,33 @@ NON_PLUGIN_META=(.github homelab-docs fastlane orca-private-archive)
 _REPO_TSV=""
 discover() {
   [[ -n "$_REPO_TSV" ]] && { printf '%s' "$_REPO_TSV"; return; }
-  _REPO_TSV="$(gh repo list "$ORG" --no-archived --limit 200 \
-    --json name,visibility,defaultBranchRef \
-    --jq '.[] | [.name, .visibility, (.defaultBranchRef.name // "main")] | @tsv' \
-    | sort)"
+  # Discovery source, in order of precedence:
+  #   1. $LABS_REPO_TSV_FILE — a precomputed "name<TAB>VISIBILITY<TAB>branch" table
+  #      (VISIBILITY is PUBLIC or PRIVATE). Lets CI enumerate repos from the Gitea
+  #      API instead of GitHub, so the generator runs on runners without `gh`.
+  #   2. `gh repo list` against GitHub (local/dev default).
+  if [[ -n "${LABS_REPO_TSV_FILE:-}" && -f "${LABS_REPO_TSV_FILE}" ]]; then
+    _REPO_TSV="$(sort "${LABS_REPO_TSV_FILE}")"
+  elif command -v gh >/dev/null 2>&1; then
+    _REPO_TSV="$(gh repo list "$ORG" --no-archived --limit 200 \
+      --json name,visibility,defaultBranchRef \
+      --jq '.[] | [.name, .visibility, (.defaultBranchRef.name // "main")] | @tsv' \
+      | sort)"
+  else
+    warn "discover: no repo source — set \$LABS_REPO_TSV_FILE or install gh"; return 1
+  fi
   printf '%s' "$_REPO_TSV"
 }
 
 in_list() { local x="$1"; shift; for e in "$@"; do [[ "$e" == "$x" ]] && return 0; done; return 1; }
+
+# Optional description override, keyed by repo name, from $LABS_DESC_FILE
+# (lines of "name<TAB>description"). Used by the gh-free CI path so workstation
+# repos whose blurb lives in the repo description (not Cargo.toml) still populate.
+_desc_override() {
+  [[ -n "${LABS_DESC_FILE:-}" && -f "${LABS_DESC_FILE}" ]] || return 0
+  awk -F'\t' -v n="$1" '$1==n{sub(/^[^\t]*\t/,"");print;exit}' "${LABS_DESC_FILE}"
+}
 
 classify() { # name -> core|meta|plugin
   local n="$1"
@@ -484,7 +510,15 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
     [[ "$cls" == "meta" || "$cls" == "core" ]] && continue
     if in_list "$name" "${WORKSTATION[@]}"; then
       cat="workstation"
-      desc="$(gh repo view "$ORG/$name" --json description --jq '.description // ""' 2>/dev/null)"
+      if command -v gh >/dev/null 2>&1 && [[ -z "${LABS_REPO_TSV_FILE:-}" ]]; then
+        desc="$(gh repo view "$ORG/$name" --json description --jq '.description // ""' 2>/dev/null)"
+      else
+        # gh-free (CI on Gitea): workstation repos carry their blurb in the repo
+        # description (not always in Cargo.toml), so prefer $LABS_DESC_FILE, then
+        # fall back to the local clone's Cargo.toml description.
+        desc="$(_desc_override "$name")"
+        [[ -n "$desc" ]] || { m="$(plugin_meta "$name" 2>/dev/null)" && desc="${m#*$'\t'}" || desc=""; }
+      fi
     elif repo_is_workspace "$name"; then
       # workspace-of-plugins: emit one row per member plugin crate, not the repo.
       local wcat crate cm ccat cdesc cicon
@@ -497,7 +531,7 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
         [[ -n "$ccat" ]] || ccat="${wcat:-other}"
         cicon="$raw/$name/$branch/crates/$crate/assets/icon-256.png"
         cdesc="$(html_escape "$cdesc")"   # HTML table cell — escape & < >
-        BUCKET[$ccat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name/tree/$branch/crates/$crate\">$crate</a></td><td>${cdesc:-—}</td></tr>"$'\n'
+        BUCKET[$ccat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name/tree/$branch/crates/$crate\">$crate</a></td><td width=\"100%\">${cdesc:-—}</td></tr>"$'\n'
       done < <(repo_crates "$name")
       continue
     else
@@ -507,7 +541,11 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
     fi
     icon="$raw/$name/$branch/assets/icon-256.png"
     desc="$(html_escape "$desc")"   # HTML table cell — escape & < >
-    BUCKET[$cat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name\">$name</a></td><td>${desc:-—}</td></tr>"$'\n'
+    # description cell carries width="100%" so it absorbs surplus column
+    # width (text wraps); keeps the fixed 72px icon cell from being crushed
+    # by Gitea's .markup table{width:100%}+img{max-width:100%}, which pins
+    # height=60 while shrinking width into a portrait rectangle.
+    BUCKET[$cat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name\">$name</a></td><td width=\"100%\">${desc:-—}</td></tr>"$'\n'
   done <<<"$(discover)"
 
   {
