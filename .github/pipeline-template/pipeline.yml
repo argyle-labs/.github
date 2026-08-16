@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CANONICAL thin caller — the ONE ~30-line stub every orca-ecosystem repo uses.
+# Copy this to a repo as `.github/workflows/pipeline.yml`. It is identical across
+# repos except the two marked lines (asset-profile / mint-runner-label); the
+# sync-callers workflow keeps every repo's copy in step with this template so
+# the pipeline is defined in exactly one place. Do NOT add logic here — all of
+# it lives in the shared ci.yml / release.yml reusable workflows.
+#
+# Flow: PR → ci (test+build). push→main → rc-draft (rolling draft, no tests).
+#       workflow_dispatch → operator gate (rc-publish, then promote-stable).
+# See [[unified-cicd-pipeline-architecture]].
+# ─────────────────────────────────────────────────────────────────────────────
+name: Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Release gate to run'
+        type: choice
+        options: [rc-publish, promote-stable]
+        default: rc-publish
+      bump:
+        description: 'Version bump (rc-publish computes the base stable from this)'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+jobs:
+  # PR gate: test + build.
+  ci:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: argyle-labs/.github/.github/workflows/ci.yml@main
+    secrets: inherit
+
+  # Merge to main: build a rolling DRAFT release. No tests (the PR gated them).
+  rc-draft:
+    if: ${{ github.event_name == 'push' }}
+    uses: argyle-labs/.github/.github/workflows/release.yml@main
+    with:
+      stage: rc-draft
+      asset-profile: binaries        # orca overrides → full
+      # mint-runner-label: <label>   # orca only: best-effort macOS .pkg leg
+    secrets: inherit
+
+  # Operator gate: publish the RC, then (a later dispatch) promote to stable.
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    uses: argyle-labs/.github/.github/workflows/release.yml@main
+    with:
+      stage: ${{ inputs.stage }}
+      bump: ${{ inputs.bump }}
+      asset-profile: binaries        # orca overrides → full
+    secrets: inherit

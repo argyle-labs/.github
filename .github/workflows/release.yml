@@ -1,0 +1,316 @@
+name: Release (shared reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The unified release pipeline for orca core AND every plugin. One file, three
+# stages selected by `stage`; Gitea Releases are canonical, GitHub is mirrored.
+# See [[unified-cicd-pipeline-architecture]].
+#
+#   rc-draft        (auto on push to main; NO tests — the PR already gated them)
+#                   build binaries/assets → publish as a rolling DRAFT on Gitea
+#                   (tag "next", no git tag, not mirrored). A fresh consumable
+#                   candidate always sits ready; nothing is released.
+#
+#   rc-publish      (operator workflow_dispatch — GATE 1)
+#                   compute vX.Y.Z-rc.N → build at that version → publish RC
+#                   (prerelease) to Gitea → mirror to GitHub.
+#
+#   promote-stable  (operator workflow_dispatch — GATE 2)
+#                   compute vX.Y.Z → build at that version → publish stable to
+#                   Gitea → mirror to GitHub.
+#
+# `asset-profile`: binaries (plugins) | full (orca: + deb/rpm/apk/PKGBUILD/
+# homebrew/plg/checksums/install.sh, and — best-effort — the macOS .pkg on the
+# mint runner when `mint-runner-label` is set).
+#
+# Gates = the operator dispatch itself (Gitea has no environment: reviewers).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: rc-draft | rc-publish | promote-stable
+        required: true
+        type: string
+      asset-profile:
+        description: binaries | full
+        required: false
+        type: string
+        default: binaries
+      bump:
+        description: patch | minor | major (for rc-publish / promote-stable)
+        required: false
+        type: string
+        default: patch
+      targets:
+        description: JSON array of target triples.
+        required: false
+        type: string
+        default: >-
+          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","aarch64-apple-darwin","x86_64-apple-darwin"]
+      bins:
+        description: 'JSON array of bin names. Empty ([]) = derive from cargo metadata.'
+        required: false
+        type: string
+        default: "[]"
+      mint-runner-label:
+        description: 'runs-on label of the macOS runner for the best-effort .pkg leg (full profile). Empty = skip .pkg.'
+        required: false
+        type: string
+        default: ""
+      notes:
+        description: Extra release-notes prefix.
+        required: false
+        type: string
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  # ── Resolve the version/tag/flags for this stage. ──
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      tag: ${{ steps.pick.outputs.tag }}
+      rel-name: ${{ steps.pick.outputs.rel-name }}
+      prerelease: ${{ steps.pick.outputs.prerelease }}
+      draft: ${{ steps.pick.outputs.draft }}
+      mirror: ${{ steps.pick.outputs.mirror }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: cv
+        uses: argyle-labs/.github/.github/actions/compute-version@main
+        with:
+          bump: ${{ inputs.bump }}
+
+      - name: Pick per-stage version/flags
+        id: pick
+        env:
+          STAGE: ${{ inputs.stage }}
+          RC_VERSION: ${{ steps.cv.outputs.rc-version }}
+          RC_TAG: ${{ steps.cv.outputs.rc-tag }}
+          STABLE_VERSION: ${{ steps.cv.outputs.stable-version }}
+          STABLE_TAG: ${{ steps.cv.outputs.stable-tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          case "$STAGE" in
+            rc-draft)
+              # Bake the prospective RC version; publish as a rolling draft.
+              version="$RC_VERSION"; tag="next"
+              name="${REPO##*/} — rolling draft (${RC_VERSION})"
+              prerelease=true; draft=true; mirror=false ;;
+            rc-publish)
+              version="$RC_VERSION"; tag="$RC_TAG"
+              name="${REPO##*/} ${RC_TAG}"
+              prerelease=true; draft=false; mirror=true ;;
+            promote-stable)
+              version="$STABLE_VERSION"; tag="$STABLE_TAG"
+              name="${REPO##*/} ${STABLE_TAG}"
+              prerelease=false; draft=false; mirror=true ;;
+            *) echo "::error::unknown stage '$STAGE'"; exit 1 ;;
+          esac
+          {
+            echo "version=$version"; echo "tag=$tag"; echo "rel-name=$name"
+            echo "prerelease=$prerelease"; echo "draft=$draft"; echo "mirror=$mirror"
+          } >> "$GITHUB_OUTPUT"
+          echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
+
+  # ── Cross-compile every target and stage assets in the profile's convention. ──
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rust setup
+        uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          cache-key: release-${{ matrix.target }}
+          orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      - name: Resolve bin list
+        id: bins
+        run: |
+          set -euo pipefail
+          requested='${{ inputs.bins }}'
+          if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
+            bins=$(echo "$requested" | jq -r '.[]')
+          else
+            bins=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          fi
+          [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
+          { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Build at release version
+        uses: argyle-labs/.github/.github/actions/build-target@main
+        with:
+          target: ${{ matrix.target }}
+          bins: ${{ steps.bins.outputs.list }}
+          version: ${{ needs.version.outputs.version }}
+
+      - name: Stage assets
+        env:
+          PROFILE: ${{ inputs.asset-profile }}
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ needs.version.outputs.tag }}
+          BINS: ${{ steps.bins.outputs.list }}
+        run: |
+          set -euo pipefail
+          if [ "$PROFILE" = "full" ]; then
+            # orca convention: dist-release/orca-<triple> (consumed by
+            # build_native_packages) + per-binary .sha256.
+            mkdir -p dist-release
+            while IFS= read -r bin; do
+              [ -z "$bin" ] && continue
+              cp "target/${TARGET}/release/${bin}" "dist-release/${bin}-${TARGET}"
+              ( cd dist-release && shasum -a 256 "${bin}-${TARGET}" > "${bin}-${TARGET}.sha256" )
+            done <<< "$BINS"
+            outdir=dist-release
+          else
+            # plugin convention: dist/<bin>-<tag>-<triple> + .sha256.
+            mkdir -p dist
+            while IFS= read -r bin; do
+              [ -z "$bin" ] && continue
+              cp "target/${TARGET}/release/${bin}" "dist/${bin}-${TAG}-${TARGET}"
+              ( cd dist && shasum -a 256 "${bin}-${TAG}-${TARGET}" > "${bin}-${TAG}-${TARGET}.sha256" )
+            done <<< "$BINS"
+            outdir=dist
+          fi
+          echo "── staged ($outdir) ──"; ls -la "$outdir"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: |
+            dist/
+            dist-release/
+
+  # ── orca full profile: native Linux packages from the staged binaries. ──
+  package-native:
+    if: ${{ inputs.asset-profile == 'full' }}
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect built binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          merge-multiple: true
+          path: staged
+
+      - name: Stage binaries into dist-release
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          # The full profile staged orca-<triple>(+.sha256) under each artifact.
+          find staged -type f \( -name 'orca-*' -o -name '*.sha256' \) -exec cp {} dist-release/ \;
+          echo "── dist-release ──"; ls -la dist-release
+
+      - name: Build native packages (deb/rpm/apk/PKGBUILD/homebrew/plg)
+        uses: argyle-labs/.github/.github/actions/package-native@main
+
+      - name: Assemble checksums + install.sh
+        run: |
+          set -euo pipefail
+          ( cd dist-release && cat ./*.sha256 > checksums.sha256 2>/dev/null || true )
+          [ -f scripts/install.sh ] && cp scripts/install.sh dist-release/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-packages
+          path: dist-release/
+
+  # ── orca full profile: best-effort macOS .pkg on the mint runner. ──
+  #     continue-on-error so a down/flaky mint never blocks a canonical release.
+  package-macos-pkg:
+    if: ${{ inputs.asset-profile == 'full' && inputs.mint-runner-label != '' }}
+    needs: version
+    runs-on: ${{ inputs.mint-runner-label }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build darwin binaries + .pkg natively
+        env:
+          REL_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          source scripts/release-lib.sh
+          write_cargo_version "$REL_VERSION"
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            rustup target add "$t" || true
+          done
+          # Build the darwin binaries this mac can produce, then let orca emit
+          # the .pkg (needs Apple pkgbuild — present only on macOS).
+          build_orca_targets || true
+          build_native_packages || true
+          echo "── dist-release (.pkg leg) ──"; ls -la dist-release || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist-release/*.pkg
+          if-no-files-found: warn
+
+  # ── Publish: Gitea canonical, then GitHub mirror (skipped for the draft). ──
+  publish:
+    needs: [version, build, package-native, package-macos-pkg]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gather all release assets
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: incoming
+
+      - name: Flatten into release-assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          # Collect every staged/packaged file, de-duplicated by basename.
+          find incoming -type f -exec cp -n {} release-assets/ \;
+          echo "── release-assets ──"; ls -la release-assets
+
+      - name: Publish to Gitea (canonical)
+        uses: argyle-labs/.github/.github/actions/publish-gitea@main
+        with:
+          gitea-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
+          tag: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.rel-name }}
+          body: ${{ inputs.notes }}
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          draft: ${{ needs.version.outputs.draft }}
+          assets-dir: release-assets
+
+      - name: Mirror to GitHub
+        if: ${{ needs.version.outputs.mirror == 'true' }}
+        uses: argyle-labs/.github/.github/actions/mirror-github@main
+        with:
+          github-token: ${{ secrets.GH_RELEASE_TOKEN }}
+          tag: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.rel-name }}
+          body: ${{ inputs.notes }}
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          assets-dir: release-assets

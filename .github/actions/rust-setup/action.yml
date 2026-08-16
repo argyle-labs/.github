@@ -1,0 +1,84 @@
+name: Rust setup (shared)
+description: >
+  The ONE home for the org's Rust CI/build environment: toolchain, the caching
+  strategy (sccache local-disk + Swatinem rust-cache), the private orca git-dep
+  auth (github.com→Gitea host rewrite), and the compile-memory controls that
+  keep heavy generated crates under the runner's memory cap. Every CI and
+  release job composes this so caching + toolchain are defined in exactly one
+  place (see [[unified-cicd-pipeline-architecture]]).
+
+inputs:
+  components:
+    description: 'Extra rustup components, comma-separated (e.g. "clippy, rustfmt"). Empty for build-only jobs.'
+    required: false
+    default: ""
+  cache-key:
+    description: 'Swatinem/rust-cache shared key — distinct per job/target so caches do not collide.'
+    required: true
+  orca-fetch-token:
+    description: >
+      Gitea token with read on argyle-labs/orca, for the private git dep.
+      Composites cannot read secrets, so the caller passes it in. Empty skips
+      the rewrite (e.g. the orca repo itself, which IS the dep).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    # sccache caches individual rustc invocations — INCLUDING workspace members,
+    # which rust-cache deliberately skips. That is what makes the giant generated
+    # proxmox crate stop recompiling from scratch each run. Backend = local disk
+    # on the persistent `:host` LXC runner (see env below); no cache protocol.
+    - name: Set up sccache
+      uses: mozilla-actions/sccache-action@v0.0.9
+
+    - name: Cache cargo registry + dep builds
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.cache-key }}
+
+    - name: Configure shared cargo/sccache environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          # ── caching ──
+          echo "RUSTC_WRAPPER=sccache"
+          # Local-disk backend on the persistent LXC runner: a fixed host path
+          # survives across jobs with zero cache-protocol dependency. Do NOT use
+          # SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat with
+          # sccache's GHA backend is unproven. Revisit if ephemeral runners land.
+          echo "SCCACHE_DIR=/root/.cache/sccache"
+          echo "SCCACHE_CACHE_SIZE=20G"
+          # sccache and cargo incremental are mutually exclusive.
+          echo "CARGO_INCREMENTAL=0"
+          # ── compile-memory controls ──
+          # The proxmox build.rs generates 1261 JsonSchema types; clippy's
+          # `lib test` variant at default debuginfo=2 OOM-killed the memory-capped
+          # runner. CI never debugs binaries, so drop debuginfo in dev+test.
+          echo "CARGO_PROFILE_DEV_DEBUG=0"
+          echo "CARGO_PROFILE_TEST_DEBUG=0"
+        } >> "$GITHUB_ENV"
+
+    - name: Drop local-dev cargo patch
+      shell: bash
+      run: rm -f .cargo/config.toml
+
+    - name: Authenticate private orca git dependency (Gitea)
+      if: ${{ inputs.orca-fetch-token != '' }}
+      shell: bash
+      env:
+        ORCA_FETCH_TOKEN: ${{ inputs.orca-fetch-token }}
+      run: |
+        # orca is spelled as a github.com dep but fetched from Gitea via a host
+        # rewrite. ORCA_FETCH_TOKEN must be a Gitea token with read on
+        # argyle-labs/orca. See [[gitea-canonical-github-mirror-only]].
+        git config --global \
+          url."https://x-access-token:${ORCA_FETCH_TOKEN}@gitea.scottkey.me/".insteadOf \
+          "https://github.com/"
