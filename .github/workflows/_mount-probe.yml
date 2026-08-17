@@ -1,0 +1,15 @@
+name: _mount-probe
+# THROWAWAY: does `docker run -v $PWD:/w` see the checkout (host executor) or an
+# empty dir (docker executor / DinD path mismatch)? Job SUCCESS = bind-mount
+# works; FAILURE = it doesn't. Read the conclusion via API. Delete after.
+on:
+  workflow_dispatch:
+jobs:
+  bindmount:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bind-mount visibility
+        run: |
+          echo "host pwd=$PWD; whoami=$(whoami)"
+          docker run --rm -v "$PWD":/w -w /w alpine sh -c 'ls -la /w | head; test -f /w/.github/workflows/_mount-probe.yml && echo MOUNT_OK'
