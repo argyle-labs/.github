@@ -1,0 +1,13 @@
+name: _docker-in-job
+# THROWAWAY: can a job docker-run (native-distro Part 2 needs this)? Job SUCCESS
+# = docker usable inside a job; FAILURE = not. Read the conclusion, no logs needed.
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: docker available in-job?
+        run: |
+          echo "whoami=$(whoami) host=$(hostname)"
+          docker version --format 'server={{.Server.Version}}' && echo "DOCKER_IN_JOB=yes"
