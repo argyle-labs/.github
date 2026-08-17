@@ -372,7 +372,7 @@ jobs:
             fi
           done <<< '${{ steps.bins.outputs.list }}'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: plugin-${{ matrix.target }}
           path: dist/*
@@ -405,12 +405,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # download-artifact@v3 (Gitea-compatible; @v4 uses @actions/artifact v2's
+      # Twirl API which Gitea/GHES do not implement → GHESNotSupportedError).
+      # @v3 has no `pattern`/`merge-multiple`, so grab every artifact and flatten
+      # the per-artifact subdirs into `dist/` with a portable find|while-read
+      # loop (BSD mv has no `mv -t`; runners here are Linux but keep it portable).
       - name: Download all target artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           path: dist
-          pattern: plugin-*
-          merge-multiple: true
+      - name: Flatten downloaded artifacts
+        run: |
+          set -euo pipefail
+          find dist -mindepth 2 -type f | while IFS= read -r f; do mv -f "$f" dist/; done
+          find dist -mindepth 1 -type d -empty -delete
 
       - name: Create Gitea Release (pipeline-tagged)
         # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]])
