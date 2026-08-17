@@ -84,9 +84,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Gitea's act runner can't resolve cross-repo composite actions hosted in
+      # the `.github` repo (it mis-resolves `argyle-labs/.github/...@main` to the
+      # caller's checkout). Vendor them onto disk and reference by local path.
+      - name: Fetch shared CI actions
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/.github
+          path: .ci
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
       - name: Compute version
         id: cv
-        uses: argyle-labs/.github/.github/actions/compute-version@main
+        uses: ./.ci/.github/actions/compute-version
         with:
           bump: ${{ inputs.bump }}
 
@@ -136,8 +146,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Gitea's act runner can't resolve cross-repo composite actions hosted in
+      # the `.github` repo (it mis-resolves `argyle-labs/.github/...@main` to the
+      # caller's checkout). Vendor them onto disk and reference by local path.
+      - name: Fetch shared CI actions
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/.github
+          path: .ci
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
       - name: Rust setup
-        uses: argyle-labs/.github/.github/actions/rust-setup@main
+        uses: ./.ci/.github/actions/rust-setup
         with:
           cache-key: release-${{ matrix.target }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -157,7 +177,7 @@ jobs:
           { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Build at release version
-        uses: argyle-labs/.github/.github/actions/build-target@main
+        uses: ./.ci/.github/actions/build-target
         with:
           target: ${{ matrix.target }}
           bins: ${{ steps.bins.outputs.list }}
@@ -210,6 +230,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Gitea's act runner can't resolve cross-repo composite actions hosted in
+      # the `.github` repo (it mis-resolves `argyle-labs/.github/...@main` to the
+      # caller's checkout). Vendor them onto disk and reference by local path.
+      - name: Fetch shared CI actions
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/.github
+          path: .ci
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
       - name: Collect built binaries
         uses: actions/download-artifact@v3
         with:
@@ -224,7 +254,7 @@ jobs:
           echo "── dist-release ──"; ls -la dist-release
 
       - name: Build native packages (deb/rpm/apk/PKGBUILD/homebrew/plg)
-        uses: argyle-labs/.github/.github/actions/package-native@main
+        uses: ./.ci/.github/actions/package-native
 
       - name: Assemble checksums + install.sh
         run: |
@@ -277,6 +307,16 @@ jobs:
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      # Gitea's act runner can't resolve cross-repo composite actions hosted in
+      # the `.github` repo (it mis-resolves `argyle-labs/.github/...@main` to the
+      # caller's checkout). Vendor them onto disk and reference by local path.
+      - name: Fetch shared CI actions
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/.github
+          path: .ci
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
       - name: Gather all release assets
         uses: actions/download-artifact@v3
         with:
@@ -291,7 +331,7 @@ jobs:
           echo "── release-assets ──"; ls -la release-assets
 
       - name: Publish to Gitea (canonical)
-        uses: argyle-labs/.github/.github/actions/publish-gitea@main
+        uses: ./.ci/.github/actions/publish-gitea
         with:
           gitea-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
           tag: ${{ needs.version.outputs.tag }}
@@ -303,7 +343,7 @@ jobs:
 
       - name: Mirror to GitHub
         if: ${{ needs.version.outputs.mirror == 'true' }}
-        uses: argyle-labs/.github/.github/actions/mirror-github@main
+        uses: ./.ci/.github/actions/mirror-github
         with:
           github-token: ${{ secrets.GH_RELEASE_TOKEN }}
           tag: ${{ needs.version.outputs.tag }}
