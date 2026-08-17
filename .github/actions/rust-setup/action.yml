@@ -35,8 +35,26 @@ runs:
     # which rust-cache deliberately skips. That is what makes the giant generated
     # proxmox crate stop recompiling from scratch each run. Backend = local disk
     # on the persistent `:host` LXC runner (see env below); no cache protocol.
-    - name: Set up sccache
-      uses: mozilla-actions/sccache-action@v0.0.9
+    # Install sccache directly from its public release tarball — best-effort.
+    # mozilla-actions/sccache-action queries the GitHub *API* to resolve the
+    # release, which needs a token that Gitea's act does not populate in a
+    # composite ("Input required and not supplied: token"), failing the build.
+    # A direct download of a pinned version needs no API and no token; if it
+    # fails for any reason we skip the wrapper rather than break the build.
+    - name: Set up sccache (best-effort, no GitHub API)
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v sccache >/dev/null 2>&1; then echo "sccache already present"; exit 0; fi
+        ver=0.8.2
+        url="https://github.com/mozilla/sccache/releases/download/v${ver}/sccache-v${ver}-x86_64-unknown-linux-musl.tar.gz"
+        if curl -fsSL "$url" -o /tmp/sccache.tgz && tar -xzf /tmp/sccache.tgz -C /tmp; then
+          install -m0755 /tmp/sccache-v${ver}-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache \
+            2>/dev/null || sudo install -m0755 /tmp/sccache-v${ver}-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache
+          echo "sccache $(sccache --version 2>/dev/null || echo '?') installed"
+        else
+          echo "::warning::sccache download failed — building without compiler cache"
+        fi
 
     - name: Cache cargo registry + dep builds
       uses: Swatinem/rust-cache@v2
@@ -49,7 +67,9 @@ runs:
         set -euo pipefail
         {
           # ── caching ──
-          echo "RUSTC_WRAPPER=sccache"
+          # Only wrap rustc when sccache actually installed (best-effort above);
+          # otherwise leave RUSTC_WRAPPER unset so the build still runs.
+          command -v sccache >/dev/null 2>&1 && echo "RUSTC_WRAPPER=sccache"
           # Local-disk backend on the persistent LXC runner: a fixed host path
           # survives across jobs with zero cache-protocol dependency. Do NOT use
           # SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat with
