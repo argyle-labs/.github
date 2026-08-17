@@ -64,6 +64,18 @@ on:
         required: false
         type: string
         default: ""
+      build-mode:
+        description: >-
+          Which Linux build variant runs: "parallel" (static shard matrix — fans
+          out one job per target across runners; the Gitea-act default) or
+          "sequential" (fromJSON(inputs.targets) matrix — the clean generic form
+          that fans out natively on real GitHub Actions but COLLAPSES to one
+          sequential job on Gitea act). Both jobs always exist; the unselected
+          one runs as a fast no-op (step-level skip, NOT job-level — a job-level
+          skipped `needs` hangs downstream on Gitea act). Nothing is lost.
+        required: false
+        type: string
+        default: parallel
       notes:
         description: Extra release-notes prefix.
         required: false
@@ -139,23 +151,60 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
 
-  # ── Cross-compile every target and stage assets in the profile's convention. ──
-  build:
+  # ── Build every target IN PARALLEL and stage assets in the profile's convention. ──
+  #   Parallelism note: Gitea's `act` COLLAPSES a `fromJSON(inputs.targets)`
+  #   matrix into a single sequential job (verified), but fans out a STATIC
+  #   matrix into concurrent jobs across runners (also verified). So the matrix
+  #   is a static shard index and each shard picks targets[shard] from the still-
+  #   generic `inputs.targets` — parallel AND generic. Keep the shard list length
+  #   in sync with SHARDS below; more targets than shards fails loudly.
+  build-parallel:
     needs: version
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets) }}
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Select this shard's target
+        id: sel
+        env:
+          TARGETS: ${{ inputs.targets }}
+          SHARD: ${{ matrix.shard }}
+          MODE: ${{ inputs.build-mode }}
+        run: |
+          set -euo pipefail
+          # No-op (fast success, NOT job-skip) when the sequential variant is
+          # selected — a job-level skip would hang the downstream `needs`.
+          if [ "$MODE" != "parallel" ]; then
+            echo "build-mode=$MODE → parallel build stands down (shard ${SHARD} no-op)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          SHARDS=6   # MUST equal the length of strategy.matrix.shard above.
+          n=$(echo "$TARGETS" | jq 'length')
+          if [ "$n" -gt "$SHARDS" ]; then
+            echo "::error::${n} targets exceeds ${SHARDS} build shards — widen strategy.matrix.shard (and SHARDS) in release.yml."
+            exit 1
+          fi
+          t=$(echo "$TARGETS" | jq -r ".[${SHARD}] // empty")
+          if [ -z "$t" ]; then
+            echo "shard ${SHARD}: no target (only ${n} target(s)) — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "shard ${SHARD} → ${t}"
+            echo "target=${t}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Gitea's act runner can't resolve cross-repo composite actions hosted in
       # the `.github` repo (it mis-resolves `argyle-labs/.github/...@main` to the
       # caller's checkout). Vendor them onto disk and reference by local path.
       - name: Fetch shared CI actions
+        if: steps.sel.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           repository: argyle-labs/.github
@@ -163,13 +212,15 @@ jobs:
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Rust setup
+        if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/rust-setup
         with:
-          cache-key: release-${{ matrix.target }}
+          cache-key: release-${{ steps.sel.outputs.target }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Resolve bin list
         id: bins
+        if: steps.sel.outputs.skip != 'true'
         run: |
           set -euo pipefail
           requested='${{ inputs.bins }}'
@@ -183,16 +234,18 @@ jobs:
           { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Build at release version
+        if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/build-target
         with:
-          target: ${{ matrix.target }}
+          target: ${{ steps.sel.outputs.target }}
           bins: ${{ steps.bins.outputs.list }}
           version: ${{ needs.version.outputs.version }}
 
       - name: Stage assets
+        if: steps.sel.outputs.skip != 'true'
         env:
           PROFILE: ${{ inputs.asset-profile }}
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ steps.sel.outputs.target }}
           TAG: ${{ needs.version.outputs.tag }}
           BINS: ${{ steps.bins.outputs.list }}
         run: |
@@ -233,6 +286,139 @@ jobs:
       # exec'd here — those are smoke-tested on their native runner
       # (darwin on the macOS leg). A non-launching binary FAILS the release.
       - name: Smoke-test binary (native-arch targets only)
+        if: steps.sel.outputs.skip != 'true'
+        env:
+          PROFILE: ${{ inputs.asset-profile }}
+          TARGET: ${{ steps.sel.outputs.target }}
+          TAG: ${{ needs.version.outputs.tag }}
+          BINS: ${{ steps.bins.outputs.list }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            x86_64-unknown-linux-gnu|x86_64-unknown-linux-musl) ;;
+            *) echo "skip: $TARGET not exec'able on this x86_64 Linux runner"; exit 0 ;;
+          esac
+          while IFS= read -r bin; do
+            [ -z "$bin" ] && continue
+            if [ "$PROFILE" = "full" ]; then f="dist-release/${bin}-${TARGET}"; else f="dist/${bin}-${TAG}-${TARGET}"; fi
+            chmod +x "$f"
+            echo "── smoke: $f --version ──"
+            "./$f" --version
+          done <<< "$BINS"
+
+      - uses: actions/upload-artifact@v3
+        if: steps.sel.outputs.skip != 'true'
+        with:
+          name: build-${{ steps.sel.outputs.target }}
+          if-no-files-found: warn
+          path: |
+            dist/
+            dist-release/
+
+  # ── Sequential build variant: fromJSON(inputs.targets) matrix. ──
+  #   The clean generic form — on real GitHub Actions it fans out one job per
+  #   target; on Gitea act it COLLAPSES to a single job that builds every target
+  #   back-to-back (~12 min each). Kept alongside build-parallel and selected
+  #   with build-mode=sequential. When parallel is chosen this job runs as a fast
+  #   no-op (step-level gate, NOT a job-level skip — that would hang publish).
+  build-sequential:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gate on build-mode
+        id: gate
+        env:
+          MODE: ${{ inputs.build-mode }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "sequential" ]; then
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build-mode=$MODE → sequential build stands down (no-op)."
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch shared CI actions
+        if: steps.gate.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/.github
+          path: .ci
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      - name: Rust setup
+        if: steps.gate.outputs.active == 'true'
+        uses: ./.ci/.github/actions/rust-setup
+        with:
+          cache-key: release-${{ matrix.target }}
+          orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      - name: Resolve bin list
+        id: bins
+        if: steps.gate.outputs.active == 'true'
+        run: |
+          set -euo pipefail
+          requested='${{ inputs.bins }}'
+          if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
+            bins=$(echo "$requested" | jq -r '.[]')
+          else
+            bins=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          fi
+          [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
+          { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Build at release version
+        if: steps.gate.outputs.active == 'true'
+        uses: ./.ci/.github/actions/build-target
+        with:
+          target: ${{ matrix.target }}
+          bins: ${{ steps.bins.outputs.list }}
+          version: ${{ needs.version.outputs.version }}
+
+      - name: Stage assets
+        if: steps.gate.outputs.active == 'true'
+        env:
+          PROFILE: ${{ inputs.asset-profile }}
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ needs.version.outputs.tag }}
+          BINS: ${{ steps.bins.outputs.list }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            *-apple-darwin)
+              echo "::warning::skipping $TARGET in the Linux build — darwin is built natively on the macOS runner leg."
+              exit 0 ;;
+          esac
+          if [ "$PROFILE" = "full" ]; then
+            mkdir -p dist-release
+            while IFS= read -r bin; do
+              [ -z "$bin" ] && continue
+              cp "target/${TARGET}/release/${bin}" "dist-release/${bin}-${TARGET}"
+              ( cd dist-release && shasum -a 256 "${bin}-${TARGET}" > "${bin}-${TARGET}.sha256" )
+            done <<< "$BINS"
+            outdir=dist-release
+          else
+            mkdir -p dist
+            while IFS= read -r bin; do
+              [ -z "$bin" ] && continue
+              cp "target/${TARGET}/release/${bin}" "dist/${bin}-${TAG}-${TARGET}"
+              ( cd dist && shasum -a 256 "${bin}-${TAG}-${TARGET}" > "${bin}-${TAG}-${TARGET}.sha256" )
+            done <<< "$BINS"
+            outdir=dist
+          fi
+          echo "── staged ($outdir) ──"; ls -la "$outdir"
+
+      - name: Smoke-test binary (native-arch targets only)
+        if: steps.gate.outputs.active == 'true'
         env:
           PROFILE: ${{ inputs.asset-profile }}
           TARGET: ${{ matrix.target }}
@@ -253,6 +439,7 @@ jobs:
           done <<< "$BINS"
 
       - uses: actions/upload-artifact@v3
+        if: steps.gate.outputs.active == 'true'
         with:
           name: build-${{ matrix.target }}
           if-no-files-found: warn
@@ -263,7 +450,7 @@ jobs:
   # ── orca full profile: native Linux packages from the staged binaries. ──
   package-native:
     if: ${{ inputs.asset-profile == 'full' }}
-    needs: [version, build]
+    needs: [version, build-parallel, build-sequential]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -377,7 +564,7 @@ jobs:
     # a terminal state). CAUTION: Gitea's act HANGS a job that `needs` a SKIPPED
     # job — so if a caller omits mint-runner-label (package-macos-pkg skips), drop
     # it from this needs list, or publish will sit unscheduled.
-    needs: [version, build, package-native, package-macos-pkg]
+    needs: [version, build-parallel, build-sequential, package-native, package-macos-pkg]
     # NO `if:` here. Gitea's act never MATERIALISES a job whose `if` uses
     # cancelled()/!cancelled() or needs.*.result — publish sat forever in
     # "waiting" with created:null even when every dependency succeeded (run 335,
