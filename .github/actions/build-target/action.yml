@@ -85,6 +85,14 @@ runs:
         RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
       run: |
         set -euo pipefail
+        # zig's linker opens every input object at once (thousands for a release
+        # binary — e.g. orca's darwin link touches ~3k .o files). The container's
+        # default open-file soft limit (1024) then trips
+        # `ProcessFdQuotaExceeded`. Raise it to the hard cap (root in-container
+        # may also lift the hard cap) before building.
+        ulimit -Hn 1048576 2>/dev/null || true
+        ulimit -n 1048576 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+        echo "open-files limit (soft/hard): $(ulimit -Sn)/$(ulimit -Hn)"
         case "${{ inputs.target }}" in
           x86_64-unknown-linux-gnu) builder="cargo build" ;;
           *)                        builder="cargo zigbuild" ;;
