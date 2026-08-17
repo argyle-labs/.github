@@ -251,6 +251,10 @@ jobs:
           mkdir -p dist-release
           # The full profile staged orca-<triple>(+.sha256) under each artifact.
           find staged -type f \( -name 'orca-*' -o -name '*.sha256' \) -exec cp {} dist-release/ \;
+          # Artifact up/download strips the Unix +x bit; build_native_packages
+          # requires `-x` and the deb/rpm payloads must be executable. Restore it
+          # on the binaries (not the .sha256 sidecars).
+          find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── dist-release ──"; ls -la dist-release
 
       - name: Build native packages (deb/rpm/apk/PKGBUILD/homebrew/plg)
@@ -328,6 +332,8 @@ jobs:
           mkdir -p release-assets
           # Collect every staged/packaged file, de-duplicated by basename.
           find incoming -type f -exec cp -n {} release-assets/ \;
+          # Restore +x on the raw per-target binaries (artifact round-trips drop it).
+          find release-assets -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── release-assets ──"; ls -la release-assets
 
       - name: Publish to Gitea (canonical)
