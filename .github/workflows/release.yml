@@ -43,11 +43,17 @@ on:
         type: string
         default: patch
       targets:
-        description: JSON array of target triples.
+        description: >-
+          JSON array of target triples for the Linux cross-compile matrix.
+          Do NOT list *-apple-darwin here: the zigbuild cross-compile emits a
+          Mach-O with a duplicate libiconv LC_LOAD_DYLIB that macOS dyld refuses
+          to load (binary is DOA). Darwin binaries are built NATIVELY on the
+          macOS runner leg (package-macos-pkg) instead. Any darwin triple listed
+          here is skipped in Stage assets and never published.
         required: false
         type: string
         default: >-
-          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","aarch64-apple-darwin","x86_64-apple-darwin"]
+          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl"]
       bins:
         description: 'JSON array of bin names. Empty ([]) = derive from cargo metadata.'
         required: false
@@ -191,6 +197,14 @@ jobs:
           BINS: ${{ steps.bins.outputs.list }}
         run: |
           set -euo pipefail
+          # Defensive: never stage a darwin binary from the Linux zigbuild leg.
+          # zig's linker double-links libiconv → dyld aborts the Mach-O on load.
+          # Darwin is built natively on the macOS runner (package-macos-pkg).
+          case "$TARGET" in
+            *-apple-darwin)
+              echo "::warning::skipping $TARGET in the Linux build — darwin is built natively on the macOS runner leg."
+              exit 0 ;;
+          esac
           if [ "$PROFILE" = "full" ]; then
             # orca convention: dist-release/orca-<triple> (consumed by
             # build_native_packages) + per-binary .sha256.
@@ -213,9 +227,35 @@ jobs:
           fi
           echo "── staged ($outdir) ──"; ls -la "$outdir"
 
+      # Gap guard: a release must never ship a binary that won't launch. Exec
+      # the freshly-built binary where the runner arch matches the target
+      # (x86_64 Linux runs on ubuntu-latest). Cross-arch/OS targets can't be
+      # exec'd here — those are smoke-tested on their native runner
+      # (darwin on the macOS leg). A non-launching binary FAILS the release.
+      - name: Smoke-test binary (native-arch targets only)
+        env:
+          PROFILE: ${{ inputs.asset-profile }}
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ needs.version.outputs.tag }}
+          BINS: ${{ steps.bins.outputs.list }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            x86_64-unknown-linux-gnu|x86_64-unknown-linux-musl) ;;
+            *) echo "skip: $TARGET not exec'able on this x86_64 Linux runner"; exit 0 ;;
+          esac
+          while IFS= read -r bin; do
+            [ -z "$bin" ] && continue
+            if [ "$PROFILE" = "full" ]; then f="dist-release/${bin}-${TARGET}"; else f="dist/${bin}-${TAG}-${TARGET}"; fi
+            chmod +x "$f"
+            echo "── smoke: $f --version ──"
+            "./$f" --version
+          done <<< "$BINS"
+
       - uses: actions/upload-artifact@v3
         with:
           name: build-${{ matrix.target }}
+          if-no-files-found: warn
           path: |
             dist/
             dist-release/
@@ -271,51 +311,72 @@ jobs:
           name: native-packages
           path: dist-release/
 
-  # ── orca full profile: best-effort macOS .pkg on the mint runner. ──
-  #     continue-on-error so a down/flaky mint never blocks a canonical release.
+  # ── orca full profile: the macOS leg — the SOLE source of the darwin binary. ──
+  #   Builds the aarch64-apple-darwin binary NATIVELY on the mint mac runner so
+  #   Apple's ld64 dedupes the libiconv load command (the zigbuild cross-compile
+  #   does not, producing a Mach-O that dyld refuses to load). Emits BOTH the raw
+  #   binary (+.sha256, consumed by the fleet updater) AND the .pkg, smoke-tests
+  #   the binary, and — because darwin has no other source — is NOT
+  #   continue-on-error: a broken or missing darwin binary must FAIL the release
+  #   rather than silently ship an unusable artifact. A down mint blocks the
+  #   release (correct: we can't claim darwin support without a working binary).
   package-macos-pkg:
     if: ${{ inputs.asset-profile == 'full' && inputs.mint-runner-label != '' }}
     needs: version
     runs-on: ${{ inputs.mint-runner-label }}
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Build darwin binaries + .pkg natively
+      - name: Build darwin binary + .pkg natively
         env:
           REL_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
-          for t in aarch64-apple-darwin x86_64-apple-darwin; do
-            rustup target add "$t" || true
-          done
-          # Build the darwin binaries this mac can produce, then let orca emit
-          # the .pkg (needs Apple pkgbuild — present only on macOS).
+          rustup target add aarch64-apple-darwin || true
           # build_orca_targets REQUIRES explicit targets (dies "no targets given"
           # otherwise, and its die exit isn't caught by `|| true`). Build the
-          # shipped arm64 slice on the arm64 mint runner.
+          # shipped arm64 slice on the arm64 mint runner, then let orca emit the
+          # .pkg (needs Apple pkgbuild — present only on macOS).
           build_orca_targets aarch64-apple-darwin
           build_native_packages
-          echo "── dist-release (.pkg leg) ──"; ls -la dist-release || true
+          echo "── dist-release (macOS leg) ──"; ls -la dist-release || true
+
+      - name: Ensure raw binary + checksum, then smoke-test it
+        run: |
+          set -euo pipefail
+          bin="dist-release/orca-aarch64-apple-darwin"
+          [ -f "$bin" ] || { echo "::error::native darwin build produced no $bin"; exit 1; }
+          chmod +x "$bin"
+          ( cd dist-release && shasum -a 256 orca-aarch64-apple-darwin > orca-aarch64-apple-darwin.sha256 )
+          # THE gap guard: rc.9 shipped a darwin Mach-O that dyld aborted on
+          # ('duplicate linked dylib libiconv.2.dylib') and nothing caught it.
+          # Exec the binary natively — if it can't even print --version, the
+          # release fails here instead of publishing a DOA artifact.
+          echo "── smoke: $bin --version ──"
+          "./$bin" --version
 
       - uses: actions/upload-artifact@v3
         with:
-          name: macos-pkg
-          path: dist-release/*.pkg
-          if-no-files-found: warn
+          name: macos-darwin
+          if-no-files-found: error
+          path: |
+            dist-release/orca-aarch64-apple-darwin
+            dist-release/orca-aarch64-apple-darwin.sha256
+            dist-release/*.pkg
 
   # ── Publish: Gitea canonical, then GitHub mirror (skipped for the draft). ──
   publish:
-    # Depends on package-macos-pkg so the .pkg is INCLUDED in the release. This is
-    # safe as long as the caller wires `mint-runner-label` (then the job RUNS and
-    # reaches a terminal state). CAUTION: Gitea's act HANGS a job that `needs` a
-    # SKIPPED job — so if a caller omits mint-runner-label (package-macos-pkg
-    # skips), drop it from this needs list, or publish will sit unscheduled.
-    # `continue-on-error` on package-macos-pkg keeps a failed .pkg from blocking.
+    # Depends on package-macos-pkg so the darwin binary + .pkg are INCLUDED and,
+    # since that leg is now a required gate (not continue-on-error), a broken or
+    # missing darwin artifact BLOCKS publish instead of shipping unusable. Safe as
+    # long as the caller wires `mint-runner-label` (then the job RUNS and reaches
+    # a terminal state). CAUTION: Gitea's act HANGS a job that `needs` a SKIPPED
+    # job — so if a caller omits mint-runner-label (package-macos-pkg skips), drop
+    # it from this needs list, or publish will sit unscheduled.
     needs: [version, build, package-native, package-macos-pkg]
     # NO `if:` here. Gitea's act never MATERIALISES a job whose `if` uses
     # cancelled()/!cancelled() or needs.*.result — publish sat forever in
