@@ -193,7 +193,7 @@ jobs:
           fi
           echo "── staged ($outdir) ──"; ls -la "$outdir"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: build-${{ matrix.target }}
           path: |
@@ -211,10 +211,8 @@ jobs:
           fetch-depth: 0
 
       - name: Collect built binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
-          pattern: build-*
-          merge-multiple: true
           path: staged
 
       - name: Stage binaries into dist-release
@@ -234,7 +232,7 @@ jobs:
           ( cd dist-release && cat ./*.sha256 > checksums.sha256 2>/dev/null || true )
           [ -f scripts/install.sh ] && cp scripts/install.sh dist-release/ || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: native-packages
           path: dist-release/
@@ -267,7 +265,7 @@ jobs:
           build_native_packages || true
           echo "── dist-release (.pkg leg) ──"; ls -la dist-release || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: macos-pkg
           path: dist-release/*.pkg
@@ -280,9 +278,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Gather all release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
-          merge-multiple: true
           path: incoming
 
       - name: Flatten into release-assets
