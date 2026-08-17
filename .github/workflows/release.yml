@@ -307,7 +307,12 @@ jobs:
 
   # ── Publish: Gitea canonical, then GitHub mirror (skipped for the draft). ──
   publish:
-    needs: [version, build, package-native, package-macos-pkg]
+    # NOT depending on package-macos-pkg: it's a best-effort, often-skipped job
+    # (only runs when a mint macOS runner is wired). Gitea's act HANGS a job that
+    # `needs` a skipped job (created:null, never scheduled) — unlike GitHub, where
+    # the `if: !cancelled()` gate lets publish proceed. publish still gathers the
+    # .pkg via download-all-artifacts if that leg happened to produce one.
+    needs: [version, build, package-native]
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
