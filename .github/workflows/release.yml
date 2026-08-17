@@ -295,8 +295,11 @@ jobs:
           done
           # Build the darwin binaries this mac can produce, then let orca emit
           # the .pkg (needs Apple pkgbuild — present only on macOS).
-          build_orca_targets || true
-          build_native_packages || true
+          # build_orca_targets REQUIRES explicit targets (dies "no targets given"
+          # otherwise, and its die exit isn't caught by `|| true`). Build the
+          # shipped arm64 slice on the arm64 mint runner.
+          build_orca_targets aarch64-apple-darwin
+          build_native_packages
           echo "── dist-release (.pkg leg) ──"; ls -la dist-release || true
 
       - uses: actions/upload-artifact@v3
