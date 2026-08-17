@@ -246,8 +246,14 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
           BINS: ${{ steps.bins.outputs.list }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p dist-release dist
+          LOG="dist-release/_nb-${TARGET}.log"
+          exec > >(tee "$LOG") 2>&1   # capture everything; uploaded even on failure
+          echo "── env: whoami=$(whoami) host=$(hostname) pwd=$PWD image=$IMAGE ──"
+          echo "── DinD mount check: can the build container see the repo? ──"
+          docker run --rm -v "$PWD":/w -w /w "$IMAGE" sh -c 'echo "in-container /w:"; ls /w | head; test -f /w/scripts/release-lib.sh && echo MOUNT_OK || echo MOUNT_EMPTY' || echo "docker run failed rc=$?"
+          set -e
           # In-container build script: install per-distro build deps, bake the
           # release version, build natively (container's default target IS the
           # triple — no --target), and drop each binary world-readable at
@@ -313,7 +319,7 @@ jobs:
           done <<< "$BINS"
 
       - uses: actions/upload-artifact@v3
-        if: steps.sel.outputs.skip != 'true'
+        if: ${{ always() && steps.sel.outputs.skip != 'true' }}
         with:
           name: build-${{ steps.sel.outputs.target }}
           if-no-files-found: warn
