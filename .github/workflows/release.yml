@@ -139,23 +139,53 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
 
-  # ── Cross-compile every target and stage assets in the profile's convention. ──
+  # ── Build every target IN PARALLEL and stage assets in the profile's convention. ──
+  #   Parallelism note: Gitea's `act` COLLAPSES a `fromJSON(inputs.targets)`
+  #   matrix into a single sequential job (verified), but fans out a STATIC
+  #   matrix into concurrent jobs across runners (also verified). So the matrix
+  #   is a static shard index and each shard picks targets[shard] from the still-
+  #   generic `inputs.targets` — parallel AND generic. Keep the shard list length
+  #   in sync with SHARDS below; more targets than shards fails loudly.
   build:
     needs: version
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets) }}
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Select this shard's target
+        id: sel
+        env:
+          TARGETS: ${{ inputs.targets }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          SHARDS=6   # MUST equal the length of strategy.matrix.shard above.
+          n=$(echo "$TARGETS" | jq 'length')
+          if [ "$n" -gt "$SHARDS" ]; then
+            echo "::error::${n} targets exceeds ${SHARDS} build shards — widen strategy.matrix.shard (and SHARDS) in release.yml."
+            exit 1
+          fi
+          t=$(echo "$TARGETS" | jq -r ".[${SHARD}] // empty")
+          if [ -z "$t" ]; then
+            echo "shard ${SHARD}: no target (only ${n} target(s)) — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "shard ${SHARD} → ${t}"
+            echo "target=${t}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Gitea's act runner can't resolve cross-repo composite actions hosted in
       # the `.github` repo (it mis-resolves `argyle-labs/.github/...@main` to the
       # caller's checkout). Vendor them onto disk and reference by local path.
       - name: Fetch shared CI actions
+        if: steps.sel.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           repository: argyle-labs/.github
@@ -163,13 +193,15 @@ jobs:
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Rust setup
+        if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/rust-setup
         with:
-          cache-key: release-${{ matrix.target }}
+          cache-key: release-${{ steps.sel.outputs.target }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Resolve bin list
         id: bins
+        if: steps.sel.outputs.skip != 'true'
         run: |
           set -euo pipefail
           requested='${{ inputs.bins }}'
@@ -183,16 +215,18 @@ jobs:
           { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Build at release version
+        if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/build-target
         with:
-          target: ${{ matrix.target }}
+          target: ${{ steps.sel.outputs.target }}
           bins: ${{ steps.bins.outputs.list }}
           version: ${{ needs.version.outputs.version }}
 
       - name: Stage assets
+        if: steps.sel.outputs.skip != 'true'
         env:
           PROFILE: ${{ inputs.asset-profile }}
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ steps.sel.outputs.target }}
           TAG: ${{ needs.version.outputs.tag }}
           BINS: ${{ steps.bins.outputs.list }}
         run: |
@@ -233,9 +267,10 @@ jobs:
       # exec'd here — those are smoke-tested on their native runner
       # (darwin on the macOS leg). A non-launching binary FAILS the release.
       - name: Smoke-test binary (native-arch targets only)
+        if: steps.sel.outputs.skip != 'true'
         env:
           PROFILE: ${{ inputs.asset-profile }}
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ steps.sel.outputs.target }}
           TAG: ${{ needs.version.outputs.tag }}
           BINS: ${{ steps.bins.outputs.list }}
         run: |
@@ -253,8 +288,9 @@ jobs:
           done <<< "$BINS"
 
       - uses: actions/upload-artifact@v3
+        if: steps.sel.outputs.skip != 'true'
         with:
-          name: build-${{ matrix.target }}
+          name: build-${{ steps.sel.outputs.target }}
           if-no-files-found: warn
           path: |
             dist/
