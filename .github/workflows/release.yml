@@ -317,7 +317,12 @@ jobs:
     # skips), drop it from this needs list, or publish will sit unscheduled.
     # `continue-on-error` on package-macos-pkg keeps a failed .pkg from blocking.
     needs: [version, build, package-native, package-macos-pkg]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.build.result == 'success' }}
+    # NO `if:` here. Gitea's act never MATERIALISES a job whose `if` uses
+    # cancelled()/!cancelled() or needs.*.result — publish sat forever in
+    # "waiting" with created:null even when every dependency succeeded (run 335,
+    # runners idle). Default gating (run only when all `needs` succeed) is what
+    # Gitea schedules reliably; package-native uses exactly that. package-macos-pkg
+    # is continue-on-error, so a failed .pkg still reports success and won't block.
     runs-on: ubuntu-latest
     steps:
       # Gitea's act runner can't resolve cross-repo composite actions hosted in
