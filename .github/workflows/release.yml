@@ -161,6 +161,12 @@ jobs:
   build-parallel:
     needs: version
     runs-on: ubuntu-latest
+    # Label each shard job with the target it actually builds. The matrix value
+    # is just an index (see the shard note below), so the target isn't a matrix
+    # dimension — but it IS derivable at job-creation time from inputs.targets
+    # indexed by the shard. A shard past the target count builds nothing, so it
+    # is labelled "unused" rather than showing a blank target.
+    name: build ${{ fromJSON(inputs.targets)[matrix.shard] || format('shard-{0} (unused)', matrix.shard) }}
     strategy:
       fail-fast: false
       matrix:
@@ -324,6 +330,9 @@ jobs:
   build-sequential:
     needs: version
     runs-on: ubuntu-latest
+    # Label by the target rather than letting the UI print the raw
+    # `${{ fromJSON(inputs.targets) }}` matrix expression.
+    name: build-sequential ${{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
