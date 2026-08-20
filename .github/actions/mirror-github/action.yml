@@ -1,0 +1,82 @@
+name: Mirror release to GitHub
+description: >
+  Mirror a release + its assets OUTWARD to GitHub Releases (the read-only
+  public mirror; Gitea is canonical). Ports the proven plugin-release curl+jq
+  pattern against api.github.com (the Gitea runner image lacks `gh`).
+  Idempotent — reuses an existing GitHub release for the tag.
+
+inputs:
+  github-token:
+    description: GitHub token with contents:write on the mirror repo.
+    required: true
+  tag:
+    description: Tag name (e.g. v0.1.8-rc.9).
+    required: true
+  name:
+    description: Release title.
+    required: true
+  body:
+    description: Release notes (markdown).
+    required: false
+    default: ""
+  prerelease:
+    description: "true = prerelease (RC); false = stable."
+    required: false
+    default: "true"
+  assets-dir:
+    description: Directory whose files are uploaded as release assets.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Mirror to GitHub
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ inputs.tag }}
+        REL_NAME: ${{ inputs.name }}
+        REL_BODY: ${{ inputs.body }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        ASSETS_DIR: ${{ inputs.assets-dir }}
+      run: |
+        set -euo pipefail
+        api="https://api.github.com"
+        up="https://uploads.github.com"
+        auth=(-H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
+        rel_api="${api}/repos/${REPO}/releases"
+
+        existing=$(curl -fsS "${auth[@]}" "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
+        rel_id=$(echo "$existing" | jq -r '.id // empty' 2>/dev/null || true)
+
+        body_json=$(jq -n \
+          --arg tag "$TAG" --arg name "$REL_NAME" --arg body "$REL_BODY" \
+          --argjson pre "$PRERELEASE" \
+          '{tag_name:$tag, name:$name, body:$body, prerelease:$pre}')
+
+        if [ -n "$rel_id" ]; then
+          echo "→ updating existing GitHub release id=$rel_id ($TAG)"
+          curl -fsS "${auth[@]}" -X PATCH -d "$body_json" "${rel_api}/${rel_id}" >/dev/null
+          for aid in $(echo "$existing" | jq -r '.assets[]?.id // empty'); do
+            curl -fsS "${auth[@]}" -X DELETE "${rel_api}/assets/${aid}" >/dev/null || true
+          done
+        else
+          echo "→ creating GitHub release ($TAG)"
+          created=$(curl -fsS "${auth[@]}" -X POST -d "$body_json" "$rel_api")
+          rel_id=$(echo "$created" | jq -r '.id')
+        fi
+        [ -n "$rel_id" ] && [ "$rel_id" != "null" ] || { echo "::error::no GitHub release id"; exit 1; }
+
+        shopt -s nullglob
+        count=0
+        for f in "$ASSETS_DIR"/*; do
+          [ -f "$f" ] || continue
+          name=$(basename "$f")
+          echo "  ↑ $name"
+          curl -fsS "${auth[@]}" -H "Content-Type: application/octet-stream" \
+            --data-binary "@${f}" \
+            "${up}/repos/${REPO}/releases/${rel_id}/assets?name=${name}" >/dev/null
+          count=$((count+1))
+        done
+        echo "→ mirrored $count asset(s) to GitHub release $TAG (id=$rel_id)"

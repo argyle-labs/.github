@@ -94,27 +94,54 @@ jobs:
           gitea_assets()  { assets_for "$GITEA_API/repos/$REPO/releases/tags/$1" "Authorization: token $GITEA_TOKEN"; }
           github_assets() { assets_for "https://api.github.com/repos/$REPO/releases/tags/$1" "Authorization: Bearer $GH_TOKEN"; }
 
+          # ── mirror-lag tolerance ───────────────────────────────────────────
+          # Gitea is canonical: its release + assets exist the instant the tag
+          # lands. The GitHub side is an ASYNC mirror — on a fresh tag push it is
+          # eventually-consistent and lags by seconds-to-minutes. Failing on that
+          # transient window produces a red run for a release that is fine once
+          # the mirror settles. So the GitHub-side conditions (not-mirrored,
+          # zero-assets, asset-mismatch) RETRY with backoff; only when they still
+          # hold after MIRROR_RETRIES do we fail. Phantom (Gitea missing) is a
+          # real pipeline bypass, never a mirror artifact — it fails immediately.
+          MIRROR_RETRIES="${MIRROR_RETRIES:-12}"   # attempts before giving up
+          MIRROR_INTERVAL="${MIRROR_INTERVAL:-15}"  # seconds between attempts
+
           fail=0
           for tag in $tags; do
             gt="$(gitea_assets "$tag")"
-            gh="$(github_assets "$tag")"
 
             if [ "$gt" = "MISSING" ]; then
               echo "::error title=Phantom release::$tag has a tag but NO release on Gitea — it bypassed the pipeline."
               fail=1; continue
             fi
-            if [ "$gh" = "MISSING" ]; then
-              echo "::error title=Not mirrored::$tag has a Gitea release but NO release on GitHub."
-              fail=1; continue
-            fi
-            if [ "$REQUIRE_ASSETS" = "true" ] && { [ -z "$gt" ] || [ -z "$gh" ]; }; then
-              echo "::error title=No assets::$tag release exists but carries zero assets (Gitea='[$gt]' GitHub='[$gh]')."
-              fail=1; continue
-            fi
-            if [ "$gt" != "$gh" ]; then
-              echo "::error title=Asset mismatch::$tag assets differ between registries."
-              echo "  Gitea : $gt"
-              echo "  GitHub: $gh"
+
+            # Poll the GitHub mirror until it matches Gitea or we run out of tries.
+            attempt=0; reason=""
+            while :; do
+              gh="$(github_assets "$tag")"
+              if [ "$gh" = "MISSING" ]; then
+                reason="Not mirrored::$tag has a Gitea release but NO release on GitHub."
+              elif [ "$REQUIRE_ASSETS" = "true" ] && { [ -z "$gt" ] || [ -z "$gh" ]; }; then
+                reason="No assets::$tag release exists but carries zero assets (Gitea='[$gt]' GitHub='[$gh]')."
+              elif [ "$gt" != "$gh" ]; then
+                reason="Asset mismatch::$tag assets differ between registries."
+              else
+                reason=""   # settled — Gitea and GitHub agree
+                break
+              fi
+              [ "$attempt" -ge "$MIRROR_RETRIES" ] && break
+              attempt=$((attempt + 1))
+              echo "… $tag not yet consistent on GitHub (attempt $attempt/$MIRROR_RETRIES) — waiting ${MIRROR_INTERVAL}s for mirror"
+              sleep "$MIRROR_INTERVAL"
+            done
+
+            if [ -n "$reason" ]; then
+              echo "::error title=${reason%%::*}::${reason#*::} (still failing after $MIRROR_RETRIES retries)"
+              case "$reason" in
+                "Asset mismatch"*)
+                  echo "  Gitea : $gt"
+                  echo "  GitHub: $gh" ;;
+              esac
               fail=1; continue
             fi
             echo "✓ $tag — assets match on Gitea and GitHub ($(echo "$gt" | tr ',' '\n' | grep -c . ) files)"
