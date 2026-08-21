@@ -48,7 +48,7 @@ on:
           Do NOT list *-apple-darwin here: the zigbuild cross-compile emits a
           Mach-O with a duplicate libiconv LC_LOAD_DYLIB that macOS dyld refuses
           to load (binary is DOA). Darwin binaries are built NATIVELY on the
-          macOS runner leg (package-macos-pkg) instead. Any darwin triple listed
+          macOS runner leg (build-macos) instead. Any darwin triple listed
           here is skipped in Stage assets and never published.
         required: false
         type: string
@@ -258,7 +258,7 @@ jobs:
           set -euo pipefail
           # Defensive: never stage a darwin binary from the Linux zigbuild leg.
           # zig's linker double-links libiconv → dyld aborts the Mach-O on load.
-          # Darwin is built natively on the macOS runner (package-macos-pkg).
+          # Darwin is built natively on the macOS runner (build-macos).
           case "$TARGET" in
             *-apple-darwin)
               echo "::warning::skipping $TARGET in the Linux build — darwin is built natively on the macOS runner leg."
@@ -507,16 +507,18 @@ jobs:
           name: native-packages
           path: dist-release/
 
-  # ── orca full profile: the macOS leg — the SOLE source of the darwin binary. ──
-  #   Builds the aarch64-apple-darwin binary NATIVELY on the mint mac runner so
-  #   Apple's ld64 dedupes the libiconv load command (the zigbuild cross-compile
-  #   does not, producing a Mach-O that dyld refuses to load). Emits BOTH the raw
-  #   binary (+.sha256, consumed by the fleet updater) AND the .pkg, smoke-tests
-  #   the binary, and — because darwin has no other source — is NOT
+  # ── orca full profile: the macOS BUILD leg — the SOLE source of the darwin
+  #   binary. Mirrors the Linux build→package split: this job only BUILDS (and
+  #   smoke-tests) the aarch64-apple-darwin binary; the .pkg is a SEPARATE job
+  #   (package-macos-pkg) that consumes this job's artifact.
+  #   Built NATIVELY on the mint mac runner so Apple's ld64 dedupes the libiconv
+  #   load command (the zigbuild cross-compile does not, producing a Mach-O that
+  #   dyld refuses to load). Emits the raw binary (+.sha256, consumed by the fleet
+  #   updater). Because darwin has no other binary source, this is NOT
   #   continue-on-error: a broken or missing darwin binary must FAIL the release
   #   rather than silently ship an unusable artifact. A down mint blocks the
   #   release (correct: we can't claim darwin support without a working binary).
-  package-macos-pkg:
+  build-macos:
     if: ${{ inputs.asset-profile == 'full' && inputs.mint-runner-label != '' }}
     needs: version
     runs-on: ${{ inputs.mint-runner-label }}
@@ -525,7 +527,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build darwin binary + .pkg natively
+      - name: Build darwin binary natively
         env:
           REL_VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -535,11 +537,9 @@ jobs:
           rustup target add aarch64-apple-darwin || true
           # build_orca_targets REQUIRES explicit targets (dies "no targets given"
           # otherwise, and its die exit isn't caught by `|| true`). Build the
-          # shipped arm64 slice on the arm64 mint runner, then let orca emit the
-          # .pkg (needs Apple pkgbuild — present only on macOS).
+          # shipped arm64 slice on the arm64 mint runner.
           build_orca_targets aarch64-apple-darwin
-          build_native_packages
-          echo "── dist-release (macOS leg) ──"; ls -la dist-release || true
+          echo "── dist-release (macOS build leg) ──"; ls -la dist-release || true
 
       - name: Ensure raw binary + checksum, then smoke-test it
         run: |
@@ -557,23 +557,67 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: macos-darwin
+          name: macos-darwin-binary
           if-no-files-found: error
           path: |
             dist-release/orca-aarch64-apple-darwin
             dist-release/orca-aarch64-apple-darwin.sha256
-            dist-release/*.pkg
+
+  # ── orca full profile: the macOS PACKAGE leg — builds the .pkg from the binary
+  #   produced by build-macos (which stages it in dist-release/). pkgbuild is
+  #   macOS-only, so this also runs on the mint runner. BEST-EFFORT
+  #   (continue-on-error): now that the fleet-critical darwin BINARY is its own
+  #   hard gate (build-macos), a .pkg packaging hiccup must NOT block the release —
+  #   the binary still ships. Mirrors package-native's relationship to the Linux
+  #   build jobs.
+  package-macos-pkg:
+    if: ${{ inputs.asset-profile == 'full' && inputs.mint-runner-label != '' }}
+    needs: [version, build-macos]
+    runs-on: ${{ inputs.mint-runner-label }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the darwin binary from build-macos
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-darwin-binary
+          path: dist-release
+
+      - name: Build .pkg from the staged darwin binary
+        env:
+          REL_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          source scripts/release-lib.sh
+          write_cargo_version "$REL_VERSION"
+          # build_native_packages consumes the staged binary at
+          # dist-release/orca-<triple>; the artifact round-trip drops the +x bit
+          # and it requires the host binary EXECUTABLE (host_target =
+          # aarch64-apple-darwin on this runner), so restore it before packaging.
+          chmod +x dist-release/orca-aarch64-apple-darwin
+          build_native_packages
+          echo "── dist-release (.pkg) ──"; ls -la dist-release/*.pkg || true
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: macos-pkg
+          if-no-files-found: warn
+          path: dist-release/*.pkg
 
   # ── Publish: Gitea canonical, then GitHub mirror (skipped for the draft). ──
   publish:
-    # Depends on package-macos-pkg so the darwin binary + .pkg are INCLUDED and,
-    # since that leg is now a required gate (not continue-on-error), a broken or
-    # missing darwin artifact BLOCKS publish instead of shipping unusable. Safe as
-    # long as the caller wires `mint-runner-label` (then the job RUNS and reaches
-    # a terminal state). CAUTION: Gitea's act HANGS a job that `needs` a SKIPPED
-    # job — so if a caller omits mint-runner-label (package-macos-pkg skips), drop
-    # it from this needs list, or publish will sit unscheduled.
-    needs: [version, build-parallel, build-sequential, package-native, package-macos-pkg]
+    # Depends on build-macos (HARD gate: the darwin binary is fleet-critical and
+    # has no other source, so a broken/missing binary BLOCKS publish) and on
+    # package-macos-pkg (continue-on-error: a failed .pkg still reports success,
+    # so it won't block — the binary ships regardless). Safe as long as the caller
+    # wires `mint-runner-label` (then both jobs RUN and reach a terminal state).
+    # CAUTION: Gitea's act HANGS a job that `needs` a SKIPPED job — so if a caller
+    # omits mint-runner-label (both macOS jobs skip), drop them from this needs
+    # list, or publish will sit unscheduled.
+    needs: [version, build-parallel, build-sequential, package-native, build-macos, package-macos-pkg]
     # NO `if:` here. Gitea's act never MATERIALISES a job whose `if` uses
     # cancelled()/!cancelled() or needs.*.result — publish sat forever in
     # "waiting" with created:null even when every dependency succeeded (run 335,
