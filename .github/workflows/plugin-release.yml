@@ -175,22 +175,44 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets) }}
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
     steps:
+      - name: Select target (skip legs not in inputs.targets)
+        id: guard
+        run: |
+          if printf '%s' '${{ inputs.targets }}' \
+            | jq -e --arg t '${{ matrix.target }}' 'index($t) != null' >/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "→ ${{ matrix.target }} not in requested targets; skipping this leg"
+          fi
+
       - uses: actions/checkout@v4
+        if: ${{ steps.guard.outputs.run == 'true' }}
         with:
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ steps.guard.outputs.run == 'true' }}
 
       - uses: Swatinem/rust-cache@v2
+        if: ${{ steps.guard.outputs.run == 'true' }}
         with:
           key: ${{ matrix.target }}
 
       - name: Drop local-dev cargo patch
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: rm -f .cargo/config.toml
 
       - name: Authenticate private orca git dependency (Gitea)
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           # orca (plugin-toolkit) is fetched from Gitea — the canonical forge
           # ([[gitea-canonical-github-mirror-only]]). Cargo.toml still spells the
@@ -207,6 +229,7 @@ jobs:
             "https://github.com/"
 
       - name: Write computed version into Cargo.toml
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           # Matches both `[package].version` and `[workspace.package].version`
@@ -219,6 +242,7 @@ jobs:
 
       - name: Resolve bin list
         id: bins
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           requested='${{ inputs.bins }}'
@@ -244,7 +268,7 @@ jobs:
       - name: Install cross toolchain (zig + cargo-zigbuild)
         # Needed for every non-host target — all linux cross triples AND both
         # apple-darwin triples (zig cross-compiles darwin from Linux).
-        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+        if: ${{ steps.guard.outputs.run == 'true' && matrix.target != 'x86_64-unknown-linux-gnu' }}
         run: |
           set -euo pipefail
           # --break-system-packages: Gitea's runner image is Debian 12, whose
@@ -263,7 +287,7 @@ jobs:
         # without a real macOS SDK. Fetch one and point cargo-zigbuild at it via
         # SDKROOT so `-framework Security/CoreFoundation` resolves — no macOS
         # runner required. Pinned SDK version; bump deliberately.
-        if: ${{ endsWith(matrix.target, '-apple-darwin') }}
+        if: ${{ steps.guard.outputs.run == 'true' && endsWith(matrix.target, '-apple-darwin') }}
         env:
           MACOS_SDK_VERSION: "14.5"
         run: |
@@ -286,9 +310,11 @@ jobs:
         # cross-compile. Keeping it unconditional also pins the artifact to the
         # single matrix-derived output path (target/<triple>/release) the
         # staging step reads.
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build release binaries
+        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           # musl: build FULLY STATIC (crt-static is already the musl default in
           # rustc; we assert it explicitly). A static musl binary carries its own
@@ -333,6 +359,7 @@ jobs:
 
       - name: Stage artifacts (+ thinness report)
         id: stage
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -373,6 +400,7 @@ jobs:
           done <<< '${{ steps.bins.outputs.list }}'
 
       - uses: actions/upload-artifact@v3
+        if: ${{ steps.guard.outputs.run == 'true' }}
         with:
           name: plugin-${{ matrix.target }}
           path: dist/*
