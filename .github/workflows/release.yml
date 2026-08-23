@@ -140,11 +140,9 @@ jobs:
           echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
 
   # ── Build every declared target in parallel; stage assets in the profile's
-  #   convention. One job per target via a flat `fromJSON(inputs.targets)` matrix
-  #   — the same portable pattern plugin-release.yml uses: it fans out one job
-  #   per target on both GitHub Actions and Gitea act (the act matrix-expansion
-  #   fix landed in #34). No shards, no "unused" jobs, no build-mode variants —
-  #   the run shows exactly the targets the caller declared.
+  #   convention. A flat `fromJSON(inputs.targets)` matrix fans out one job per
+  #   declared target on both GitHub Actions and Gitea act — the same portable
+  #   pattern plugin-release.yml uses.
   build:
     needs: version
     runs-on: ubuntu-latest
@@ -345,10 +343,9 @@ jobs:
           [ -f "$bin" ] || { echo "::error::native darwin build produced no $bin"; exit 1; }
           chmod +x "$bin"
           ( cd dist-release && shasum -a 256 orca-aarch64-apple-darwin > orca-aarch64-apple-darwin.sha256 )
-          # THE gap guard: rc.9 shipped a darwin Mach-O that dyld aborted on
-          # ('duplicate linked dylib libiconv.2.dylib') and nothing caught it.
-          # Exec the binary natively — if it can't even print --version, the
-          # release fails here instead of publishing a DOA artifact.
+          # Exec the darwin binary natively so a Mach-O that dyld rejects (e.g. a
+          # duplicate linked dylib) fails the release here rather than publishing
+          # an artifact that aborts on launch.
           echo "── smoke: $bin --version ──"
           "./$bin" --version
 
