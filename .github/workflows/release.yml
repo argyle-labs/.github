@@ -50,10 +50,14 @@ on:
           to load (binary is DOA). Darwin binaries are built NATIVELY on the
           macOS runner leg (build-macos) instead. Any darwin triple listed
           here is skipped in Stage assets and never published.
+          NOTE: the build fan-out uses a STATIC shard matrix (Gitea act does not
+          expand a fromJSON(inputs.targets) matrix — see the `build` job). The
+          number of targets here MUST be <= the shard count (SHARDS in `build`);
+          add targets and widen the shard list together.
         required: false
         type: string
         default: >-
-          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl"]
+          ["x86_64-unknown-linux-gnu","x86_64-unknown-linux-musl"]
       bins:
         description: 'JSON array of bin names. Empty ([]) = derive from cargo metadata.'
         required: false
@@ -139,20 +143,44 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
 
-  # ── Build every declared target in parallel; stage assets in the profile's
-  #   convention. A flat `fromJSON(inputs.targets)` matrix fans out one job per
-  #   declared target on both GitHub Actions and Gitea act — the same portable
-  #   pattern plugin-release.yml uses.
+  # ── Build every declared target, ONE JOB PER TARGET, in parallel. ──
+  #   Gitea's `act` runner does NOT expand a matrix whose values come from a
+  #   runtime expression (`matrix.target: ${{ fromJSON(inputs.targets) }}`): it
+  #   collapses the whole thing into a single sequential job. Only a STATIC
+  #   (literal) matrix fans out into concurrent jobs on Gitea. So the matrix is a
+  #   literal shard index and each shard builds `inputs.targets[shard]` — parallel
+  #   on Gitea AND generic in inputs.targets. Keep `shard` length == the number of
+  #   targets callers pass (SHARDS below); more targets than shards fails loudly.
   build:
     needs: version
     runs-on: ubuntu-latest
-    # Label by the target rather than printing the raw matrix expression.
-    name: build ${{ matrix.target }}
+    # Label by the target this shard builds (evaluated at job-creation time).
+    name: build ${{ fromJSON(inputs.targets)[matrix.shard] }}
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets) }}
+        shard: [0, 1]
     steps:
+      - name: Select this shard's target
+        id: sel
+        env:
+          TARGETS: ${{ inputs.targets }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          SHARDS=2   # MUST equal the length of strategy.matrix.shard above.
+          n=$(echo "$TARGETS" | jq 'length')
+          if [ "$n" -gt "$SHARDS" ]; then
+            echo "::error::${n} targets exceeds ${SHARDS} build shards — widen strategy.matrix.shard (and SHARDS) in release.yml."; exit 1
+          fi
+          t=$(echo "$TARGETS" | jq -r ".[${SHARD}] // empty")
+          if [ -z "$t" ]; then
+            echo "shard ${SHARD}: no target (only ${n}) — no-op."
+            { echo "target="; echo "skip=true"; } >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "shard ${SHARD} → ${t}"
+          { echo "target=$t"; echo "skip=false"; } >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -165,12 +193,14 @@ jobs:
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Rust setup
+        if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/rust-setup
         with:
-          cache-key: release-${{ matrix.target }}
+          cache-key: release-${{ steps.sel.outputs.target }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Resolve bin list
+        if: steps.sel.outputs.skip != 'true'
         id: bins
         run: |
           set -euo pipefail
@@ -185,16 +215,18 @@ jobs:
           { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Build at release version
+        if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/build-target
         with:
-          target: ${{ matrix.target }}
+          target: ${{ steps.sel.outputs.target }}
           bins: ${{ steps.bins.outputs.list }}
           version: ${{ needs.version.outputs.version }}
 
       - name: Stage assets
+        if: steps.sel.outputs.skip != 'true'
         env:
           PROFILE: ${{ inputs.asset-profile }}
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ steps.sel.outputs.target }}
           TAG: ${{ needs.version.outputs.tag }}
           BINS: ${{ steps.bins.outputs.list }}
         run: |
@@ -224,9 +256,10 @@ jobs:
           echo "── staged ($outdir) ──"; ls -la "$outdir"
 
       - name: Smoke-test binary (native-arch targets only)
+        if: steps.sel.outputs.skip != 'true'
         env:
           PROFILE: ${{ inputs.asset-profile }}
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ steps.sel.outputs.target }}
           TAG: ${{ needs.version.outputs.tag }}
           BINS: ${{ steps.bins.outputs.list }}
         run: |
@@ -244,8 +277,9 @@ jobs:
           done <<< "$BINS"
 
       - uses: actions/upload-artifact@v3
+        if: steps.sel.outputs.skip != 'true'
         with:
-          name: build-${{ matrix.target }}
+          name: build-${{ steps.sel.outputs.target }}
           if-no-files-found: warn
           path: |
             dist/
