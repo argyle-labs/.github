@@ -143,6 +143,9 @@ jobs:
   # requested, and every real step gates on it — unrequested legs no-op in secs.
   build:
     runs-on: ubuntu-latest
+    # Gate the (expensive, cross-compiling) build legs on a green test job:
+    # never spend build minutes / sccache load on a commit whose tests fail.
+    needs: test
     strategy:
       fail-fast: false
       matrix:
