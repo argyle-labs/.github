@@ -1,0 +1,201 @@
+name: Plugin build (single target)
+description: >-
+  Build one target triple's release binaries for an orca subprocess plugin:
+  write the release version into Cargo.toml, compile (native cargo build when the
+  runner matches the target, else cargo zigbuild), then stage each binary +
+  sha256 into dist/ and upload it as an artifact. The caller owns checkout.
+
+inputs:
+  target:
+    description: Rust target triple (e.g. x86_64-unknown-linux-gnu).
+    required: true
+  version:
+    description: Version written into Cargo.toml (e.g. 0.2.0-rc.3).
+    required: true
+  tag:
+    description: Tag used in asset filenames (e.g. v0.2.0-rc.3).
+    required: true
+  bins:
+    description: JSON array of bin names. Empty ([]) = derive from cargo metadata.
+    required: false
+    default: "[]"
+  size-budget-mib:
+    description: Soft thinness budget (MiB); over it emits a warning.
+    required: false
+    default: "20"
+  orca-fetch-token:
+    description: Gitea token with read on argyle-labs/orca.
+    required: true
+  sccache-access-key:
+    description: MinIO access key for the shared sccache bucket. Empty = no sccache.
+    required: false
+    default: ""
+  sccache-secret-key:
+    required: false
+    default: ""
+  sccache-endpoint:
+    required: false
+    default: "10.10.10.31:9000"
+  sccache-bucket:
+    required: false
+    default: "sccache"
+  macos-sdk-version:
+    required: false
+    default: "14.5"
+
+runs:
+  using: composite
+  steps:
+    - name: Write computed version into Cargo.toml
+      shell: bash
+      run: |
+        set -euo pipefail
+        # perl -i is portable across GNU (ubuntu) and BSD (macOS) runners.
+        perl -i -pe 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
+        grep -m1 '^version = ' Cargo.toml
+
+    - uses: dtolnay/rust-toolchain@stable
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.target }}
+
+    - name: Detect native vs cross
+      id: host
+      shell: bash
+      run: |
+        set -euo pipefail
+        ho=$(uname -s); ha=$(uname -m)
+        case "$ha" in aarch64|arm64) ha=arm64 ;; x86_64|amd64) ha=x86_64 ;; esac
+        t='${{ inputs.target }}'
+        case "$t" in aarch64-*) ta=arm64 ;; *) ta=x86_64 ;; esac
+        case "$t" in *-apple-darwin) to=Darwin ;; *) to=Linux ;; esac
+        native=false
+        [ "$ho" = "$to" ] && [ "$ha" = "$ta" ] && native=true
+        # musl is native only on a musl host (Alpine); glibc host must zig-cross.
+        case "$t" in *-musl) [ -f /etc/alpine-release ] || native=false ;; esac
+        # sccache binary we fetch is x86_64-linux; enable only there, with creds.
+        use_sccache=false
+        if [ -n '${{ inputs.sccache-access-key }}' ] && [ "$ho" = Linux ] && [ "$ha" = x86_64 ]; then
+          use_sccache=true
+        fi
+        {
+          echo "native=$native"
+          echo "use_sccache=$use_sccache"
+        } >> "$GITHUB_OUTPUT"
+        echo "host=$ho/$ha target=$t native=$native sccache=$use_sccache"
+
+    - name: Install sccache
+      if: ${{ steps.host.outputs.use_sccache == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        ver=v0.8.2
+        curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-x86_64-unknown-linux-musl.tar.gz" \
+          | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/sccache'
+        chmod +x /usr/local/bin/sccache
+        sccache --version
+
+    - name: Drop local-dev cargo patch
+      shell: bash
+      run: rm -f .cargo/config.toml
+
+    - name: Authenticate private orca git dependency (Gitea)
+      shell: bash
+      run: |
+        git config --global \
+          url."https://x-access-token:${{ inputs.orca-fetch-token }}@gitea.scottkey.me/".insteadOf \
+          "https://github.com/"
+
+    - name: Resolve bin list
+      id: bins
+      shell: bash
+      run: |
+        set -euo pipefail
+        requested='${{ inputs.bins }}'
+        if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
+          bins=$(echo "$requested" | jq -r '.[]')
+        else
+          bins=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+        fi
+        [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
+        { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+        echo "bins: $(echo "$bins" | paste -sd, -)"
+
+    - name: Install cross toolchain (zig + cargo-zigbuild)
+      if: ${{ steps.host.outputs.native != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # --break-system-packages: Gitea's runner image is Debian 12 (PEP 668).
+        python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Provision macOS SDK
+      # Only when cross-linking a darwin target from Linux; a native mac has its own.
+      if: ${{ endsWith(inputs.target, '-apple-darwin') && steps.host.outputs.native != 'true' }}
+      shell: bash
+      env:
+        MACOS_SDK_VERSION: ${{ inputs.macos-sdk-version }}
+      run: |
+        set -euo pipefail
+        url="https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz"
+        dest="$HOME/macos-sdk"; mkdir -p "$dest"
+        curl -fsSL --retry 5 --retry-connrefused "$url" | tar -xJ -C "$dest"
+        sdkroot="$dest/MacOSX${MACOS_SDK_VERSION}.sdk"
+        test -d "$sdkroot/System/Library/Frameworks/Security.framework" \
+          || { echo "::error::macOS SDK missing Security.framework"; exit 1; }
+        echo "SDKROOT=$sdkroot" >> "$GITHUB_ENV"
+
+    - name: Add rust target
+      shell: bash
+      run: rustup target add "${{ inputs.target }}"
+
+    - name: Build release binaries
+      shell: bash
+      env:
+        RUSTC_WRAPPER: ${{ steps.host.outputs.use_sccache == 'true' && 'sccache' || '' }}
+        CARGO_INCREMENTAL: ${{ steps.host.outputs.use_sccache == 'true' && '0' || '' }}
+        SCCACHE_BUCKET: ${{ inputs.sccache-bucket }}
+        SCCACHE_ENDPOINT: ${{ inputs.sccache-endpoint }}
+        SCCACHE_S3_USE_SSL: "false"
+        SCCACHE_REGION: us-east-1
+        AWS_ACCESS_KEY_ID: ${{ inputs.sccache-access-key }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-key }}
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
+      run: |
+        set -euo pipefail
+        if [ "${{ steps.host.outputs.native }}" = "true" ]; then builder="cargo build"; else builder="cargo zigbuild"; fi
+        bin_flags=""
+        while IFS= read -r b; do [ -n "$b" ] && bin_flags="$bin_flags --bin $b"; done <<< '${{ steps.bins.outputs.list }}'
+        export CARGO_BUILD_TARGET="${{ inputs.target }}"
+        echo "→ $builder --release --target ${{ inputs.target }}$bin_flags"
+        # shellcheck disable=SC2086
+        $builder --release --target "${{ inputs.target }}" $bin_flags
+        [ -n "${RUSTC_WRAPPER:-}" ] && sccache --show-stats || true
+
+    - name: Stage artifacts (+ thinness report)
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p dist
+        budget="${{ inputs.size-budget-mib }}"; target="${{ inputs.target }}"
+        while IFS= read -r bin; do
+          [ -z "$bin" ] && continue
+          path="target/${target}/release/${bin}"
+          [ -f "$path" ] || { echo "::error::binary not found at $path"; ls -la "target/${target}/release" || true; exit 1; }
+          asset="${bin}-${{ inputs.tag }}-${target}"
+          cp "$path" "dist/$asset"
+          ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
+          bytes=$(wc -c < "dist/$asset" | tr -d '[:space:]'); mib=$(( bytes / 1048576 ))
+          echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$mib" -gt "$budget" ] && echo "::warning title=Plugin over size budget::${asset} is ${mib} MiB (budget ${budget} MiB)."
+        done <<< '${{ steps.bins.outputs.list }}'
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: plugin-${{ inputs.target }}
+        path: dist/*
+        retention-days: 3
