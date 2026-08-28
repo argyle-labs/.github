@@ -47,14 +47,16 @@ on:
     inputs:
       targets:
         description: >-
-          JSON array of Rust target triples to build. Default: the six
-          first-party release triples — kept identical to plugin-release.yml so
-          the PR build covers exactly what a release would build. Every non-host
-          target cross-compiles with cargo-zigbuild.
+          JSON array of Rust target triples to build. Default: the in-use
+          fleet triples — kept identical to plugin-release.yml (and to orca
+          core's TARGET_TRIPLES) so the PR build covers exactly what a release
+          would build. The matrix below lists every supported triple as a menu;
+          this default selects which legs actually build (the rest guard-skip).
+          Every non-host target cross-compiles with cargo-zigbuild.
         required: false
         type: string
         default: >-
-          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","aarch64-apple-darwin","x86_64-apple-darwin"]
+          ["x86_64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-apple-darwin"]
       bins:
         description: 'JSON array of bin names to build. Empty ([]) = derive the crate''s sole bin from cargo metadata.'
         required: false
