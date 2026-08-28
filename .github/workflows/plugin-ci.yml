@@ -132,22 +132,50 @@ jobs:
   #    Mirrors plugin-release.yml's `build` job exactly (see file header). The
   #    only difference: no computed-version write — it builds at the committed
   #    Cargo.toml version, and nothing is published.
+  # LITERAL matrix — Gitea's act_runner only expands a literal matrix list; a
+  # `matrix.target: ${{ fromJSON(inputs.targets) }}` (sourced from an INPUT or a
+  # job OUTPUT) does NOT resolve at matrix-expansion time and collapses to a
+  # single job with the unexpanded string as the target. So the matrix is the
+  # full literal triple list, and each leg honours the caller's `inputs.targets`
+  # subset at RUNTIME: the `guard` step marks whether this leg's target was
+  # requested, and every real step gates on it — unrequested legs no-op in secs.
   build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets) }}
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
     steps:
+      - name: Select target (skip legs not in inputs.targets)
+        id: guard
+        run: |
+          if printf '%s' '${{ inputs.targets }}' \
+            | jq -e --arg t '${{ matrix.target }}' 'index($t) != null' >/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "→ ${{ matrix.target }} not in requested targets; skipping this leg"
+          fi
+
       - uses: actions/checkout@v4
+        if: ${{ steps.guard.outputs.run == 'true' }}
 
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ steps.guard.outputs.run == 'true' }}
 
       - uses: Swatinem/rust-cache@v2
+        if: ${{ steps.guard.outputs.run == 'true' }}
         with:
           key: ${{ matrix.target }}
 
       - name: Install sccache
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           ver=v0.8.2
@@ -157,9 +185,11 @@ jobs:
           sccache --version
 
       - name: Drop local-dev cargo patch
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: rm -f .cargo/config.toml
 
       - name: Authenticate private orca git dependency (Gitea)
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           # See plugin-release.yml for the full rationale. orca is fetched from
           # Gitea (host rewrite of the github.com-spelled dep). ORCA_FETCH_TOKEN
@@ -170,6 +200,7 @@ jobs:
 
       - name: Resolve bin list
         id: bins
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           requested='${{ inputs.bins }}'
@@ -190,14 +221,14 @@ jobs:
           echo "bins: $(echo "$bins" | paste -sd, -)"
 
       - name: Install cross toolchain (zig + cargo-zigbuild)
-        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+        if: ${{ steps.guard.outputs.run == 'true' && matrix.target != 'x86_64-unknown-linux-gnu' }}
         run: |
           set -euo pipefail
           python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Provision macOS SDK (darwin framework linking)
-        if: ${{ endsWith(matrix.target, '-apple-darwin') }}
+        if: ${{ steps.guard.outputs.run == 'true' && endsWith(matrix.target, '-apple-darwin') }}
         env:
           MACOS_SDK_VERSION: "14.5"
         run: |
@@ -214,9 +245,11 @@ jobs:
           echo "provisioned $sdkroot"
 
       - name: Add rust target
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build release binaries
+        if: ${{ steps.guard.outputs.run == 'true' }}
         env:
           RUSTFLAGS: ${{ contains(matrix.target, '-musl') && '-C target-feature=+crt-static' || '' }}
         run: |
@@ -235,6 +268,7 @@ jobs:
           $builder --release --target "${{ matrix.target }}" $bin_flags
 
       - name: Assert binaries built
+        if: ${{ steps.guard.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           while IFS= read -r bin; do
@@ -249,5 +283,5 @@ jobs:
           done <<< '${{ steps.bins.outputs.list }}'
 
       - name: sccache stats
-        if: always()
+        if: ${{ always() && steps.guard.outputs.run == 'true' }}
         run: sccache --show-stats
