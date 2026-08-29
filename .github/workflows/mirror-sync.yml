@@ -1,0 +1,49 @@
+name: Mirror sync (Gitea ⇄ GitHub)
+
+# Bidirectional sync of every repo that exists on both remotes. Runs on the
+# Gitea runners (which reach both hosts). Loop-safe and data-preserving — see
+# .github/sync/bidi-sync.sh. A red run means a real branch/tag conflict that
+# needs a human; it also fires ntfy so it can't be missed.
+#
+# Requires org-level Gitea Actions secrets:
+#   GITEA_SYNC_TOKEN  Gitea token with WRITE on every org repo. The auto-injected
+#                     github.token is scoped to THIS repo only and cannot push to
+#                     the other 49, so a real org token is mandatory.
+#   GH_TOKEN          GitHub PAT with `repo` AND `workflow` scope. `workflow` is
+#                     required or any branch that touches .github/workflows/*.yml
+#                     is rejected by GitHub.
+#   NTFY_URL          (optional) ntfy topic URL for conflict alerts.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 min
+  workflow_dispatch:
+    inputs:
+      only_repo:
+        description: "Sync a single repo (blank = all)"
+        required: false
+        type: string
+
+# Never let two syncs race on the same refs.
+concurrency:
+  group: mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconcile all repos
+        env:
+          GITEA_HOST: gitea.scottkey.me
+          GITEA_ORG: argyle-labs
+          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+          GH_ORG: argyle-labs
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          NTFY_URL: ${{ secrets.NTFY_URL }}
+          ONLY_REPO: ${{ inputs.only_repo }}
+        run: |
+          git config --global user.name  "mirror-sync"
+          git config --global user.email "mirror-sync@argyle-labs.local"
+          bash .github/sync/bidi-sync.sh
