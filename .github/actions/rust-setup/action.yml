@@ -1,0 +1,119 @@
+name: Rust setup (shared)
+description: >
+  The ONE home for the org's Rust CI/build environment: toolchain, the caching
+  strategy (sccache local-disk + Swatinem rust-cache), the private orca git-dep
+  auth (github.com→Gitea host rewrite), and the compile-memory controls that
+  keep heavy generated crates under the runner's memory cap. Every CI and
+  release job composes this so caching + toolchain are defined in exactly one
+  place (see [[unified-cicd-pipeline-architecture]]).
+
+inputs:
+  components:
+    description: 'Extra rustup components, comma-separated (e.g. "clippy, rustfmt"). Empty for build-only jobs.'
+    required: false
+    default: ""
+  cache-key:
+    description: 'Swatinem/rust-cache shared key — distinct per job/target so caches do not collide.'
+    required: true
+  orca-fetch-token:
+    description: >
+      Gitea token with read on argyle-labs/orca, for the private git dep.
+      Composites cannot read secrets, so the caller passes it in. Empty skips
+      the rewrite (e.g. the orca repo itself, which IS the dep).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    # sccache caches individual rustc invocations — INCLUDING workspace members,
+    # which rust-cache deliberately skips. That is what makes the giant generated
+    # proxmox crate stop recompiling from scratch each run. Backend = local disk
+    # on the persistent `:host` LXC runner (see env below); no cache protocol.
+    # Install sccache directly from its public release tarball — best-effort.
+    # mozilla-actions/sccache-action queries the GitHub *API* to resolve the
+    # release, which needs a token that Gitea's act does not populate in a
+    # composite ("Input required and not supplied: token"), failing the build.
+    # A direct download of a pinned version needs no API and no token; if it
+    # fails for any reason we skip the wrapper rather than break the build.
+    - name: Set up sccache (best-effort, no GitHub API)
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v sccache >/dev/null 2>&1; then echo "sccache already present"; exit 0; fi
+        ver=0.8.2
+        url="https://github.com/mozilla/sccache/releases/download/v${ver}/sccache-v${ver}-x86_64-unknown-linux-musl.tar.gz"
+        if curl -fsSL "$url" -o /tmp/sccache.tgz && tar -xzf /tmp/sccache.tgz -C /tmp; then
+          install -m0755 /tmp/sccache-v${ver}-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache \
+            2>/dev/null || sudo install -m0755 /tmp/sccache-v${ver}-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache
+          echo "sccache $(sccache --version 2>/dev/null || echo '?') installed"
+        else
+          echo "::warning::sccache download failed — building without compiler cache"
+        fi
+
+    - name: Cache cargo registry + dep builds
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.cache-key }}
+
+    - name: Configure shared cargo/sccache environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Local-disk backend on the persistent LXC runner: a fixed host path
+        # survives across jobs with zero cache-protocol dependency. Do NOT use
+        # SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat with
+        # sccache's GHA backend is unproven. Revisit if ephemeral runners land.
+        export SCCACHE_DIR=/root/.cache/sccache
+        export SCCACHE_CACHE_SIZE=20G
+        {
+          echo "SCCACHE_DIR=$SCCACHE_DIR"
+          echo "SCCACHE_CACHE_SIZE=$SCCACHE_CACHE_SIZE"
+        } >> "$GITHUB_ENV"
+        # ── caching ──
+        # A cache must never fail a build. Installing sccache is best-effort
+        # (step above); *starting* its server must be too. Once RUSTC_WRAPPER
+        # points at sccache, a server that won't come up makes every rustc
+        # invocation fail. So probe startup here and only wrap rustc when the
+        # server is actually serving; otherwise build cacheless with a warning.
+        if command -v sccache >/dev/null 2>&1 \
+           && sccache --start-server >/dev/null 2>&1 \
+           && sccache --show-stats >/dev/null 2>&1; then
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "sccache server up — wrapping rustc"
+        else
+          echo "::warning::sccache server failed to start — building without compiler cache"
+          sccache --stop-server >/dev/null 2>&1 || true
+        fi
+        {
+          # sccache and cargo incremental are mutually exclusive.
+          echo "CARGO_INCREMENTAL=0"
+          # ── compile-memory controls ──
+          # The proxmox build.rs generates 1261 JsonSchema types; clippy's
+          # `lib test` variant at default debuginfo=2 OOM-killed the memory-capped
+          # runner. CI never debugs binaries, so drop debuginfo in dev+test.
+          echo "CARGO_PROFILE_DEV_DEBUG=0"
+          echo "CARGO_PROFILE_TEST_DEBUG=0"
+        } >> "$GITHUB_ENV"
+
+    - name: Drop local-dev cargo patch
+      shell: bash
+      run: rm -f .cargo/config.toml
+
+    - name: Authenticate private orca git dependency (Gitea)
+      if: ${{ inputs.orca-fetch-token != '' }}
+      shell: bash
+      env:
+        ORCA_FETCH_TOKEN: ${{ inputs.orca-fetch-token }}
+      run: |
+        # orca is spelled as a github.com dep but fetched from Gitea via a host
+        # rewrite. ORCA_FETCH_TOKEN must be a Gitea token with read on
+        # argyle-labs/orca. See [[gitea-canonical-github-mirror-only]].
+        git config --global \
+          url."https://x-access-token:${ORCA_FETCH_TOKEN}@gitea.scottkey.me/".insteadOf \
+          "https://github.com/"

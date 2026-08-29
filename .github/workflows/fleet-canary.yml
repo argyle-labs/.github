@@ -106,7 +106,7 @@ jobs:
         run: |
           mkdir -p status
           echo "${{ steps.run.outcome }}" > "status/${{ matrix.repo }}.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: canary-status-${{ matrix.repo }}
@@ -121,11 +121,16 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/download-artifact@v4
+      # @v3 (Gitea-compatible; @v4's Twirl API is unimplemented on Gitea). No
+      # pattern/merge-multiple on @v3 — download all, then flatten into status/.
+      - uses: actions/download-artifact@v3
         with:
-          pattern: canary-status-*
           path: status
-          merge-multiple: true
+      - name: Flatten downloaded artifacts
+        run: |
+          set -euo pipefail
+          find status -mindepth 2 -type f | while IFS= read -r f; do mv -f "$f" status/; done
+          find status -mindepth 1 -type d -empty -delete
 
       - name: Compute failing plugins
         id: fail

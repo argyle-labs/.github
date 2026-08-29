@@ -1,0 +1,81 @@
+name: Compute release version (shared)
+description: >
+  SINGLE source of truth for release version math, self-contained (no repo
+  script dependency) so orca AND every plugin share it. Reads the latest git
+  TAG (never Cargo.toml), applies bump, and derives the next RC / stable
+  version + the previous-tag changelog anchors. Ports orca's
+  release-lib.sh:compute_rc_version — the two prior copies are retired.
+
+inputs:
+  bump:
+    description: patch | minor | major
+    required: true
+
+outputs:
+  stable-version:
+    description: Next stable version, e.g. 0.1.8 (no v prefix).
+    value: ${{ steps.compute.outputs.stable-version }}
+  stable-tag:
+    description: Next stable tag, e.g. v0.1.8.
+    value: ${{ steps.compute.outputs.stable-tag }}
+  rc-version:
+    description: Next RC version, e.g. 0.1.8-rc.9 (no v prefix).
+    value: ${{ steps.compute.outputs.rc-version }}
+  rc-tag:
+    description: Next RC tag, e.g. v0.1.8-rc.9.
+    value: ${{ steps.compute.outputs.rc-tag }}
+  previous-stable:
+    description: Previous stable tag (e.g. v0.1.7), or v0.0.0 on a fresh repo.
+    value: ${{ steps.compute.outputs.previous-stable }}
+  previous-rc:
+    description: >
+      Previous-RC tag for the incremental RC changelog range: highest existing
+      vX.Y.Z-rc.* for this base, else the previous stable tag (rc.1 case).
+    value: ${{ steps.compute.outputs.previous-rc }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute
+      id: compute
+      shell: bash
+      run: |
+        set -euo pipefail
+        git fetch --tags --quiet || true
+
+        bump="${{ inputs.bump }}"
+        latest_stable=$(git tag -l 'v[0-9]*' \
+          | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+          | sort -V | tail -1)
+        latest_stable=${latest_stable:-v0.0.0}
+
+        IFS='.' read -r major minor patch <<< "${latest_stable#v}"
+        case "$bump" in
+          major) major=$((major+1)); minor=0; patch=0 ;;
+          minor) minor=$((minor+1)); patch=0 ;;
+          patch) patch=$((patch+1)) ;;
+          *) echo "::error::bump must be patch|minor|major"; exit 1 ;;
+        esac
+        next_stable="${major}.${minor}.${patch}"
+
+        latest_rc=$(git tag -l "v${next_stable}-rc.*" | sort -V | tail -1)
+        if [ -z "$latest_rc" ]; then
+          n=1; prev_rc="$latest_stable"
+        else
+          n=${latest_rc##*rc.}; n=$((n+1)); prev_rc="$latest_rc"
+        fi
+        rc_version="${next_stable}-rc.${n}"
+
+        {
+          echo "stable-version=$next_stable"
+          echo "stable-tag=v$next_stable"
+          echo "rc-version=$rc_version"
+          echo "rc-tag=v$rc_version"
+          echo "previous-stable=$latest_stable"
+          echo "previous-rc=$prev_rc"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "→ next stable: v$next_stable"
+        echo "→ next rc:     v$rc_version"
+        echo "→ prev stable: $latest_stable"
+        echo "→ prev rc:     $prev_rc"

@@ -1,33 +1,99 @@
-name: CI
+name: CI (shared reusable)
 
-# Gate for the org tooling repo. The only build artifact here is the `labs`
-# multi-repo management script, so "build + test" means: it parses, and it
-# passes shellcheck. Runs on every PR (no path filter) so the required `ci`
-# check always reports a result and never leaves a PR stuck "Expected".
+# ─────────────────────────────────────────────────────────────────────────────
+# The PR gate for EVERY orca-ecosystem repo (orca core + all plugins). Runs on
+# pull_request only — the merge gate. Two required checks:
+#   test  → fmt + clippy + cargo test
+#   build → cross-compile the release binaries for every target
+#
+# Post-merge, main does NOT re-run this — release.yml takes over with a
+# no-tests rc-draft build (the PR already proved tests+build). See
+# [[unified-cicd-pipeline-architecture]].
+#
+# All environment/caching/toolchain lives in the shared `rust-setup` composite,
+# so the caching strategy is defined in exactly ONE place.
+#
+# Caller (identical across repos, kept in sync from _caller-template.yml):
+#   jobs:
+#     ci:
+#       if: github.event_name == 'pull_request'
+#       uses: argyle-labs/.github/.github/workflows/ci.yml@main
+#       secrets: inherit
+# ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_call:
+    inputs:
+      targets:
+        description: JSON array of Rust target triples to build. Default = the six release triples.
+        required: false
+        type: string
+        default: >-
+          ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-unknown-linux-musl","aarch64-apple-darwin","x86_64-apple-darwin"]
+      bins:
+        description: 'JSON array of bin names. Empty ([]) = derive from cargo metadata.'
+        required: false
+        type: string
+        default: "[]"
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
-  # No `name:` — the check run must report as `ci` to satisfy the required
-  # status check of the same name in branch protection. A display name overrides
-  # the check-run name and leaves every PR stuck "Expected — ci".
-  ci:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Syntax check (bash -n)
-        run: bash -n bin/labs
-
-      - name: ShellCheck
-        uses: ludeeus/action-shellcheck@master
+      - name: Rust setup (toolchain + caching + orca dep auth)
+        uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
-          scandir: ./bin
+          components: clippy, rustfmt
+          cache-key: test
+          orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-features --workspace
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust setup (toolchain + caching + orca dep auth)
+        uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          cache-key: ${{ matrix.target }}
+          orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      - name: Resolve bin list
+        id: bins
+        run: |
+          set -euo pipefail
+          requested='${{ inputs.bins }}'
+          if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
+            bins=$(echo "$requested" | jq -r '.[]')
+          else
+            bins=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+          fi
+          [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
+          { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          echo "bins: $(echo "$bins" | paste -sd, -)"
+
+      - name: Build (no version write — builds at committed version)
+        uses: argyle-labs/.github/.github/actions/build-target@main
+        with:
+          target: ${{ matrix.target }}
+          bins: ${{ steps.bins.outputs.list }}
