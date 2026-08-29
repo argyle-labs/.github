@@ -71,7 +71,9 @@ runs:
         case "$t" in aarch64-*) ta=arm64 ;; *) ta=x86_64 ;; esac
         case "$t" in *-apple-darwin) to=Darwin ;; *) to=Linux ;; esac
         native=false
-        [ "$ho" = "$to" ] && [ "$ha" = "$ta" ] && native=true
+        # `if` — NOT `[ ] && [ ] && native=true`: under `set -e` the bare chain
+        # returns non-zero for every cross target and would abort the step.
+        if [ "$ho" = "$to" ] && [ "$ha" = "$ta" ]; then native=true; fi
         # musl is native only on a musl host (Alpine); glibc host must zig-cross.
         case "$t" in *-musl) [ -f /etc/alpine-release ] || native=false ;; esac
         # sccache binary we fetch is x86_64-linux; enable only there, with creds.
@@ -191,7 +193,12 @@ runs:
           ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
           bytes=$(wc -c < "dist/$asset" | tr -d '[:space:]'); mib=$(( bytes / 1048576 ))
           echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
-          [ "$mib" -gt "$budget" ] && echo "::warning title=Plugin over size budget::${asset} is ${mib} MiB (budget ${budget} MiB)."
+          # Use `if` — NOT `[ ... ] && echo`. Under `set -e` a bare failing
+          # test as the last statement in the loop body aborts the step, so the
+          # healthy under-budget case (mib <= budget) would fail the release.
+          if [ "$mib" -gt "$budget" ]; then
+            echo "::warning title=Plugin over size budget::${asset} is ${mib} MiB (budget ${budget} MiB)."
+          fi
         done <<< '${{ steps.bins.outputs.list }}'
 
     - uses: actions/upload-artifact@v3
