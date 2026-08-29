@@ -9,13 +9,11 @@ name: profile
 # REST API + git, then runs `bin/labs profile` against those local clones
 # (LABS_REPO_TSV_FILE / LABS_DESC_FILE / LABS_HOME — no gh required).
 #
-# One generation, published byte-identical to both org-profile repos:
-#   • GitHub org profile → .github repo, profile/README.md
-#   • Gitea  org profile → .profile repo, README.md
-# The two platforms hardcode different repo names for the org profile, so both
-# must exist — but the CONTENT is a single source. Icons resolve from the public
-# raw.githubusercontent.com repos, which load in any browser regardless of the
-# Gitea org's privacy, so no host rewrite is needed: the files are identical.
+# One generation, published to both org-profile repos (GitHub hardcodes .github/
+# profile/README.md, Gitea hardcodes .profile/README.md). Single source; the only
+# per-platform delta is the icon HOST: GitHub keeps raw.githubusercontent URLs;
+# the Gitea copy rewrites them to same-origin Gitea raw URLs so icons load on the
+# "limited" org's page (external images don't paint reliably there).
 
 on:
   schedule:
@@ -107,14 +105,19 @@ jobs:
             git push origin HEAD:main
           fi
 
-      - name: Publish Gitea profile (.profile repo — identical content)
+      - name: Publish Gitea profile (.profile repo — same-origin icons)
         run: |
           set -euo pipefail
           host=${SERVER#https://}
           git clone -q --depth 1 \
             "https://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.profile.git" work/profile
-          # Byte-identical to .github/profile/README.md — single source of truth.
-          cp profile/README.md work/profile/README.md
+          # Same single-source content, but rewrite icon HOST github->Gitea. The
+          # Gitea org is "limited": its repo raw URLs 303-redirect anonymous
+          # requests to login, and members' browsers don't reliably paint the
+          # external raw.githubusercontent images on the org page. Same-origin
+          # Gitea raw URLs load with the viewer's session, so icons always show.
+          sed -E "s#https://raw\.githubusercontent\.com/argyle-labs/([^/\"]+)/([^/\"]+)/#${SERVER}/argyle-labs/\1/raw/branch/\2/#g" \
+            profile/README.md > work/profile/README.md
           cd work/profile
           if [[ -z "$(git status --porcelain README.md)" ]]; then
             echo "Gitea profile already up to date"
