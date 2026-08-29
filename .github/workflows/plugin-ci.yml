@@ -105,6 +105,20 @@ jobs:
           chmod +x /usr/local/bin/sccache
           sccache --version
 
+      - name: sccache backend preflight (best-effort)
+        run: |
+          set -uo pipefail
+          # A dead cache must never fail a build. If the sccache S3 backend
+          # ($SCCACHE_ENDPOINT, MinIO) is unreachable from this runner, drop the
+          # rustc wrapper and build cacheless instead of hanging on server start.
+          host="${SCCACHE_ENDPOINT%%:*}"; port="${SCCACHE_ENDPOINT##*:}"
+          if timeout 5 bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null; then
+            echo "sccache backend ${SCCACHE_ENDPOINT} reachable — using shared cache"
+          else
+            echo "::warning::sccache backend ${SCCACHE_ENDPOINT} unreachable — building without compiler cache"
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
+
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
 
@@ -127,7 +141,7 @@ jobs:
         run: cargo test --all-features --workspace
 
       - name: sccache stats
-        if: always()
+        if: ${{ always() && env.RUSTC_WRAPPER != '' }}
         run: sccache --show-stats
 
   # ── Build the release binaries for every target. Second required check. ──
@@ -188,6 +202,21 @@ jobs:
             | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/sccache'
           chmod +x /usr/local/bin/sccache
           sccache --version
+
+      - name: sccache backend preflight (best-effort)
+        if: ${{ steps.guard.outputs.run == 'true' }}
+        run: |
+          set -uo pipefail
+          # A dead cache must never fail a build. If the sccache S3 backend
+          # ($SCCACHE_ENDPOINT, MinIO) is unreachable from this runner, drop the
+          # rustc wrapper and build cacheless instead of hanging on server start.
+          host="${SCCACHE_ENDPOINT%%:*}"; port="${SCCACHE_ENDPOINT##*:}"
+          if timeout 5 bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null; then
+            echo "sccache backend ${SCCACHE_ENDPOINT} reachable — using shared cache"
+          else
+            echo "::warning::sccache backend ${SCCACHE_ENDPOINT} unreachable — building without compiler cache"
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
 
       - name: Drop local-dev cargo patch
         if: ${{ steps.guard.outputs.run == 'true' }}
@@ -288,5 +317,5 @@ jobs:
           done <<< '${{ steps.bins.outputs.list }}'
 
       - name: sccache stats
-        if: ${{ always() && steps.guard.outputs.run == 'true' }}
+        if: ${{ always() && steps.guard.outputs.run == 'true' && env.RUSTC_WRAPPER != '' }}
         run: sccache --show-stats
