@@ -65,17 +65,32 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # Local-disk backend on the persistent LXC runner: a fixed host path
+        # survives across jobs with zero cache-protocol dependency. Do NOT use
+        # SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat with
+        # sccache's GHA backend is unproven. Revisit if ephemeral runners land.
+        export SCCACHE_DIR=/root/.cache/sccache
+        export SCCACHE_CACHE_SIZE=20G
         {
-          # ── caching ──
-          # Only wrap rustc when sccache actually installed (best-effort above);
-          # otherwise leave RUSTC_WRAPPER unset so the build still runs.
-          command -v sccache >/dev/null 2>&1 && echo "RUSTC_WRAPPER=sccache"
-          # Local-disk backend on the persistent LXC runner: a fixed host path
-          # survives across jobs with zero cache-protocol dependency. Do NOT use
-          # SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat with
-          # sccache's GHA backend is unproven. Revisit if ephemeral runners land.
-          echo "SCCACHE_DIR=/root/.cache/sccache"
-          echo "SCCACHE_CACHE_SIZE=20G"
+          echo "SCCACHE_DIR=$SCCACHE_DIR"
+          echo "SCCACHE_CACHE_SIZE=$SCCACHE_CACHE_SIZE"
+        } >> "$GITHUB_ENV"
+        # ── caching ──
+        # A cache must never fail a build. Installing sccache is best-effort
+        # (step above); *starting* its server must be too. Once RUSTC_WRAPPER
+        # points at sccache, a server that won't come up makes every rustc
+        # invocation fail. So probe startup here and only wrap rustc when the
+        # server is actually serving; otherwise build cacheless with a warning.
+        if command -v sccache >/dev/null 2>&1 \
+           && sccache --start-server >/dev/null 2>&1 \
+           && sccache --show-stats >/dev/null 2>&1; then
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "sccache server up — wrapping rustc"
+        else
+          echo "::warning::sccache server failed to start — building without compiler cache"
+          sccache --stop-server >/dev/null 2>&1 || true
+        fi
+        {
           # sccache and cargo incremental are mutually exclusive.
           echo "CARGO_INCREMENTAL=0"
           # ── compile-memory controls ──
