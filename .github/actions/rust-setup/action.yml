@@ -26,6 +26,24 @@ inputs:
 runs:
   using: composite
   steps:
+    # `dtolnay/rust-toolchain` bootstraps rustup via a single no-retry
+    # rustup-init download; the runner's egress to static.rust-lang.org
+    # intermittently resets, failing the whole job. Ensure rustup is present
+    # first with a retrying curl so dtolnay's next step is a no-op fast path.
+    - name: Ensure rustup (resilient bootstrap)
+      shell: bash
+      run: |
+        command -v rustup >/dev/null 2>&1 && { echo "rustup already present"; exit 0; }
+        n=0
+        until curl --proto '=https' --tlsv1.2 -fsSL --retry 6 --retry-all-errors \
+                --retry-delay 5 https://sh.rustup.rs \
+                | sh -s -- -y --profile minimal --default-toolchain none; do
+          n=$((n + 1))
+          [ "$n" -ge 4 ] && { echo "::error::rustup bootstrap failed after $n attempts"; exit 1; }
+          echo "rustup bootstrap attempt $n failed; retrying in $((n * 10))s"; sleep $((n * 10))
+        done
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
