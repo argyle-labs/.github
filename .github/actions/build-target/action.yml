@@ -54,7 +54,17 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        python3 -m pip install --user --break-system-packages cargo-zigbuild ziglang
+        # Retry: the runner's egress to files.pythonhosted.org intermittently
+        # times out mid-stream, and a bare `pip install` fails the whole build on
+        # one blip. --timeout widens the per-read socket window; the loop re-runs
+        # the install (idempotent) a few times before giving up.
+        n=0
+        until python3 -m pip install --user --break-system-packages \
+                --timeout 120 --retries 5 cargo-zigbuild ziglang; do
+          n=$((n + 1))
+          [ "$n" -ge 4 ] && { echo "::error::pip install cargo-zigbuild/ziglang failed after $n attempts"; exit 1; }
+          echo "pip attempt $n failed; retrying in $((n * 10))s"; sleep $((n * 10))
+        done
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Provision macOS SDK (darwin framework linking)
