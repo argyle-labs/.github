@@ -356,6 +356,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The mint runner is self-hosted + persistent, but act WIPES the job
+      # workdir each run (`git init` on a cleared hostexecutor), so `target/`
+      # never survives and every release recompiled all ~40 crates + deps from
+      # scratch (~4-5 min cold). sccache with a cache dir OUTSIDE the workdir
+      # persists across runs, so a release that touches a few crates recompiles
+      # only those. No cache backend / network round-trip — a local dir on the
+      # persistent runner. Release profile has incremental OFF, which is exactly
+      # what sccache requires. Env set here via $GITHUB_ENV flows into the build
+      # step below (RUSTC_WRAPPER is honoured by the cargo builds in
+      # build_orca_targets).
+      - name: Enable sccache (persistent compile cache)
+        run: |
+          set -euo pipefail
+          command -v sccache >/dev/null 2>&1 || brew install sccache
+          echo "RUSTC_WRAPPER=sccache"                        >> "$GITHUB_ENV"
+          echo "SCCACHE_DIR=$HOME/Library/Caches/orca-sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=20G"                       >> "$GITHUB_ENV"
+
       - name: Build darwin binary natively
         env:
           REL_VERSION: ${{ needs.version.outputs.version }}
@@ -364,11 +382,14 @@ jobs:
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
           rustup target add aarch64-apple-darwin || true
+          sccache --zero-stats >/dev/null 2>&1 || true
           # build_orca_targets REQUIRES explicit targets (dies "no targets given"
           # otherwise, and its die exit isn't caught by `|| true`). Build the
           # shipped arm64 slice on the arm64 mint runner.
           build_orca_targets aarch64-apple-darwin
           echo "── dist-release (macOS build leg) ──"; ls -la dist-release || true
+          echo "── sccache stats (cache hit rate for this release) ──"
+          sccache --show-stats || true
 
       - name: Ensure raw binary + checksum, then smoke-test it
         run: |
