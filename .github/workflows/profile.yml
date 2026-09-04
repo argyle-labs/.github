@@ -75,11 +75,15 @@ jobs:
       - name: Clone every repo (shallow, from Gitea)
         run: |
           set -euo pipefail
-          host=${SERVER#https://}
+          # SERVER (github.server_url) may be http://10.10.10.20:3000 on the
+          # internal runner or https://gitea.scottkey.me — preserve its scheme
+          # and strip only the scheme, never hardcode https (plaintext :3000
+          # would fail the TLS handshake).
+          scheme=${SERVER%%://*}; host=${SERVER#*://}
           mkdir -p work/src
           while IFS=$'\t' read -r name vis br; do
             git clone -q --depth 1 \
-              "https://x-access-token:${READ_TOKEN}@${host}/argyle-labs/${name}.git" \
+              "${scheme}://x-access-token:${READ_TOKEN}@${host}/argyle-labs/${name}.git" \
               "work/src/${name}"
           done < work/repos.tsv
 
@@ -98,8 +102,8 @@ jobs:
           else
             git config user.name  "gitea-actions[bot]"
             git config user.email "gitea-actions[bot]@noreply.gitea.scottkey.me"
-            host=${SERVER#https://}
-            git remote set-url origin "https://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.github.git"
+            scheme=${SERVER%%://*}; host=${SERVER#*://}
+            git remote set-url origin "${scheme}://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.github.git"
             git add profile/README.md
             git commit -m "chore: regenerate org index [skip ci]"
             git push origin HEAD:main
@@ -108,9 +112,9 @@ jobs:
       - name: Publish Gitea profile (.profile repo — same-origin icons)
         run: |
           set -euo pipefail
-          host=${SERVER#https://}
+          scheme=${SERVER%%://*}; host=${SERVER#*://}
           git clone -q --depth 1 \
-            "https://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.profile.git" work/profile
+            "${scheme}://x-access-token:${WRITE_TOKEN}@${host}/argyle-labs/.profile.git" work/profile
           # Same single-source content, but rewrite icon HOST github->Gitea. The
           # Gitea org is "limited": its repo raw URLs 303-redirect anonymous
           # requests to login, and members' browsers don't reliably paint the
