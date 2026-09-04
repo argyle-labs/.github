@@ -531,7 +531,7 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
         [[ -n "$ccat" ]] || ccat="${wcat:-other}"
         cicon="$raw/$name/$branch/crates/$crate/assets/icon-256.png"
         cdesc="$(html_escape "$cdesc")"   # HTML table cell — escape & < >
-        BUCKET[$ccat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name/tree/$branch/crates/$crate\">$crate</a></td><td width=\"100%\">${cdesc:-—}</td></tr>"$'\n'
+        BUCKET[$ccat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$cicon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name/tree/$branch/crates/$crate\">$crate</a></td><td>${cdesc:-—}</td></tr>"$'\n'
       done < <(repo_crates "$name")
       continue
     else
@@ -541,11 +541,15 @@ cmd_profile() { # regenerate profile/README.md from live repo metadata
     fi
     icon="$raw/$name/$branch/assets/icon-256.png"
     desc="$(html_escape "$desc")"   # HTML table cell — escape & < >
-    # description cell carries width="100%" so it absorbs surplus column
-    # width (text wraps); keeps the fixed 72px icon cell from being crushed
-    # by Gitea's .markup table{width:100%}+img{max-width:100%}, which pins
-    # height=60 while shrinking width into a portrait rectangle.
-    BUCKET[$cat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name\">$name</a></td><td width=\"100%\">${desc:-—}</td></tr>"$'\n'
+    # NOTE: the description cell deliberately carries NO width. A width="100%"
+    # here (a past Gitea fix) starves the icon column under GitHub's
+    # table-layout:auto — GitHub forces every README img to max-width:100%;
+    # height:auto and strips author style, so the width-driven icon collapses
+    # to 0px and disappears. Leaving width off lets GitHub render the icons
+    # (~45px). Gitea tradeoff: without the 100% absorber Gitea's stretched
+    # table may narrow the icons toward a portrait rectangle — revisit if Gitea
+    # rendering regresses.
+    BUCKET[$cat]+="<tr><td align=\"center\" width=\"72\"><img src=\"$icon\" width=\"60\" height=\"60\" alt=\"\" /></td><td><a href=\"https://github.com/$ORG/$name\">$name</a></td><td>${desc:-—}</td></tr>"$'\n'
   done <<<"$(discover)"
 
   {
