@@ -122,10 +122,15 @@ runs:
 
     - name: Authenticate private orca git dependency (Gitea)
       shell: bash
+      env:
+        ORCA_FETCH_TOKEN: ${{ inputs.orca-fetch-token }}
       run: |
-        git config --global \
-          url."https://x-access-token:${{ inputs.orca-fetch-token }}@gitea.scottkey.me/".insteadOf \
-          "https://github.com/"
+        # Target THIS runner's own Gitea via GITHUB_SERVER_URL: internal
+        # act_runners see http://10.10.10.20:3000 (resolves); the external
+        # hostname gitea.scottkey.me does NOT resolve on them.
+        base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
+        auth="${base/:\/\//://x-access-token:${ORCA_FETCH_TOKEN}@}"
+        git config --global url."${auth}/".insteadOf "https://github.com/"
 
     - name: Resolve bin list
       id: bins

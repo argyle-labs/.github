@@ -115,8 +115,11 @@ runs:
         ORCA_FETCH_TOKEN: ${{ inputs.orca-fetch-token }}
       run: |
         # orca is spelled as a github.com dep but fetched from Gitea via a host
-        # rewrite. ORCA_FETCH_TOKEN must be a Gitea token with read on
-        # argyle-labs/orca. See [[gitea-canonical-github-mirror-only]].
-        git config --global \
-          url."https://x-access-token:${ORCA_FETCH_TOKEN}@gitea.scottkey.me/".insteadOf \
-          "https://github.com/"
+        # rewrite. Target THIS runner's own Gitea via GITHUB_SERVER_URL: internal
+        # act_runners see http://10.10.10.20:3000 (resolves), whereas the external
+        # hostname gitea.scottkey.me does NOT resolve on them. ORCA_FETCH_TOKEN
+        # must be a Gitea token with read on argyle-labs/orca.
+        # See [[gitea-canonical-github-mirror-only]].
+        base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
+        auth="${base/:\/\//://x-access-token:${ORCA_FETCH_TOKEN}@}"
+        git config --global url."${auth}/".insteadOf "https://github.com/"
