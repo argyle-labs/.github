@@ -55,11 +55,8 @@ jobs:
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
 
-      - name: Authenticate private orca git dependency
-        run: |
-          git config --global \
-            url."https://x-access-token:${{ secrets.ORCA_FETCH_TOKEN }}@github.com/".insteadOf \
-            "https://github.com/"
+      # orca's github mirror is public; runners reach github.com directly, so no
+      # auth rewrite is needed. (Fetch via git CLI: CARGO_NET_GIT_FETCH_WITH_CLI.)
 
       # The whole point of the canary: advance the orca source to main HEAD.
       - name: Sync orca dep to main tip
