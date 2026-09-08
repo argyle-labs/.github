@@ -47,7 +47,7 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 <table>
 <thead><tr><th></th><th>Plugin</th><th>What it does</th></tr></thead>
 <tbody>
-<tr><td align="center" width="72"><img src="https://raw.githubusercontent.com/argyle-labs/adguard/main/assets/icon-256.png" width="60" height="60" alt="" /></td><td><a href="https://github.com/argyle-labs/adguard">adguard</a></td><td>AdGuard Home DNS sinkhole — orca service-backend</td></tr>
+<tr><td align="center" width="72"><img src="https://raw.githubusercontent.com/argyle-labs/adguard/main/assets/icon-256.png" width="60" height="60" alt="" /></td><td><a href="https://github.com/argyle-labs/adguard">adguard</a></td><td>AdGuard Home plugin for orca — service backend + DNS rewrite CRUD/status over the REST API</td></tr>
 <tr><td align="center" width="72"><img src="https://raw.githubusercontent.com/argyle-labs/caddy/main/assets/icon-256.png" width="60" height="60" alt="" /></td><td><a href="https://github.com/argyle-labs/caddy">caddy</a></td><td>Caddy reverse proxy — orca service-backend</td></tr>
 <tr><td align="center" width="72"><img src="https://raw.githubusercontent.com/argyle-labs/mikrotik/main/assets/icon-256.png" width="60" height="60" alt="" /></td><td><a href="https://github.com/argyle-labs/mikrotik">mikrotik</a></td><td>MikroTik RouterOS device management — orca service-backend</td></tr>
 <tr><td align="center" width="72"><img src="https://raw.githubusercontent.com/argyle-labs/openvpn/main/assets/icon-256.png" width="60" height="60" alt="" /></td><td><a href="https://github.com/argyle-labs/openvpn">openvpn</a></td><td>OpenVPN server — orca service-backend</td></tr>
