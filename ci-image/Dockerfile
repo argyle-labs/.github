@@ -23,7 +23,7 @@ FROM docker.io/library/rust:${RUST_VERSION}-bookworm
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates curl git perl xz-utils musl-tools pkg-config; \
+        ca-certificates curl git perl xz-utils musl-tools pkg-config sudo; \
     rm -rf /var/lib/apt/lists/*
 
 # Node.js — required by the CI job runner, NOT by the build. Gitea/act runs
