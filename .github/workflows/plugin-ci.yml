@@ -78,6 +78,12 @@ jobs:
       credentials:
         username: ${{ secrets.CI_REGISTRY_USER }}
         password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    # In a custom container Gitea defaults `run:` steps to `sh` (dash), not the
+    # stock runner's bash — force bash so the orca-auth step's ${var/…/…}
+    # substitution (and any other bashism) works.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
