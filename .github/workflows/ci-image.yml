@@ -15,10 +15,14 @@ name: CI image (ci-rust)
 # (Names use the CI_ prefix, NOT GITEA_ — Gitea reserves the GITEA_/GITHUB_
 # prefixes and rejects action secret/var names that use them.)
 # Org var CI_REGISTRY points at the registry host; the committed default is
-# the vanity host (TLS via Caddy). Set the var to the LAN IP:port on runners
-# that can't resolve the vanity name (and add it to docker insecure-registries
-# if it is plain HTTP). The real LAN endpoint lives in the var, never here — this
-# repo mirrors to public GitHub.
+# the vanity host `gitea.scottkey.me` (TLS via Caddy). Runner hosts on the
+# tailnet resolve it over valid TLS, so the default path needs NO insecure /
+# HTTP handling — prefer it. Only when CI_REGISTRY is set to a plain-HTTP LAN
+# endpoint (a runner that can't resolve the vanity name) set org var
+# CI_REGISTRY_HTTP=true: the build then marks it insecure for buildkit, and you
+# must also add that endpoint to the runner docker daemon's insecure-registries
+# so `docker login` works. The real LAN endpoint lives in the var, never here —
+# this repo mirrors to public GitHub.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -51,18 +55,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # BuildKit runs in its own builder container and does NOT inherit the host
+      # daemon's insecure-registries. For the default vanity TLS host this is a
+      # no-op (empty config). Only when CI_REGISTRY_HTTP=true (registry is a
+      # plain-HTTP LAN endpoint) do we write a buildkitd config marking it
+      # insecure — otherwise the `--push` fails "HTTP response to HTTPS client".
+      # Host comes from env.REGISTRY (the org var); never hardcoded — this repo
+      # mirrors to public GitHub.
+      - name: Buildkit registry config (only for a plain-HTTP endpoint)
+        id: buildkit
+        env:
+          CI_REGISTRY_HTTP: ${{ vars.CI_REGISTRY_HTTP }}
+        run: |
+          if [ "${CI_REGISTRY_HTTP:-false}" = "true" ]; then
+            {
+              printf '[registry."%s"]\n' "$REGISTRY"
+              printf '  http = true\n'
+              printf '  insecure = true\n'
+            } > "${RUNNER_TEMP}/buildkitd.toml"
+            echo "config=${RUNNER_TEMP}/buildkitd.toml" >> "$GITHUB_OUTPUT"
+            echo "Marked $REGISTRY insecure (HTTP) for buildkit."
+          else
+            echo "config=" >> "$GITHUB_OUTPUT"
+            echo "Default TLS registry handling for $REGISTRY."
+          fi
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          # The BuildKit builder runs in its own container and does NOT inherit
-          # the host daemon's insecure-registries, so the final `--push` to a
-          # plain-HTTP registry fails ("HTTP response to HTTPS client") even
-          # after `docker login` succeeds. Tell BuildKit the registry is HTTP.
-          # Host lives in env.REGISTRY (the org var) — never hardcoded here.
+          # network=host so the builder resolves the vanity name via host DNS
+          # (tailnet/LAN) and reaches the registry directly.
           driver-opts: network=host
-          buildkitd-config-inline: |
-            [registry."${{ env.REGISTRY }}"]
-              http = true
+          buildkitd-config: ${{ steps.buildkit.outputs.config }}
 
       - name: Log in to the Gitea registry
         uses: docker/login-action@v3
