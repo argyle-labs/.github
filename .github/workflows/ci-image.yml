@@ -11,8 +11,10 @@ name: CI image (ci-rust)
 # refresh. NOT part of the per-plugin hot path.
 #
 # Prereqs (epic slice 1, Gitea admin): container registry enabled + a publish
-# robot account. Org secrets: GITEA_REGISTRY_USER / GITEA_REGISTRY_TOKEN.
-# Org var GITEA_REGISTRY points at the registry host; the committed default is
+# robot account. Org secrets: CI_REGISTRY_USER / CI_REGISTRY_TOKEN.
+# (Names use the CI_ prefix, NOT GITEA_ — Gitea reserves the GITEA_/GITHUB_
+# prefixes and rejects action secret/var names that use them.)
+# Org var CI_REGISTRY points at the registry host; the committed default is
 # the vanity host (TLS via Caddy). Set the var to the LAN IP:port on runners
 # that can't resolve the vanity name (and add it to docker insecure-registries
 # if it is plain HTTP). The real LAN endpoint lives in the var, never here — this
@@ -44,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUST_VERSION: ${{ inputs.rust_version || '1.95.0' }}
-      REGISTRY: ${{ vars.GITEA_REGISTRY || 'gitea.scottkey.me' }}
+      REGISTRY: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
       IMAGE: argyle-labs/ci-rust
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +58,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.GITEA_REGISTRY_USER }}
-          password: ${{ secrets.GITEA_REGISTRY_TOKEN }}
+          username: ${{ secrets.CI_REGISTRY_USER }}
+          password: ${{ secrets.CI_REGISTRY_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v5

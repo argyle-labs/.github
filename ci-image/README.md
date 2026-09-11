@@ -23,8 +23,8 @@ on the next CI run — no per-repo edit.
 
 ## Prerequisites (epic slice 1 — Gitea admin)
 - Gitea container registry enabled + a `ci-publish` robot account.
-- Org secrets `GITEA_REGISTRY_USER` / `GITEA_REGISTRY_TOKEN`.
-- Org var `GITEA_REGISTRY` (committed default `gitea.scottkey.me`; set it to the
+- Org secrets `CI_REGISTRY_USER` / `CI_REGISTRY_TOKEN`.
+- Org var `CI_REGISTRY` (committed default `gitea.scottkey.me`; set it to the
   LAN `IP:port` on runners that can't resolve the vanity name). If served over
   plain HTTP, the runner docker daemon needs it in `insecure-registries`. The
   real LAN endpoint lives in the var, never committed (this repo mirrors public).
