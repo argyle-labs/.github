@@ -104,6 +104,45 @@ jobs:
           auth="${base/:\/\//://x-access-token:${ORCA_FETCH_TOKEN}@}"
           git config --global url."${auth}/".insteadOf "https://github.com/"
 
+      # ── Frontend gate (UI plugins only) ──────────────────────────────────
+      # Gated on a ui/package.json so Rust-only plugins skip it entirely. For a
+      # UI plugin (e.g. peacock, a SvelteKit app under ui/) the frontend is
+      # embedded into the binary via rust-embed from ui/dist — but ui/dist is
+      # gitignored (only a placeholder index.html is tracked), so nothing here
+      # actually tested or built the UI before. Build it and run its own checks
+      # so a broken frontend fails the PR, and so `npm run build` output exists
+      # for the cargo steps below to embed. Node/npm come from the ci-rust image.
+      - name: Detect UI
+        id: ui
+        run: |
+          if [ -f ui/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "no ui/package.json — skipping frontend gate"
+          fi
+
+      - name: UI install (npm ci)
+        if: steps.ui.outputs.present == 'true'
+        working-directory: ui
+        run: npm ci
+
+      - name: UI typecheck (svelte-check)
+        if: steps.ui.outputs.present == 'true'
+        working-directory: ui
+        run: npm run check
+
+      - name: UI unit tests (vitest)
+        if: steps.ui.outputs.present == 'true'
+        working-directory: ui
+        run: npm run test:run
+
+      - name: UI build (vite → ui/dist)
+        if: steps.ui.outputs.present == 'true'
+        working-directory: ui
+        run: npm run build
+
+      # ── Rust gate ────────────────────────────────────────────────────────
       - name: Format check
         run: cargo fmt --all --check
 
