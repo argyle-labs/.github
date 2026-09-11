@@ -53,6 +53,16 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # The BuildKit builder runs in its own container and does NOT inherit
+          # the host daemon's insecure-registries, so the final `--push` to a
+          # plain-HTTP registry fails ("HTTP response to HTTPS client") even
+          # after `docker login` succeeds. Tell BuildKit the registry is HTTP.
+          # Host lives in env.REGISTRY (the org var) — never hardcoded here.
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."${{ env.REGISTRY }}"]
+              http = true
 
       - name: Log in to the Gitea registry
         uses: docker/login-action@v3
