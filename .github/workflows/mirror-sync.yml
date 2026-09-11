@@ -6,9 +6,11 @@ name: Mirror sync (Gitea ⇄ GitHub)
 # needs a human; it also fires ntfy so it can't be missed.
 #
 # Requires org-level Gitea Actions secrets:
-#   GITEA_SYNC_TOKEN  Gitea token with WRITE on every org repo. The auto-injected
+#   SYNC_GITEA_TOKEN  Gitea token with WRITE on every org repo. The auto-injected
 #                     github.token is scoped to THIS repo only and cannot push to
 #                     the other 49, so a real org token is mandatory.
+#                     (Named SYNC_GITEA_TOKEN, not GITEA_SYNC_TOKEN — Gitea
+#                     reserves the GITEA_/GITHUB_ secret-name prefixes.)
 #   GH_TOKEN          GitHub PAT with `repo` AND `workflow` scope. `workflow` is
 #                     required or any branch that touches .github/workflows/*.yml
 #                     is rejected by GitHub.
@@ -38,7 +40,7 @@ jobs:
         env:
           GITEA_HOST: gitea.scottkey.me
           GITEA_ORG: argyle-labs
-          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.SYNC_GITEA_TOKEN }}
           GH_ORG: argyle-labs
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           NTFY_URL: ${{ secrets.NTFY_URL }}
