@@ -31,7 +31,7 @@ RUN set -eux; \
 # `node` INSIDE the job container; without it every container job dies at the
 # first `uses:` step ("job not started" / checkout failure). Official static
 # build, pinned; x86_64 host (CI runners are x86_64).
-ARG NODE_VERSION=20.18.0
+ARG NODE_VERSION=24.21.0
 RUN set -eux; \
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
         | tar -xJ -C /usr/local --strip-components=1 \
