@@ -64,27 +64,22 @@ env:
 
 jobs:
   # ── Unit/integration tests. First required check. ──
+  #
+  # Runs INSIDE the prebuilt ci-rust image (epic #53): the pinned Rust toolchain
+  # (+ clippy/rustfmt) and sccache are baked in, so this job no longer downloads
+  # rustup (the recurring static.rust-lang.org Fastly wedge) or curls sccache —
+  # it starts compiling immediately. Image is pulled from the internal Gitea
+  # registry over the vanity TLS host (vars.CI_REGISTRY); the pinned :1.95.0 tag
+  # tracks orca/rust-toolchain.toml — bump both together when Rust moves.
   test:
     runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: test
-
-      - name: Install sccache
-        run: |
-          set -euo pipefail
-          ver=v0.8.2
-          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-x86_64-unknown-linux-musl.tar.gz" \
-            | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/sccache'
-          chmod +x /usr/local/bin/sccache
-          sccache --version
 
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
