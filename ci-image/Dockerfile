@@ -23,8 +23,20 @@ FROM docker.io/library/rust:${RUST_VERSION}-bookworm
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates curl git perl xz-utils musl-tools pkg-config; \
+        ca-certificates curl git perl xz-utils musl-tools pkg-config sudo; \
     rm -rf /var/lib/apt/lists/*
+
+# Node.js — required by the CI job runner, NOT by the build. Gitea/act runs
+# JavaScript actions (actions/checkout@v4, upload-artifact, etc.) by exec'ing
+# `node` INSIDE the job container; without it every container job dies at the
+# first `uses:` step ("job not started" / checkout failure). Official static
+# build, pinned; x86_64 host (CI runners are x86_64).
+ARG NODE_VERSION=24.21.0
+RUN set -eux; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+        | tar -xJ -C /usr/local --strip-components=1 \
+            --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE'; \
+    node --version; npm --version
 
 # Toolchain components (match orca/rust-toolchain.toml) + every Linux target the
 # release matrix builds. `rust:<ver>` already carries the pinned rustc/cargo.
