@@ -101,17 +101,68 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "→ ${{ inputs.channel }} (${{ inputs.bump }}) from ${latest_stable}: $tag"
 
+  # ── Build the frontend ONCE for UI plugins (e.g. peacock: a SvelteKit app in
+  #    ui/). ui/dist is what rust-embed bakes into the binary, but it is
+  #    gitignored (only a placeholder index.html is tracked) — so without this a
+  #    released binary embeds the placeholder, not the app. Build it once in the
+  #    ci-rust container (has Node/npm) and publish ui/dist as an artifact; every
+  #    target build job below downloads it before cargo build, so a single UI
+  #    build serves all targets (incl. macOS, which then needs no Node). Gated on
+  #    ui/package.json via the has_ui output; Rust-only plugins produce nothing. ──
+  ui-build:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      has_ui: ${{ steps.detect.outputs.present }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect UI
+        id: detect
+        run: |
+          if [ -f ui/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "no ui/package.json — no frontend to build"
+          fi
+      - name: Build frontend (npm ci → vite build → ui/dist)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - name: Publish ui/dist artifact
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
+          retention-days: 1
+
   # ── One build job per supported triple (guard-skipped unless requested). Each
   #    builds via the shared plugin-build action (write version → native/cross
   #    build → stage binary+sha256 → upload artifact) for the release to gather. ──
   build-x86_64-linux-gnu:
-    needs: version
+    needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-gnu')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-unknown-linux-gnu'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+        if: needs.ui-build.outputs.has_ui == 'true'
+        uses: actions/download-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
       - uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: x86_64-unknown-linux-gnu
@@ -124,13 +175,19 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
   build-aarch64-linux-gnu:
-    needs: version
+    needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'aarch64-unknown-linux-gnu')
     runs-on: ${{ fromJSON(inputs.runs_on)['aarch64-unknown-linux-gnu'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+        if: needs.ui-build.outputs.has_ui == 'true'
+        uses: actions/download-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
       - uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: aarch64-unknown-linux-gnu
@@ -143,13 +200,19 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
   build-x86_64-linux-musl:
-    needs: version
+    needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-musl')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-unknown-linux-musl'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+        if: needs.ui-build.outputs.has_ui == 'true'
+        uses: actions/download-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
       - uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: x86_64-unknown-linux-musl
@@ -162,13 +225,19 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
   build-aarch64-linux-musl:
-    needs: version
+    needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'aarch64-unknown-linux-musl')
     runs-on: ${{ fromJSON(inputs.runs_on)['aarch64-unknown-linux-musl'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+        if: needs.ui-build.outputs.has_ui == 'true'
+        uses: actions/download-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
       - uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: aarch64-unknown-linux-musl
@@ -181,13 +250,19 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
   build-aarch64-darwin:
-    needs: version
+    needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'aarch64-apple-darwin')
     runs-on: ${{ fromJSON(inputs.runs_on)['aarch64-apple-darwin'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+        if: needs.ui-build.outputs.has_ui == 'true'
+        uses: actions/download-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
       - uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: aarch64-apple-darwin
@@ -200,13 +275,19 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
   build-x86_64-darwin:
-    needs: version
+    needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'x86_64-apple-darwin')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-apple-darwin'] || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+        if: needs.ui-build.outputs.has_ui == 'true'
+        uses: actions/download-artifact@v3
+        with:
+          name: ui-dist
+          path: ui/dist
       - uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: x86_64-apple-darwin
@@ -222,6 +303,7 @@ jobs:
   release:
     needs:
       - version
+      - ui-build
       - build-x86_64-linux-gnu
       - build-aarch64-linux-gnu
       - build-x86_64-linux-musl
@@ -241,6 +323,7 @@ jobs:
           set -euo pipefail
           fail=0
           for r in \
+            "ui-build:${{ needs.ui-build.result }}" \
             "gnu-x86:${{ needs.build-x86_64-linux-gnu.result }}" \
             "gnu-arm:${{ needs.build-aarch64-linux-gnu.result }}" \
             "musl-x86:${{ needs.build-x86_64-linux-musl.result }}" \
