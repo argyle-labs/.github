@@ -23,8 +23,18 @@ FROM docker.io/library/rust:${RUST_VERSION}-bookworm
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates curl git perl xz-utils musl-tools pkg-config sudo; \
+        ca-certificates curl git perl xz-utils musl-tools pkg-config sudo \
+        libssl-dev mold; \
     rm -rf /var/lib/apt/lists/*
+# libssl-dev + mold serve the CI compile-speed path:
+#   - libssl-dev lets `OPENSSL_NO_VENDOR=1` link the system OpenSSL on the PR
+#     gate instead of compiling openssl-src from source every cold build (the
+#     single biggest cold-compile cost — pulled in twice, via git2's
+#     vendored-openssl and rusqlite's bundled-sqlcipher-vendored-openssl).
+#     Release/cross builds do NOT set OPENSSL_NO_VENDOR, so they keep vendoring
+#     the static lib for musl — libssl-dev's mere presence changes nothing there.
+#   - mold is the fast linker (was best-effort apt at job time); baking it in
+#     makes it guaranteed and removes a per-job install.
 
 # Node.js — required by the CI job runner, NOT by the build. Gitea/act runs
 # JavaScript actions (actions/checkout@v4, upload-artifact, etc.) by exec'ing
