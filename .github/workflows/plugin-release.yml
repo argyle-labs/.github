@@ -69,6 +69,14 @@ jobs:
 
       - name: Compute next version from tags
         id: ver
+        # Same rule as the publish step: caller inputs reach the shell through the
+        # environment. These are `choice` in each repo's thin caller, but this is a
+        # reusable workflow — a caller may pass any string via `with:`, and the
+        # `case` validation below runs AFTER interpolation would already have
+        # executed it.
+        env:
+          BUMP: ${{ inputs.bump }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           git fetch --tags --quiet || true
@@ -77,14 +85,14 @@ jobs:
             | sort -V | tail -1)
           latest_stable=${latest_stable:-v0.0.0}
           IFS='.' read -r major minor patch <<< "${latest_stable#v}"
-          case "${{ inputs.bump }}" in
+          case "$BUMP" in
             major) major=$((major+1)); minor=0; patch=0 ;;
             minor) minor=$((minor+1)); patch=0 ;;
             patch) patch=$((patch+1)) ;;
-            *) echo "::error::bump must be patch|minor|major (got '${{ inputs.bump }}')"; exit 1 ;;
+            *) echo "::error::bump must be patch|minor|major (got '$BUMP')"; exit 1 ;;
           esac
           base="${major}.${minor}.${patch}"
-          case "${{ inputs.channel }}" in
+          case "$CHANNEL" in
             stable)
               version="$base"; tag="v$base"; prerelease=false ;;
             rc)
@@ -92,14 +100,14 @@ jobs:
               if [ -z "$latest_rc" ]; then n=1; else n=${latest_rc##*rc.}; n=$((n+1)); fi
               version="${base}-rc.${n}"; tag="v${version}"; prerelease=true ;;
             *)
-              echo "::error::channel must be rc|stable (got '${{ inputs.channel }}')"; exit 1 ;;
+              echo "::error::channel must be rc|stable (got '$CHANNEL')"; exit 1 ;;
           esac
           {
             echo "version=$version"
             echo "tag=$tag"
             echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
-          echo "→ ${{ inputs.channel }} (${{ inputs.bump }}) from ${latest_stable}: $tag"
+          echo "→ $CHANNEL ($BUMP) from ${latest_stable}: $tag"
 
   # ── Build the frontend ONCE for UI plugins (e.g. peacock: a SvelteKit app in
   #    ui/). ui/dist is what rust-embed bakes into the binary, but it is
@@ -353,6 +361,15 @@ jobs:
         # GitHub is an OUTBOUND-ONLY mirror; nothing here writes to api.github.com.
         env:
           GITEA_TOKEN: ${{ secrets.ORCA_RELEASE_TOKEN || github.token }}
+          # Operator-supplied free text. It MUST arrive through the environment,
+          # never via `${{ }}` inside the script: expression interpolation happens
+          # before the shell parses, so backticks or $(…) in release notes would be
+          # executed — with contents:write and inherited secrets in scope. Release
+          # notes for a *software* project contain backticks routinely, and when
+          # they did, publish died with `missing: command not found` (exit 127)
+          # AFTER every build went green, producing no release at all.
+          # Double-quoting alone does NOT fix this: `…` still substitutes inside "…".
+          NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
           repo="${{ github.repository }}"
@@ -361,7 +378,7 @@ jobs:
           server="${{ github.server_url }}"
           hdr_auth="Authorization: token ${GITEA_TOKEN}"
           accept="Accept: application/json"
-          notes="${{ inputs.notes }}"
+          notes="$NOTES"
           [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${repo}\`, built against orca \`main\`. Plugin binary + sha256 per host target."
           ls -la dist
 
