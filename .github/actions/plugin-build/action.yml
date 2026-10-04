@@ -43,6 +43,12 @@ inputs:
   macos-sdk-version:
     required: false
     default: "14.5"
+  rust-toolchain:
+    description: >-
+      Toolchain for hosts without the ci-rust image (macOS, plain Linux).
+      Tracks orca/rust-toolchain.toml and the ci-rust image tag.
+    required: false
+    default: "1.95.0"
 
 outputs:
   orca-source:
@@ -86,11 +92,11 @@ runs:
            && command -v zig >/dev/null && command -v sccache >/dev/null; then
           prebaked=true
         fi
-        # The sccache binary we fetch is x86_64-linux; enable only there, with creds.
+        # sccache is installed per host below: x86_64-linux tarball, or the
+        # macOS binary (Homebrew or the aarch64-apple-darwin tarball).
         use_sccache=false
-        if [ -n '${{ inputs.sccache-access-key }}' ] && [ -n '${{ inputs.sccache-endpoint }}' ] \
-           && [ "$ho" = Linux ] && [ "$ha" = x86_64 ]; then
-          use_sccache=true
+        if [ -n '${{ inputs.sccache-access-key }}' ] && [ -n '${{ inputs.sccache-endpoint }}' ]; then
+          case "$ho/$ha" in Linux/x86_64|Darwin/arm64) use_sccache=true ;; esac
         fi
         {
           echo "native=$native"
@@ -99,10 +105,9 @@ runs:
         } >> "$GITHUB_OUTPUT"
         echo "host=$ho/$ha target=$t native=$native prebaked=$prebaked sccache=$use_sccache"
 
-    # `dtolnay/rust-toolchain` bootstraps rustup via a single no-retry
-    # rustup-init download; the runner's egress to static.rust-lang.org
-    # intermittently resets, failing the whole job. Ensure rustup is present
-    # first with a retrying curl so dtolnay's next step is a no-op fast path.
+    # rustup-init is a single no-retry download and the runner's egress to
+    # static.rust-lang.org intermittently resets, so bootstrap it with a
+    # retrying curl.
     - name: Ensure rustup (resilient bootstrap)
       if: ${{ steps.host.outputs.prebaked != 'true' }}
       shell: bash
@@ -118,8 +123,21 @@ runs:
         done
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-    - uses: dtolnay/rust-toolchain@stable
+    # A persistent host (mint) already has the pinned toolchain; installing
+    # only when missing avoids the stable-channel update check on every run.
+    - name: Ensure pinned toolchain
       if: ${{ steps.host.outputs.prebaked != 'true' }}
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.rust-toolchain }}
+      run: |
+        set -euo pipefail
+        if rustup toolchain list | grep -q "^${TOOLCHAIN}-"; then
+          echo "toolchain ${TOOLCHAIN} already installed"
+        else
+          rustup toolchain install "$TOOLCHAIN" --profile minimal --no-self-update
+        fi
+        echo "RUSTUP_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
 
     - uses: Swatinem/rust-cache@v2
       with:
@@ -131,6 +149,18 @@ runs:
       run: |
         set -euo pipefail
         ver=v0.8.2
+        if [ "$(uname -s)" = Darwin ]; then
+          # The host executor's PATH may not include Homebrew.
+          if [ -x /opt/homebrew/bin/sccache ]; then
+            echo "/opt/homebrew/bin" >> "$GITHUB_PATH"; /opt/homebrew/bin/sccache --version; exit 0
+          fi
+          command -v sccache >/dev/null && { sccache --version; exit 0; }
+          dest="$HOME/.local/bin"; mkdir -p "$dest"
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-aarch64-apple-darwin.tar.gz" \
+            | tar -xz --strip-components=1 -C "$dest" "sccache-${ver}-aarch64-apple-darwin/sccache"
+          echo "$dest" >> "$GITHUB_PATH"; "$dest/sccache" --version
+          exit 0
+        fi
         curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-x86_64-unknown-linux-musl.tar.gz" \
           | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/sccache'
         chmod +x /usr/local/bin/sccache
@@ -239,12 +269,46 @@ runs:
         } >> "$GITHUB_ENV"
         export SCCACHE_S3_USE_SSL=false SCCACHE_REGION=us-east-1 SCCACHE_IDLE_TIMEOUT=0 \
           SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="${RUNNER_TEMP:-/tmp}/sccache-error.log"
-        if timeout 60 sccache --start-server; then
+        # macOS has no coreutils `timeout` unless Homebrew's gtimeout is present.
+        to=$(command -v timeout || command -v gtimeout || true)
+        if ${to:+$to 60} sccache --start-server; then
           echo "ok=true" >> "$GITHUB_OUTPUT"
         else
           echo "::warning title=sccache unavailable::sccache server did not start against the MinIO backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
           echo "ok=false" >> "$GITHUB_OUTPUT"
         fi
+
+    # On the macOS host: link Homebrew's static OpenSSL instead of compiling
+    # openssl-src, and route C (jemalloc) through sccache. Together those were
+    # ~45 min per run on the throttled mint runner. OPENSSL_STATIC keeps the
+    # shipped binary free of a Homebrew dylib dependency (checked after build).
+    # CARGO_TARGET_DIR: act's host executor uses a fresh workdir per run, and
+    # OUT_DIR paths under it are part of sccache's key, so a fixed target dir
+    # (wiped each run; mint runs one job at a time) keeps keys stable.
+    - name: macOS build environment
+      if: ${{ runner.os == 'macOS' && steps.host.outputs.native == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        tdir=/tmp/plugin-build-target/${{ inputs.target }}
+        rm -rf "$tdir"; mkdir -p "$tdir"
+        ssl=$(brew --prefix openssl@3 2>/dev/null || true)
+        if [ -z "$ssl" ] || [ ! -f "$ssl/lib/libssl.a" ] || [ ! -f "$ssl/lib/libcrypto.a" ]; then
+          echo "::warning title=No Homebrew openssl@3::static libssl/libcrypto not found; vendored OpenSSL will compile from source (brew install openssl@3)"
+          ssl=""
+        fi
+        {
+          echo "CARGO_TARGET_DIR=$tdir"
+          if [ -n "$ssl" ]; then
+            echo "OPENSSL_NO_VENDOR=1"
+            echo "OPENSSL_STATIC=1"
+            echo "OPENSSL_DIR=$ssl"
+          fi
+          if [ "${{ steps.sccache.outputs.ok }}" = "true" ]; then
+            echo "CC=sccache cc"
+            echo "CXX=sccache c++"
+          fi
+        } >> "$GITHUB_ENV"
 
     - name: Fetch dependencies
       shell: bash
@@ -294,8 +358,11 @@ runs:
         budget="${{ inputs.size-budget-mib }}"; target="${{ inputs.target }}"
         while IFS= read -r bin; do
           [ -z "$bin" ] && continue
-          path="target/${target}/release/${bin}"
-          [ -f "$path" ] || { echo "::error::binary not found at $path"; ls -la "target/${target}/release" || true; exit 1; }
+          path="${CARGO_TARGET_DIR:-target}/${target}/release/${bin}"
+          [ -f "$path" ] || { echo "::error::binary not found at $path"; ls -la "${CARGO_TARGET_DIR:-target}/${target}/release" || true; exit 1; }
+          if [ "$(uname -s)" = Darwin ] && otool -L "$path" | grep -q /opt/homebrew; then
+            echo "::error::$path links a Homebrew dylib:"; otool -L "$path"; exit 1
+          fi
           asset="${bin}-${{ inputs.tag }}-${target}"
           cp "$path" "dist/$asset"
           ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
