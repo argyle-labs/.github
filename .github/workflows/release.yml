@@ -320,12 +320,19 @@ jobs:
             fi
             echo
             echo "### ${TARGET} — sccache"
+            stats=$(sccache --show-stats 2>&1) || stats="(sccache not in use)"
             echo '```'
-            sccache --show-stats 2>&1 || echo "(sccache not in use)"
+            echo "$stats"
             echo '```'
+            # ReadOnly mode fails every write without ever completing one.
+            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
+            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
+            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
+              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ -s "${SCCACHE_ERROR_LOG:-}" ]; then
-            echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
+          if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
+            echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
           fi
 
       - uses: actions/upload-artifact@v3
@@ -432,6 +439,7 @@ jobs:
             echo "SCCACHE_CACHE_SIZE=20G"
             echo "SCCACHE_IDLE_TIMEOUT=0"
             echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+            echo "SCCACHE_ERROR_LOG=${RUNNER_TEMP:-/tmp}/sccache-error.log"
           } >> "$GITHUB_ENV"
 
       - name: Build darwin binary natively
@@ -443,7 +451,12 @@ jobs:
           write_cargo_version "$REL_VERSION"
           rustup target add aarch64-apple-darwin || true
           sccache --stop-server >/dev/null 2>&1 || true
+          # A failed write check leaves sccache up but READ-ONLY, reported only in this append-only log.
+          : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
           sccache --start-server
+          if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
+            echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (disk write check failed): cache will not fill; check mint's disk ($SCCACHE_DIR). $(tr '\n' ' ' <<< "$ro")"
+          fi
           sccache --zero-stats >/dev/null 2>&1 || true
           t0=$SECONDS
           # build_orca_targets REQUIRES explicit targets (dies "no targets given"
@@ -452,10 +465,20 @@ jobs:
           build_orca_targets aarch64-apple-darwin
           {
             echo "### aarch64-apple-darwin — build $((SECONDS - t0))s"
+            stats=$(sccache --show-stats 2>&1) || true
             echo '```'
-            sccache --show-stats 2>&1 || true
+            echo "$stats"
             echo '```'
+            # ReadOnly mode fails every write without ever completing one.
+            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
+            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
+            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
+              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check mint's disk)."
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
+            echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
+          fi
           echo "── dist-release (macOS build leg) ──"; ls -la dist-release || true
 
       - name: Ensure raw binary + checksum, then smoke-test it

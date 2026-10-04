@@ -31,17 +31,12 @@ on:
       targets:
         description: >-
           JSON array of target triples to build+publish (unrequested = skipped,
-          no runner). Linux daemons fetch the musl-static asset first and fall
-          back to gnu, so gnu is opt-in via include_gnu.
+          no runner). aarch64 Linux is opt-in via targets; Linux hosts fetch
+          musl first, then gnu.
         required: false
         type: string
         default: >-
-          ["x86_64-unknown-linux-musl","aarch64-apple-darwin"]
-      include_gnu:
-        description: Also build x86_64-unknown-linux-gnu (same as listing it in targets).
-        required: false
-        type: boolean
-        default: false
+          ["x86_64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-apple-darwin"]
       runs_on:
         description: >-
           JSON map triple → runs-on label. Unlisted → ubuntu-latest (zig-cross).
@@ -172,7 +167,7 @@ jobs:
   #    build → stage binary+sha256 → upload artifact) for the release to gather. ──
   build-x86_64-linux-gnu:
     needs: [version, ui-build]
-    if: inputs.include_gnu || contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-gnu')
+    if: contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-gnu')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-unknown-linux-gnu'] || 'ubuntu-latest' }}
     container:
       image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0

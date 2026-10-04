@@ -143,9 +143,13 @@ runs:
           export SCCACHE_IDLE_TIMEOUT=0 SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="$err_log"
           # Starting up front runs the storage check, so a dead backend falls
           # back to an uncached build in seconds instead of mid-compile.
+          # A failed write check leaves sccache up but READ-ONLY, reported only in this append-only log.
+          : > "$err_log" 2>/dev/null || true
           if ! timeout 60 sccache --start-server; then
             echo "::warning title=sccache unavailable::sccache ($backend) did not start; building UNCACHED. $(tail -n 5 "$err_log" 2>/dev/null | tr '\n' ' ')"
             backend=none
+          elif ro=$(grep -A 5 'storage write check failed' "$err_log" 2>/dev/null); then
+            echo "::error title=sccache READ-ONLY::sccache ($backend) cache is READ-ONLY (backend write check failed): cache will not fill; check backend disk/permissions. $(tr '\n' ' ' <<< "$ro")"
           fi
         fi
         echo "sccache backend: $backend"
