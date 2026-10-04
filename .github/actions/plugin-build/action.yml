@@ -69,13 +69,6 @@ runs:
         perl -i -pe 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
         grep -m1 '^version = ' Cargo.toml
 
-    # RCs build without LTO (orca#755); stable keeps the Cargo.toml profile.
-    # Set before rust-cache, which keys on CARGO_* env.
-    - name: Disable LTO for release candidates
-      if: ${{ contains(inputs.version, '-rc.') }}
-      shell: bash
-      run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
-
     - name: Detect native vs cross
       id: host
       shell: bash
@@ -396,9 +389,7 @@ runs:
           cargo build --release --locked --target "$TARGET" $bin_flags
         SLOT_TARGET: ${{ inputs.target }}
         SLOT_BINS: ${{ steps.bins.outputs.list }}
-        # The LTO mode changes every dep's artifact hash; separate scopes keep
-        # RC and stable slots from holding both sets.
-        SLOT_SCOPE: ${{ contains(inputs.version, '-rc.') && 'plugin-rc' || 'plugin' }}
+        SLOT_SCOPE: plugin
         SLOT_CAP_GB: "4"
         SLOT_SCCACHE: ${{ steps.sccache.outputs.ok == 'true' && 'true' || 'false' }}
       run: /bin/bash "$GITHUB_ACTION_PATH/../mint-cargo-slot/slot.sh"

@@ -214,10 +214,11 @@ jobs:
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       # Thin LTO is ~85% of orca's final-crate build time (orca#755); stable
-      # keeps the Cargo.toml profile. Set before Rust setup so rust-cache, which
-      # keys on CARGO_* env, keeps RC and stable target dirs apart.
+      # keeps the Cargo.toml profile. orca only (full profile): plugins default
+      # to lto=false. Set before Rust setup so rust-cache, which keys on CARGO_*
+      # env, keeps RC and stable target dirs apart.
       - name: Disable LTO for release candidates
-        if: contains(needs.version.outputs.version, '-rc.')
+        if: steps.sel.outputs.skip != 'true' && inputs.asset-profile == 'full' && contains(needs.version.outputs.version, '-rc.')
         run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
 
       - name: Rust setup
