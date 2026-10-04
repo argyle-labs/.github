@@ -1,25 +1,17 @@
-name: CI (shared reusable)
+name: CI
 
-# ─────────────────────────────────────────────────────────────────────────────
-# The PR gate for EVERY orca-ecosystem repo (orca core + all plugins). Runs on
-# pull_request only — the merge gate. Two required checks:
-#   test  → fmt + clippy + cargo test
+# PR gate for orca-ecosystem Rust repos. Two checks:
+#   ci    → fmt + clippy + cargo test
 #   build → cross-compile the release binaries for every target
+# Main is not re-tested after merge; release.yml builds the rc draft.
+# Toolchain and caching live in the rust-setup composite action.
 #
-# Post-merge, main does NOT re-run this — release.yml takes over with a
-# no-tests rc-draft build (the PR already proved tests+build). See
-# [[unified-cicd-pipeline-architecture]].
-#
-# All environment/caching/toolchain lives in the shared `rust-setup` composite,
-# so the caching strategy is defined in exactly ONE place.
-#
-# Caller (identical across repos, kept in sync from _caller-template.yml):
+# Caller:
 #   jobs:
 #     ci:
 #       if: github.event_name == 'pull_request'
 #       uses: argyle-labs/.github/.github/workflows/ci.yml@main
 #       secrets: inherit
-# ─────────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_call:
@@ -41,7 +33,7 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,6 +1,6 @@
-# Reusable secret/PII scan. Every argyle-labs repo calls this from its own
+# Secret/PII scan. Every argyle-labs repo calls this from its own
 # .github/workflows/secret-scan.yml so rules live in one place.
-name: gitleaks-reusable
+name: gitleaks
 on:
   workflow_call:
 
