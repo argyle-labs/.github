@@ -139,7 +139,7 @@ if [ "${1:-}" = __inner ]; then
 fi
 
 mkdir -p "$base"
-SLOT_WORK=$(mktemp -d "${TMPDIR:-/tmp}/mint-cargo-slot.XXXXXX")
+SLOT_WORK=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mint-cargo-slot.XXXXXX")
 export SLOT_WORK
 trap 'rm -rf "$SLOT_WORK"' EXIT
 
