@@ -7,7 +7,7 @@ name: Plugin CI (reusable)
 #
 #   • Before approval — on a PR to main AND on push to main — a plugin caller
 #     runs THIS workflow, which is TEST + LINT ONLY:
-#       test → cargo fmt --check + cargo clippy -D warnings + cargo test
+#       test → cargo fmt --check + cargo test + cargo clippy -D warnings
 #              (fail = block the PR)
 #     Branch protection on `main` marks `test` as the single required check.
 #     CI does NOT build binaries: cross-compiling every target on every PR/push
@@ -40,9 +40,18 @@ name: Plugin CI (reusable)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  # No inputs: CI is test + lint only. The build target matrix (targets/bins)
-  # lives solely in plugin-release.yml, which is where binaries are built.
+  # CI is test + lint only. The build target matrix (targets/bins) lives solely
+  # in plugin-release.yml, which is where binaries are built.
   workflow_call:
+    inputs:
+      lock-check:
+        description: >-
+          Cargo.lock drift gate: `warn` (annotate only) or `enforce` (fail the
+          job). Flip the default to `enforce` once every plugin's lock is
+          git-sourced, or opt in per repo with `with: { lock-check: enforce }`.
+        required: false
+        type: string
+        default: warn
 
 env:
   CARGO_TERM_COLOR: always
@@ -62,6 +71,24 @@ env:
   SCCACHE_REGION: us-east-1
   AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+  # The server's idle timer only resets on NEW requests, so one rustc running
+  # longer than the 600s default (a giant generated crate) made the server shut
+  # itself down mid-compile: ~10.5 min of silence, then "server looks like it
+  # shut down unexpectedly" and a local recompile. The container's lifetime
+  # bounds the server instead.
+  SCCACHE_IDLE_TIMEOUT: "0"
+  # A server that does die mid-build degrades to a local compile instead of
+  # failing the rustc invocation.
+  SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+  SCCACHE_ERROR_LOG: /tmp/sccache-error.log
+  # CI-only: link the image's system OpenSSL instead of compiling openssl-src
+  # (vendored in most plugin locks via git2/rusqlite/native-tls). Release
+  # builds do not set this, so shipped binaries keep vendoring it.
+  OPENSSL_NO_VENDOR: "1"
+  # cc-rs honours a multi-word CC/CXX, so the C deps that remain (SQLCipher,
+  # libgit2, jemalloc) are cached too.
+  CC: "sccache cc"
+  CXX: "sccache c++"
 
 jobs:
   # ── Unit/integration tests. First required check. ──
@@ -90,6 +117,56 @@ jobs:
 
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
+
+      # A lock generated under the local path patch records orca crates with no
+      # `source`, so CI silently re-resolves against whatever orca main is at
+      # that moment and the sccache keys miss every time main moves.
+      - name: Cargo.lock drift check
+        env:
+          MODE: ${{ inputs.lock-check }}
+        run: |
+          set -uo pipefail
+          problems=()
+          if [ -f Cargo.lock ]; then
+            members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
+            # [[package]] blocks without a `source` that are not members of this
+            # workspace came from a path patch.
+            sourceless=$(awk '
+              /^\[\[package\]\]/ { if (name != "" && !src) print name; name=""; src=0; next }
+              /^name = /             { gsub(/"/, "", $3); name=$3 }
+              /^source = /           { src=1 }
+              END                    { if (name != "" && !src) print name }
+            ' Cargo.lock | grep -vxF -f <(printf '%s\n' "$members") || true)
+            if [ -n "$sourceless" ]; then
+              problems+=("Cargo.lock has path-sourced (sourceless) entries for non-member crates: $(echo "$sourceless" | paste -sd, -) — regenerate the lock without .cargo/config.toml")
+            fi
+            if ! err=$(cargo metadata --locked --format-version 1 2>&1 >/dev/null); then
+              problems+=("cargo metadata --locked failed (lock out of sync with Cargo.toml): $(echo "$err" | grep -m1 -i error)")
+            fi
+          else
+            problems+=("no Cargo.lock committed")
+          fi
+          [ "${#problems[@]}" -eq 0 ] && { echo "Cargo.lock is git-sourced and in sync"; exit 0; }
+          level=warning; [ "$MODE" = enforce ] && level=error
+          {
+            echo "### Cargo.lock drift (${MODE})"
+            for p in "${problems[@]}"; do echo "- $p"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+          for p in "${problems[@]}"; do echo "::${level} title=Cargo.lock drift::$p"; done
+          [ "$MODE" = enforce ] && exit 1
+          exit 0
+
+      # Starting the server up front runs sccache's storage check against MinIO,
+      # so an unreachable backend falls back to an uncached build in seconds
+      # with a visible warning instead of stalling inside the first rustc.
+      - name: sccache preflight
+        run: |
+          if timeout 60 sccache --start-server; then
+            echo "sccache server up ($SCCACHE_ENDPOINT/$SCCACHE_BUCKET)"
+          else
+            echo "::warning title=sccache unavailable::sccache server did not start against the MinIO backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
+            { echo "RUSTC_WRAPPER="; echo "CC=cc"; echo "CXX=c++"; } >> "$GITHUB_ENV"
+          fi
 
       # orca's plugin-toolkit is pinned to the PUBLIC github.com/argyle-labs/orca
       # mirror. Runners reach github.com directly (the sccache curl above proves
@@ -138,15 +215,47 @@ jobs:
         run: npm run build
 
       # ── Rust gate ────────────────────────────────────────────────────────
+      # Each timed phase appends `name|seconds|exit` to /tmp/ci-phases from an
+      # EXIT trap, so a failing phase is still recorded; the summary renders it.
       - name: Format check
         run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Fetch dependencies
+        run: |
+          export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          cargo fetch
 
+      # Test BEFORE clippy, with the same --workspace/--all-features: clippy's
+      # check-mode .rmeta cannot back a codegen build, but the test build's
+      # artifacts do satisfy clippy's dependency edges, so the lint phase only
+      # re-checks workspace members. Reversed, both phases pay a full compile.
       - name: Test
-        run: cargo test --all-features --workspace
+        run: |
+          export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          cargo test --workspace --all-features
 
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        run: |
+          export t0=$SECONDS; trap 'echo "clippy|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Timings + sccache summary
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "### Phase timings"
+            echo "| phase | seconds | exit |"
+            echo "|---|---:|---:|"
+            if [ -f /tmp/ci-phases ]; then
+              while IFS='|' read -r p t e; do echo "| $p | $t | $e |"; done < /tmp/ci-phases
+            fi
+            echo
+            echo "### sccache"
+            echo '```'
+            sccache --show-stats 2>&1 || echo "(sccache server not running)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s "$SCCACHE_ERROR_LOG" ]; then
+            echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
+          fi
