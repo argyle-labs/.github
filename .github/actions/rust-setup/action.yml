@@ -1,7 +1,7 @@
 name: Rust setup (shared)
 description: >
   The ONE home for the org's Rust CI/build environment: toolchain, the caching
-  strategy (sccache local-disk + Swatinem rust-cache), the private orca git-dep
+  strategy (sccache on MinIO or local disk + Swatinem rust-cache), the private orca git-dep
   auth (github.com→Gitea host rewrite), and the compile-memory controls that
   keep heavy generated crates under the runner's memory cap. Every CI and
   release job composes this so caching + toolchain are defined in exactly one
@@ -22,15 +22,46 @@ inputs:
       the rewrite (e.g. the orca repo itself, which IS the dep).
     required: false
     default: ""
+  sccache-endpoint:
+    description: >
+      MinIO host:port for the shared sccache bucket (pass vars.SCCACHE_ENDPOINT).
+      With the access/secret keys set, sccache uses MinIO; otherwise a local
+      disk cache.
+    required: false
+    default: ""
+  sccache-bucket:
+    required: false
+    default: "sccache"
+  sccache-access-key:
+    required: false
+    default: ""
+  sccache-secret-key:
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    # The ci-rust container bakes the pinned toolchain (+ clippy/rustfmt), zig,
+    # cargo-zigbuild and sccache; there every bootstrap below is skipped.
+    - name: Detect prebaked toolchain
+      id: env
+      shell: bash
+      run: |
+        prebaked=false
+        if [ "$(uname -s)" = Linux ] && command -v rustup >/dev/null && command -v cargo-zigbuild >/dev/null \
+           && command -v zig >/dev/null && command -v sccache >/dev/null; then
+          prebaked=true
+        fi
+        echo "prebaked=$prebaked" >> "$GITHUB_OUTPUT"
+        echo "prebaked toolchain: $prebaked"
+
     # `dtolnay/rust-toolchain` bootstraps rustup via a single no-retry
     # rustup-init download; the runner's egress to static.rust-lang.org
     # intermittently resets, failing the whole job. Ensure rustup is present
     # first with a retrying curl so dtolnay's next step is a no-op fast path.
     - name: Ensure rustup (resilient bootstrap)
+      if: ${{ steps.env.outputs.prebaked != 'true' }}
       shell: bash
       run: |
         command -v rustup >/dev/null 2>&1 && { echo "rustup already present"; exit 0; }
@@ -45,14 +76,15 @@ runs:
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
     - name: Install Rust toolchain
+      if: ${{ steps.env.outputs.prebaked != 'true' }}
       uses: dtolnay/rust-toolchain@stable
       with:
         components: ${{ inputs.components }}
 
     # sccache caches individual rustc invocations — INCLUDING workspace members,
     # which rust-cache deliberately skips. That is what makes the giant generated
-    # proxmox crate stop recompiling from scratch each run. Backend = local disk
-    # on the persistent `:host` LXC runner (see env below); no cache protocol.
+    # proxmox crate stop recompiling from scratch each run. Backend is chosen in
+    # the configure step below.
     # Install sccache directly from its public release tarball — best-effort.
     # mozilla-actions/sccache-action queries the GitHub *API* to resolve the
     # release, which needs a token that Gitea's act does not populate in a
@@ -60,6 +92,7 @@ runs:
     # A direct download of a pinned version needs no API and no token; if it
     # fails for any reason we skip the wrapper rather than break the build.
     - name: Set up sccache (best-effort, no GitHub API)
+      if: ${{ steps.env.outputs.prebaked != 'true' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -81,19 +114,61 @@ runs:
 
     - name: Configure shared cargo/sccache environment
       shell: bash
+      env:
+        S3_ENDPOINT: ${{ inputs.sccache-endpoint }}
+        S3_BUCKET: ${{ inputs.sccache-bucket }}
+        S3_ACCESS_KEY: ${{ inputs.sccache-access-key }}
+        S3_SECRET_KEY: ${{ inputs.sccache-secret-key }}
       run: |
-        set -euo pipefail
+        set -uo pipefail
+        err_log="${RUNNER_TEMP:-/tmp}/sccache-error.log"
+        backend=none
+        if command -v sccache >/dev/null 2>&1; then
+          if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ]; then
+            # Shared MinIO bucket: jobs in an ephemeral container have no disk
+            # that outlives them, so a local SCCACHE_DIR would always be cold.
+            export SCCACHE_BUCKET="$S3_BUCKET" SCCACHE_ENDPOINT="$S3_ENDPOINT" \
+              SCCACHE_S3_USE_SSL=false SCCACHE_REGION=us-east-1 \
+              AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
+            backend=s3
+          else
+            # Local-disk backend on a persistent runner: a fixed host path
+            # survives across jobs with zero cache-protocol dependency. Do NOT
+            # use SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat
+            # with sccache's GHA backend is unproven.
+            export SCCACHE_DIR=/root/.cache/sccache SCCACHE_CACHE_SIZE=20G
+            backend=disk
+          fi
+          # The idle timer only resets on new requests, so a single rustc
+          # running past the 600s default made the server shut down under it.
+          # A server that still dies degrades to a local compile.
+          export SCCACHE_IDLE_TIMEOUT=0 SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="$err_log"
+          # Starting up front runs the storage check, so a dead backend falls
+          # back to an uncached build in seconds instead of mid-compile.
+          if ! timeout 60 sccache --start-server; then
+            echo "::warning title=sccache unavailable::sccache ($backend) did not start; building UNCACHED. $(tail -n 5 "$err_log" 2>/dev/null | tr '\n' ' ')"
+            backend=none
+          fi
+        fi
+        echo "sccache backend: $backend"
         {
-          # ── caching ──
-          # Only wrap rustc when sccache actually installed (best-effort above);
-          # otherwise leave RUSTC_WRAPPER unset so the build still runs.
-          command -v sccache >/dev/null 2>&1 && echo "RUSTC_WRAPPER=sccache"
-          # Local-disk backend on the persistent LXC runner: a fixed host path
-          # survives across jobs with zero cache-protocol dependency. Do NOT use
-          # SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat with
-          # sccache's GHA backend is unproven. Revisit if ephemeral runners land.
-          echo "SCCACHE_DIR=/root/.cache/sccache"
-          echo "SCCACHE_CACHE_SIZE=20G"
+          if [ "$backend" != none ]; then
+            echo "RUSTC_WRAPPER=sccache"
+            echo "SCCACHE_IDLE_TIMEOUT=0"
+            echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+            echo "SCCACHE_ERROR_LOG=$err_log"
+          fi
+          if [ "$backend" = s3 ]; then
+            echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
+            echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
+            echo "SCCACHE_S3_USE_SSL=false"
+            echo "SCCACHE_REGION=us-east-1"
+            echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+            echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+          elif [ "$backend" = disk ]; then
+            echo "SCCACHE_DIR=$SCCACHE_DIR"
+            echo "SCCACHE_CACHE_SIZE=$SCCACHE_CACHE_SIZE"
+          fi
           # sccache and cargo incremental are mutually exclusive.
           echo "CARGO_INCREMENTAL=0"
           # ── compile-memory controls ──

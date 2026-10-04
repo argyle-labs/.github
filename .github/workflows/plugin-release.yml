@@ -11,6 +11,8 @@ name: Plugin release (reusable)
 # NATIVE ROUTING: inputs.runs_on maps a triple → runner label; the shared
 # plugin-build action auto-detects native (cargo build) vs cross (cargo
 # zigbuild). Default routes aarch64-apple-darwin to the macos runner.
+# Linux legs run in the prebaked ci-rust container (toolchain, zig,
+# cargo-zigbuild, sccache); darwin legs run on the host.
 #
 # Caller MUST set `permissions: contents: write` (secrets: inherit does not
 # carry permissions); the release job creates the release.
@@ -27,13 +29,24 @@ on:
         required: true
         type: string
       targets:
-        description: JSON array of target triples to build+publish (unrequested = skipped, no runner).
+        description: >-
+          JSON array of target triples to build+publish (unrequested = skipped,
+          no runner). Linux daemons fetch the musl-static asset first and fall
+          back to gnu, so gnu is opt-in via include_gnu.
         required: false
         type: string
         default: >-
-          ["x86_64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-apple-darwin"]
+          ["x86_64-unknown-linux-musl","aarch64-apple-darwin"]
+      include_gnu:
+        description: Also build x86_64-unknown-linux-gnu (same as listing it in targets).
+        required: false
+        type: boolean
+        default: false
       runs_on:
-        description: JSON map triple → runs-on label. Unlisted → ubuntu-latest (zig-cross).
+        description: >-
+          JSON map triple → runs-on label. Unlisted → ubuntu-latest (zig-cross).
+          Linux triples build inside the x86_64 ci-rust container, so route
+          them only to x86_64 Linux runners.
         required: false
         type: string
         default: >-
@@ -159,8 +172,18 @@ jobs:
   #    build → stage binary+sha256 → upload artifact) for the release to gather. ──
   build-x86_64-linux-gnu:
     needs: [version, ui-build]
-    if: contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-gnu')
+    if: inputs.include_gnu || contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-gnu')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-unknown-linux-gnu'] || 'ubuntu-latest' }}
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -171,7 +194,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      - uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - id: build
+        uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: x86_64-unknown-linux-gnu
           version: ${{ needs.version.outputs.version }}
@@ -187,6 +211,16 @@ jobs:
     needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'aarch64-unknown-linux-gnu')
     runs-on: ${{ fromJSON(inputs.runs_on)['aarch64-unknown-linux-gnu'] || 'ubuntu-latest' }}
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -197,7 +231,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      - uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - id: build
+        uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: aarch64-unknown-linux-gnu
           version: ${{ needs.version.outputs.version }}
@@ -213,6 +248,16 @@ jobs:
     needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-musl')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-unknown-linux-musl'] || 'ubuntu-latest' }}
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -223,7 +268,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      - uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - id: build
+        uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: x86_64-unknown-linux-musl
           version: ${{ needs.version.outputs.version }}
@@ -239,6 +285,16 @@ jobs:
     needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'aarch64-unknown-linux-musl')
     runs-on: ${{ fromJSON(inputs.runs_on)['aarch64-unknown-linux-musl'] || 'ubuntu-latest' }}
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -249,7 +305,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      - uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - id: build
+        uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: aarch64-unknown-linux-musl
           version: ${{ needs.version.outputs.version }}
@@ -265,6 +322,8 @@ jobs:
     needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'aarch64-apple-darwin')
     runs-on: ${{ fromJSON(inputs.runs_on)['aarch64-apple-darwin'] || 'ubuntu-latest' }}
+    outputs:
+      orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -275,7 +334,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      - uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - id: build
+        uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: aarch64-apple-darwin
           version: ${{ needs.version.outputs.version }}
@@ -291,6 +351,8 @@ jobs:
     needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'x86_64-apple-darwin')
     runs-on: ${{ fromJSON(inputs.runs_on)['x86_64-apple-darwin'] || 'ubuntu-latest' }}
+    outputs:
+      orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -301,7 +363,8 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
-      - uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - id: build
+        uses: argyle-labs/.github/.github/actions/plugin-build@main
         with:
           target: x86_64-apple-darwin
           version: ${{ needs.version.outputs.version }}
@@ -376,6 +439,14 @@ jobs:
           # AFTER every build went green, producing no release at all.
           # Double-quoting alone does NOT fix this: `…` still substitutes inside "…".
           NOTES: ${{ inputs.notes }}
+          # First leg that resolved plugin-toolkit; every leg builds the same lock.
+          ORCA_SOURCE: >-
+            ${{ needs.build-x86_64-linux-musl.outputs.orca-source
+            || needs.build-x86_64-linux-gnu.outputs.orca-source
+            || needs.build-aarch64-darwin.outputs.orca-source
+            || needs.build-aarch64-linux-musl.outputs.orca-source
+            || needs.build-aarch64-linux-gnu.outputs.orca-source
+            || needs.build-x86_64-darwin.outputs.orca-source }}
         run: |
           set -euo pipefail
           repo="${{ github.repository }}"
@@ -384,8 +455,16 @@ jobs:
           server="${{ github.server_url }}"
           hdr_auth="Authorization: token ${GITEA_TOKEN}"
           accept="Accept: application/json"
+          # ORCA_SOURCE is the lock source, e.g.
+          # git+https://github.com/argyle-labs/orca?tag=v0.2.1-rc.10#<sha>.
+          orca_ref="an unrecorded orca revision"
+          if [ -n "$ORCA_SOURCE" ]; then
+            base=${ORCA_SOURCE%%#*}; rev=${ORCA_SOURCE##*#}; pin=${base#*\?}
+            [ "$pin" = "$base" ] && pin="default branch"
+            orca_ref="orca \`${pin/=/ }\` @ \`${rev:0:12}\`"
+          fi
           notes="$NOTES"
-          [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${repo}\`, built against orca \`main\`. Plugin binary + sha256 per host target."
+          [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${repo}\`, built against plugin-toolkit from ${orca_ref}. Plugin binary + sha256 per host target."
           ls -la dist
 
           payload=$(jq -n \
