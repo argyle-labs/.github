@@ -49,6 +49,13 @@ on:
         required: false
         type: string
         default: ''
+      runs-on:
+        description: >-
+          Runner label for the job. A crate whose compile needs more memory
+          than the default runners' per-job cap can request `ci-large`.
+        required: false
+        type: string
+        default: ubuntu-latest
 
 env:
   CARGO_TERM_COLOR: always
@@ -81,7 +88,7 @@ jobs:
   # The ci-rust image bakes in the toolchain and sccache. Its tag tracks
   # orca/rust-toolchain.toml; bump both together.
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     container:
       image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
       credentials:
