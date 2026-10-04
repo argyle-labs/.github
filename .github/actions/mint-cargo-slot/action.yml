@@ -1,0 +1,54 @@
+name: Mint cargo slot
+description: >
+  Run one cargo build on a persistent macOS host runner inside a reusable,
+  locked target dir (~/Library/Caches/orca-ci/target/<scope>/<target>/s<k>),
+  so concurrent jobs never share a target dir and deps stay warm across runs.
+  The command runs under `caffeinate -i` with CARGO_TARGET_DIR, TARGET and BINS
+  exported; afterwards each bin is copied to ./target/<target>/<profile>/ so
+  staging steps are unchanged. With sccache, a per-slot server port is used and
+  only that port is stopped. Fails early when the host has under 15G free.
+
+inputs:
+  run:
+    description: Shell command(s) that perform the build. Runs under bash -euo pipefail.
+    required: true
+  target:
+    description: Rust target triple.
+    required: true
+  bins:
+    description: Newline-separated bin names to copy back from the slot.
+    required: true
+  scope:
+    description: Slot namespace (e.g. orca, plugin).
+    required: true
+  profile:
+    required: false
+    default: release
+  slots:
+    description: Slot count per scope/target; match the runner's capacity.
+    required: false
+    default: "3"
+  cap-gb:
+    description: Per-slot size cap; a slot over it is emptied before building.
+    required: false
+    default: "4"
+  sccache:
+    description: '"true" to run rustc through a per-slot sccache server (configured via SCCACHE_* env).'
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Build in slot
+      shell: bash
+      env:
+        SLOT_RUN: ${{ inputs.run }}
+        SLOT_TARGET: ${{ inputs.target }}
+        SLOT_BINS: ${{ inputs.bins }}
+        SLOT_SCOPE: ${{ inputs.scope }}
+        SLOT_PROFILE: ${{ inputs.profile }}
+        SLOT_COUNT: ${{ inputs.slots }}
+        SLOT_CAP_GB: ${{ inputs.cap-gb }}
+        SLOT_SCCACHE: ${{ inputs.sccache }}
+      run: /bin/bash "$GITHUB_ACTION_PATH/slot.sh"
