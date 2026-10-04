@@ -417,9 +417,11 @@ jobs:
       - name: Collect release assets
         # Publishes only <bin>-<tag>-<triple> and its .sha256 from each
         # plugin-<triple> artifact; any other file or artifact fails the release.
-        # ui-dist only feeds the build jobs' rust-embed.
+        # ui-dist only feeds the build jobs' rust-embed. Every requested target
+        # must yield a binary: a skipped build job passes the gate above.
         env:
           TAG: ${{ needs.version.outputs.tag }}
+          TARGETS: ${{ inputs.targets }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -432,7 +434,8 @@ jobs:
               plugin-*) triple=${art#plugin-} ;;
               *) echo "::error::unexpected artifact $art"; bad=1; continue ;;
             esac
-            while IFS= read -r f; do
+            mapfile -t files < <(find "$d" -type f); wait $!
+            for f in "${files[@]}"; do
               rel=${f#"$d"/}
               case "$rel" in
                 */*) echo "::error::$art: unexpected nested file $rel"; bad=1 ;;
@@ -444,17 +447,24 @@ jobs:
                   fi ;;
                 *) echo "::error::$art: unexpected file $rel"; bad=1 ;;
               esac
-            done < <(find "$d" -type f)
+            done
           done
           [ "$bad" = 0 ] || exit 1
           assets=(dist/*)
           [ ${#assets[@]} -gt 0 ] || { echo "::error::no release assets collected"; exit 1; }
           for f in "${assets[@]}"; do
             case "$f" in
-              *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; exit 1; } ;;
-              *) [ -f "$f.sha256" ] || { echo "::error::missing checksum for $f"; exit 1; } ;;
+              *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; bad=1; } ;;
+              *) [ -f "$f.sha256" ] || { echo "::error::missing checksum for $f"; bad=1; } ;;
             esac
           done
+          IFS=, read -ra requested <<< "${TARGETS//[][\"[:space:]]/}"
+          [ ${#requested[@]} -gt 0 ] || { echo "::error::no targets requested"; bad=1; }
+          for t in "${requested[@]}"; do
+            bins=(dist/*-"${TAG}-${t}")
+            [ ${#bins[@]} -gt 0 ] || { echo "::error::no binary for requested target $t"; bad=1; }
+          done
+          [ "$bad" = 0 ] || exit 1
 
       - name: Create Gitea Release (pipeline-tagged)
         # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]]).
