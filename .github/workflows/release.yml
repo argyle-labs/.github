@@ -423,21 +423,6 @@ jobs:
           path: .ci
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
-      # A local sccache dir outside act's per-run workdir persists across runs.
-      # SCCACHE_IDLE_TIMEOUT=0: the idle timer resets only on new requests, so a
-      # single long rustc could outlive the 600s default and lose its server.
-      - name: Enable sccache (persistent compile cache)
-        run: |
-          set -euo pipefail
-          command -v sccache >/dev/null 2>&1 || brew install sccache
-          {
-            echo "SCCACHE_DIR=$HOME/Library/Caches/orca-sccache"
-            echo "SCCACHE_CACHE_SIZE=20G"
-            echo "SCCACHE_IDLE_TIMEOUT=0"
-            echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
-            echo "SCCACHE_ERROR_LOG=${RUNNER_TEMP:-/tmp}/sccache-error.log"
-          } >> "$GITHUB_ENV"
-
       - name: Write release version
         env:
           REL_VERSION: ${{ needs.version.outputs.version }}
