@@ -583,12 +583,33 @@ jobs:
         with:
           path: incoming
 
-      - name: Flatten into release-assets
+      - name: Collect release assets
+        # Allow-list by basename; any other file fails the release. orca-*-staging
+        # dirs are build_native_packages scratch (apk sources, packager-less
+        # fallbacks), never assets. The same binary arrives in several artifacts,
+        # so identical copies dedupe and differing ones fail.
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          # Collect every staged/packaged file, de-duplicated by basename.
-          find incoming -type f -exec cp -n {} release-assets/ \;
+          bad=0
+          while IFS= read -r f; do
+            case "$f" in */orca-*-staging/*) continue ;; esac
+            name=$(basename "$f")
+            case "$name" in
+              *.sha256|install.sh|*.deb|*.rpm|*.pkg|*.rb|*.plg|PKGBUILD) ;;
+              *-x86_64-unknown-linux-gnu|*-x86_64-unknown-linux-musl) ;;
+              *-aarch64-unknown-linux-gnu|*-aarch64-unknown-linux-musl) ;;
+              *-aarch64-apple-darwin|*-x86_64-apple-darwin) ;;
+              *) echo "::error::unexpected release file $f"; bad=1; continue ;;
+            esac
+            if [ -e "release-assets/$name" ]; then
+              cmp -s "$f" "release-assets/$name" || { echo "::error::conflicting copies of $name"; bad=1; }
+            else
+              cp "$f" release-assets/
+            fi
+          done < <(find incoming -type f)
+          [ "$bad" = 0 ] || exit 1
+          [ -n "$(ls -A release-assets)" ] || { echo "::error::no release assets collected"; exit 1; }
           # Restore +x on the raw per-target binaries (artifact round-trips drop it).
           find release-assets -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── release-assets ──"; ls -la release-assets

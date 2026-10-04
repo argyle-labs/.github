@@ -2,11 +2,12 @@ name: CI
 
 # PR gate for orca subprocess plugins: fmt, clippy and tests only. Binaries are
 # built by plugin-release.yml, which a caller reaches only through a manual
-# workflow_dispatch; Gitea has no `environment:` protection rules, so that
-# dispatch is the approval gate.
+# workflow_dispatch; Gitea ignores `jobs.<id>.environment` (no reviewer
+# protection), so that dispatch is the approval gate.
 #
-# Caller:
+# Caller (the workflow name makes the status row `CI / ci`):
 #
+#   name: CI
 #   on:
 #     pull_request:
 #       branches: [main]
@@ -197,6 +198,7 @@ jobs:
       # Gated on a ui/package.json so Rust-only plugins skip it entirely. For a
       # UI plugin the frontend is embedded from ui/dist via rust-embed, and
       # ui/dist is gitignored, so it must be built here before the cargo steps.
+      # Node/npm come from the ci-rust image.
       - name: Detect UI
         id: ui
         run: |

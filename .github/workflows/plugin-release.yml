@@ -413,12 +413,48 @@ jobs:
       - name: Download all target artifacts
         uses: actions/download-artifact@v3
         with:
-          path: dist
-      - name: Flatten downloaded artifacts
+          path: artifacts
+      - name: Collect release assets
+        # Publishes only <bin>-<tag>-<triple> and its .sha256 from each
+        # plugin-<triple> artifact; any other file or artifact fails the release.
+        # ui-dist only feeds the build jobs' rust-embed.
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           set -euo pipefail
-          find dist -mindepth 2 -type f | while IFS= read -r f; do mv -f "$f" dist/; done
-          find dist -mindepth 1 -type d -empty -delete
+          shopt -s nullglob
+          mkdir -p dist
+          bad=0
+          for d in artifacts/*/; do
+            d=${d%/}; art=${d#artifacts/}
+            case "$art" in
+              ui-dist) continue ;;
+              plugin-*) triple=${art#plugin-} ;;
+              *) echo "::error::unexpected artifact $art"; bad=1; continue ;;
+            esac
+            while IFS= read -r f; do
+              rel=${f#"$d"/}
+              case "$rel" in
+                */*) echo "::error::$art: unexpected nested file $rel"; bad=1 ;;
+                ?*"-${TAG}-${triple}"|?*"-${TAG}-${triple}.sha256")
+                  if [ -e "dist/$rel" ]; then
+                    echo "::error::duplicate asset $rel"; bad=1
+                  else
+                    mv "$f" dist/
+                  fi ;;
+                *) echo "::error::$art: unexpected file $rel"; bad=1 ;;
+              esac
+            done < <(find "$d" -type f)
+          done
+          [ "$bad" = 0 ] || exit 1
+          assets=(dist/*)
+          [ ${#assets[@]} -gt 0 ] || { echo "::error::no release assets collected"; exit 1; }
+          for f in "${assets[@]}"; do
+            case "$f" in
+              *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; exit 1; } ;;
+              *) [ -f "$f.sha256" ] || { echo "::error::missing checksum for $f"; exit 1; } ;;
+            esac
+          done
 
       - name: Create Gitea Release (pipeline-tagged)
         # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]]).
