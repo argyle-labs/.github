@@ -9,6 +9,11 @@ via `container:`. Epic: [.github#53](https://gitea.scottkey.me/argyle-labs/.gith
 - Rust **1.95.0** (tracks `orca/rust-toolchain.toml`) + `clippy`, `rustfmt`, `llvm-tools-preview`
 - Linux targets: `x86_64`/`aarch64` × `gnu`/`musl`
 - `zig` + `cargo-zigbuild` (cross), `sccache`, `cargo-nextest`, `cargo-llvm-cov`
+- `jq`, `libssl-dev`, `mold`
+- A warm `CARGO_HOME`: `cargo fetch` of `warm/Cargo.lock` (every plugin-facing
+  `plugin-toolkit` dependency) plus the orca git db at `ORCA_TAG`. When the
+  pinned orca tag moves, bump the tag in `warm/Cargo.toml` and `ORCA_TAG` in the
+  Dockerfile together and regenerate the lock (`cargo generate-lockfile`).
 
 ## Tags
 `ci-rust:<rust-version>` (pinned) and `ci-rust:latest` (current toolchain).

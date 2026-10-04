@@ -1,0 +1,17 @@
+# Skeleton plugin used only to warm CARGO_HOME in the ci-rust image. `full`
+# (default) + socketio + delegated-http enables every plugin-facing optional
+# dependency, so its lock is the union any plugin profile can pull. Bump the
+# tag here together with ORCA_TAG in the Dockerfile, then regenerate the lock
+# with `cargo generate-lockfile`.
+[package]
+name = "ci-warm"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+plugin-toolkit = { git = "https://github.com/argyle-labs/orca", tag = "v0.2.1-rc.10", features = ["socketio", "delegated-http"] }
+
+[build-dependencies]
+plugin-toolkit-build = { git = "https://github.com/argyle-labs/orca", tag = "v0.2.1-rc.10" }

@@ -23,7 +23,7 @@ FROM docker.io/library/rust:${RUST_VERSION}-bookworm
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates curl git perl xz-utils musl-tools pkg-config sudo \
+        ca-certificates curl git jq perl xz-utils musl-tools pkg-config sudo \
         libssl-dev mold; \
     rm -rf /var/lib/apt/lists/*
 # libssl-dev + mold serve the CI compile-speed path:
@@ -82,10 +82,19 @@ RUN set -eux; \
 RUN set -eux; \
     cargo install --locked cargo-zigbuild cargo-llvm-cov
 
-# Warm the cargo registry index so the first job doesn't pay a cold index fetch.
-# (A best-effort update; harmless if the network is unavailable at build time.)
-RUN cargo search --limit 1 serde >/dev/null 2>&1 || true
+# Warm CARGO_HOME: the sparse index entries + .crate files for the union of
+# plugin dependencies, and the orca git db/checkout at ORCA_TAG. A job then
+# downloads only what drifted from this lock, and a plugin pinned to another
+# orca rev fetches a delta into the existing git db instead of a full clone.
+# Extracted sources are dropped; re-extracting a .crate is cheap.
+ARG ORCA_TAG=v0.2.1-rc.10
+COPY warm /tmp/ci-warm
+RUN set -eux; \
+    grep -q "tag = \"${ORCA_TAG}\"" /tmp/ci-warm/Cargo.toml; \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch --locked --manifest-path /tmp/ci-warm/Cargo.toml; \
+    ls -d "${CARGO_HOME}"/git/db/orca-*; \
+    rm -rf /tmp/ci-warm "${CARGO_HOME}/registry/src"
 
 LABEL org.opencontainers.image.source="https://github.com/argyle-labs/.github" \
-      org.opencontainers.image.description="orca plugin CI/release toolchain (rust ${RUST_VERSION} + linux targets + zig + sccache)" \
+      org.opencontainers.image.description="orca plugin CI/release toolchain (rust ${RUST_VERSION} + linux targets + zig + sccache + warm CARGO_HOME at orca ${ORCA_TAG})" \
       org.opencontainers.image.licenses="MIT"
