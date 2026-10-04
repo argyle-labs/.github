@@ -1,6 +1,6 @@
-name: Plugin release (reusable)
+name: Release
 
-# Reusable release for orca subprocess plugins. Artifact = target/<triple>/
+# Release for orca subprocess plugins. Artifact = target/<triple>/
 # release/<bin> + .sha256. Reached only via a caller workflow_dispatch
 # (channel=rc, then stable) — that operator trigger is the approval gate;
 # building happens here, post-approval (plugin-ci.yml is test+lint only).

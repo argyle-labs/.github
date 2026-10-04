@@ -1,16 +1,9 @@
-name: Compose CI (reusable)
+name: CI
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Reusable CI workflow for orca docker-compose plugins — the PR gate for repos
-# whose deliverable is a compose stack (not a Rust [[bin]]). Gitea-canonical,
-# see [[gitea-canonical-github-mirror-only]].
+# PR gate for docker-compose plugins: every compose file must be well-formed
+# YAML and a valid compose spec.
 #
-# A compose plugin ships one or more compose files (compose.yml / compose.yaml /
-# docker-compose.yml) plus assets/docs — there is no crate to `cargo test`, so
-# the Rust plugin-ci.yml does not apply. This workflow's gate is: every compose
-# file is (a) well-formed YAML and (b) a valid compose spec.
-#
-# One caller per compose-plugin repo does:
+# Caller:
 #
 #   name: CI
 #   on:
@@ -21,9 +14,8 @@ name: Compose CI (reusable)
 #       uses: argyle-labs/.github/.github/workflows/compose-ci.yml@main
 #       secrets: inherit
 #
-# No `permissions:` block is required — this gate neither tags nor publishes,
-# so the default read-only token is sufficient.
-# ─────────────────────────────────────────────────────────────────────────────
+# The caller needs no `permissions:` block; this workflow neither tags nor
+# publishes.
 
 on:
   workflow_call:
@@ -38,8 +30,7 @@ on:
         default: "compose.yml compose.yaml docker-compose.yml docker-compose.yaml"
 
 jobs:
-  # ── Validate every compose file. Required check. ──
-  compose:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

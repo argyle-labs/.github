@@ -1,8 +1,8 @@
-name: Cargo publish to Gitea (reusable)
+name: Cargo publish
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Publish a Rust workspace's crates to the org's Gitea cargo registry in
-# dependency order (.github#53 slice 4), so plugins can depend on versioned
+# dependency order, so plugins can depend on versioned
 # orca crates instead of a git source. Dispatch-only: the caller is a
 # workflow_dispatch in orca:
 #

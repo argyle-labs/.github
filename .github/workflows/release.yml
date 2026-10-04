@@ -1,9 +1,8 @@
-name: Release (shared reusable)
+name: Release
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The unified release pipeline for orca core AND every plugin. One file, three
 # stages selected by `stage`; Gitea Releases are canonical, GitHub is mirrored.
-# See [[unified-cicd-pipeline-architecture]].
 #
 #   rc-draft        (auto on push to main; NO tests — the PR already gated them)
 #                   build binaries/assets → publish as a rolling DRAFT on Gitea
