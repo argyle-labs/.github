@@ -164,9 +164,18 @@ jobs:
       # CC/CXX, so SQLCipher/libgit2/jemalloc are cached too).
       - name: sccache preflight
         run: |
+          # sccache appends to its log; start clean so detection below sees only this server.
+          : > "$SCCACHE_ERROR_LOG"
           if timeout 60 sccache --start-server; then
             echo "sccache server up ($SCCACHE_ENDPOINT/$SCCACHE_BUCKET)"
             { echo "RUSTC_WRAPPER=sccache"; echo "CC=sccache cc"; echo "CXX=sccache c++"; } >> "$GITHUB_ENV"
+            # A failed backend write check (e.g. full MinIO disk) still starts the
+            # server, silently in ReadOnly mode: every miss then fails its write.
+            # sccache reports it only on stderr, which it redirects into this log.
+            # Reads still work, so this is loud but not fatal.
+            if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG"); then
+              echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (backend write check failed): cache will not fill; check MinIO disk. $(tr '\n' ' ' <<< "$ro")"
+            fi
           else
             echo "::warning title=sccache unavailable::sccache server did not start against the MinIO backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
           fi
@@ -254,10 +263,17 @@ jobs:
             fi
             echo
             echo "### sccache"
+            stats=$(sccache --show-stats 2>&1) || stats="(sccache server not running)"
             echo '```'
-            sccache --show-stats 2>&1 || echo "(sccache server not running)"
+            echo "$stats"
             echo '```'
+            # ReadOnly mode fails every write without ever completing one.
+            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
+            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
+            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
+              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ -s "$SCCACHE_ERROR_LOG" ]; then
-            echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
+          if errs=$(grep -m 20 -iE 'error|warn|failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
+            echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
           fi
