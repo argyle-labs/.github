@@ -47,11 +47,11 @@ on:
       lock-check:
         description: >-
           Cargo.lock drift gate: `warn` (annotate only) or `enforce` (fail the
-          job). Flip the default to `enforce` once every plugin's lock is
-          git-sourced, or opt in per repo with `with: { lock-check: enforce }`.
+          job). Defaults to `enforce`; a repo can opt down with
+          `with: { lock-check: warn }`.
         required: false
         type: string
-        default: warn
+        default: enforce
 
 env:
   CARGO_TERM_COLOR: always
@@ -118,12 +118,20 @@ jobs:
         env:
           MODE: ${{ inputs.lock-check }}
         # Fail-open: a probe that cannot run (no jq in an older image, cargo
-        # metadata erroring) warns and passes; only MODE=enforce on a detected
-        # problem fails the step.
+        # metadata erroring for any reason other than a stale lock, e.g. a
+        # network or git fetch failure) warns and passes unless a problem was
+        # already detected; only MODE=enforce on a detected problem fails the step.
         run: |
           set +e -uo pipefail
           problems=()
-          probe_fail() { echo "::warning title=Cargo.lock drift check skipped::$1"; exit 0; }
+          probe_fail() {
+            if [ "${#problems[@]}" -eq 0 ]; then
+              echo "::warning title=Cargo.lock drift check skipped::$1"
+              exit 0
+            fi
+            echo "::warning title=Cargo.lock drift check partially skipped::$1"
+          }
+          fix="regenerate with \`cargo update --workspace\` with no .cargo/config.toml present, then commit Cargo.lock"
           command -v jq >/dev/null || probe_fail "jq not available in this image"
           if [ -f Cargo.lock ]; then
             meta=$(cargo metadata --no-deps --format-version 1 2>/dev/null) \
@@ -139,10 +147,14 @@ jobs:
               END                    { if (name != "" && !src) print name }
             ' Cargo.lock | grep -vxF -f <(printf '%s\n' "$members") || true)
             if [ -n "$sourceless" ]; then
-              problems+=("Cargo.lock has path-sourced (sourceless) entries for non-member crates: $(echo "$sourceless" | paste -sd, -) — regenerate the lock without .cargo/config.toml")
+              problems+=("Cargo.lock has path-sourced (sourceless) entries for non-member crates: $(echo "$sourceless" | paste -sd, -) — $fix")
             fi
             if ! err=$(cargo metadata --locked --format-version 1 2>&1 >/dev/null); then
-              problems+=("cargo metadata --locked failed (lock out of sync with Cargo.toml): $(echo "$err" | grep -m1 -i error)")
+              if grep -qF -- '--locked was passed' <<< "$err"; then
+                problems+=("Cargo.lock is out of sync with Cargo.toml — $fix")
+              else
+                probe_fail "cargo metadata --locked failed: $(echo "$err" | grep -m1 -i error)"
+              fi
             fi
           else
             problems+=("no Cargo.lock committed")
@@ -229,7 +241,7 @@ jobs:
       - name: Fetch dependencies
         run: |
           export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          cargo fetch
+          cargo fetch --locked
 
       # Clippy first: check mode is the cheaper build, so lint failures report
       # sooner. The two phases share only build scripts and proc-macros (library
@@ -239,13 +251,13 @@ jobs:
       - name: Clippy
         run: |
           export t0=$SECONDS; trap 'echo "clippy|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
         if: ${{ !cancelled() }}
         run: |
           export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          cargo test --workspace --all-features
+          cargo test --locked --workspace --all-features
 
       - name: Timings + sccache summary
         if: ${{ !cancelled() }}
