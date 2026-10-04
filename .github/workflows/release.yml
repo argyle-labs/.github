@@ -171,8 +171,10 @@ jobs:
         shard: [0, 1]
     steps:
       # build.rs runs `git describe` on a checkout owned by another uid, and
-      # ci-rust images built before jq was baked in lack it.
+      # ci-rust images built before jq was baked in lack it. Linux only: on a
+      # host runner --global is the operator's real ~/.gitconfig.
       - name: Prepare container
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           git config --global --add safe.directory '*'
@@ -414,26 +416,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The mint runner is self-hosted + persistent, but act WIPES the job
-      # workdir each run (`git init` on a cleared hostexecutor), so `target/`
-      # never survives and every release recompiled all ~40 crates + deps from
-      # scratch (~4-5 min cold). sccache with a cache dir OUTSIDE the workdir
-      # persists across runs, so a release that touches a few crates recompiles
-      # only those. No cache backend / network round-trip — a local dir on the
-      # persistent runner. Release profile has incremental OFF, which is exactly
-      # what sccache requires. Env set here via $GITHUB_ENV flows into the build
-      # step below (RUSTC_WRAPPER is honoured by the cargo builds in
-      # build_orca_targets).
+      - name: Fetch shared CI actions
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/.github
+          path: .ci
+          token: ${{ secrets.ORCA_FETCH_TOKEN }}
+
+      # A local sccache dir outside act's per-run workdir persists across runs.
       # SCCACHE_IDLE_TIMEOUT=0: the idle timer resets only on new requests, so a
       # single long rustc could outlive the 600s default and lose its server.
-      # mint is persistent, so the server is stopped before and after the build
-      # rather than left holding the port with this job's (local-disk) config.
       - name: Enable sccache (persistent compile cache)
         run: |
           set -euo pipefail
           command -v sccache >/dev/null 2>&1 || brew install sccache
           {
-            echo "RUSTC_WRAPPER=sccache"
             echo "SCCACHE_DIR=$HOME/Library/Caches/orca-sccache"
             echo "SCCACHE_CACHE_SIZE=20G"
             echo "SCCACHE_IDLE_TIMEOUT=0"
@@ -441,7 +438,7 @@ jobs:
             echo "SCCACHE_ERROR_LOG=${RUNNER_TEMP:-/tmp}/sccache-error.log"
           } >> "$GITHUB_ENV"
 
-      - name: Build darwin binary natively
+      - name: Write release version
         env:
           REL_VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -449,36 +446,28 @@ jobs:
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
           rustup target add aarch64-apple-darwin || true
-          sccache --stop-server >/dev/null 2>&1 || true
-          # A failed write check leaves sccache up but READ-ONLY, reported only in this append-only log.
-          : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
-          sccache --start-server
-          if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
-            echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (disk write check failed): cache will not fill; check mint's disk ($SCCACHE_DIR). $(tr '\n' ' ' <<< "$ro")"
-          fi
-          sccache --zero-stats >/dev/null 2>&1 || true
-          t0=$SECONDS
-          # build_orca_targets REQUIRES explicit targets (dies "no targets given"
-          # otherwise, and its die exit isn't caught by `|| true`). Build the
-          # shipped arm64 slice on the arm64 mint runner.
-          build_orca_targets aarch64-apple-darwin
-          {
-            echo "### aarch64-apple-darwin — build $((SECONDS - t0))s"
-            stats=$(sccache --show-stats 2>&1) || true
-            echo '```'
-            echo "$stats"
-            echo '```'
-            # ReadOnly mode fails every write without ever completing one.
-            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
-            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
-            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
-              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check mint's disk)."
-            fi
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
-            echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
-          fi
-          echo "── dist-release (macOS build leg) ──"; ls -la dist-release || true
+
+      # Persistent per-slot target dir keeps deps warm across releases; the slot
+      # copies the binary back to target/<triple>/release/ for staging.
+      - name: Build darwin binary natively
+        uses: ./.ci/.github/actions/mint-cargo-slot
+        with:
+          scope: orca
+          target: aarch64-apple-darwin
+          bins: orca
+          cap-gb: "6"
+          sccache: "true"
+          run: |
+            source scripts/release-lib.sh
+            cargo_build_target "$TARGET" "$(release_cargo_jobs 1)"
+
+      - name: Stage darwin binary
+        run: |
+          set -euo pipefail
+          source scripts/release-lib.sh
+          mkdir -p dist-release
+          stage_target_asset aarch64-apple-darwin
+          echo "── dist-release (macOS build leg) ──"; ls -la dist-release
 
       - name: Ensure raw binary + checksum, then smoke-test it
         run: |
@@ -492,10 +481,6 @@ jobs:
           # an artifact that aborts on launch.
           echo "── smoke: $bin --version ──"
           "./$bin" --version
-
-      - name: Stop sccache server
-        if: ${{ always() }}
-        run: sccache --stop-server >/dev/null 2>&1 || true
 
       - uses: actions/upload-artifact@v3
         with:

@@ -98,12 +98,16 @@ runs:
         if [ -n '${{ inputs.sccache-access-key }}' ] && [ -n '${{ inputs.sccache-endpoint }}' ]; then
           case "$ho/$ha" in Linux/x86_64|Darwin/arm64) use_sccache=true ;; esac
         fi
+        # Native darwin on a macOS host builds in a mint-cargo-slot target dir.
+        slot=false
+        if [ "$ho" = Darwin ] && [ "$native" = true ]; then slot=true; fi
         {
           echo "native=$native"
           echo "prebaked=$prebaked"
           echo "use_sccache=$use_sccache"
+          echo "slot=$slot"
         } >> "$GITHUB_OUTPUT"
-        echo "host=$ho/$ha target=$t native=$native prebaked=$prebaked sccache=$use_sccache"
+        echo "host=$ho/$ha target=$t native=$native prebaked=$prebaked sccache=$use_sccache slot=$slot"
 
     # rustup-init is a single no-retry download and the runner's egress to
     # static.rust-lang.org intermittently resets, so bootstrap it with a
@@ -271,6 +275,7 @@ runs:
         SCCACHE_ENDPOINT: ${{ inputs.sccache-endpoint }}
         AWS_ACCESS_KEY_ID: ${{ inputs.sccache-access-key }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-key }}
+        SLOT: ${{ steps.host.outputs.slot }}
       run: |
         set -uo pipefail
         {
@@ -284,6 +289,9 @@ runs:
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
           echo "SCCACHE_ERROR_LOG=${RUNNER_TEMP:-/tmp}/sccache-error.log"
         } >> "$GITHUB_ENV"
+        # The slot build starts its own server on a per-slot port and falls back
+        # to an uncached build itself.
+        if [ "$SLOT" = true ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
         export SCCACHE_S3_USE_SSL=false SCCACHE_REGION=us-east-1 SCCACHE_IDLE_TIMEOUT=0 \
           SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="${RUNNER_TEMP:-/tmp}/sccache-error.log"
         # macOS has no coreutils `timeout` unless Homebrew's gtimeout is present.
@@ -307,23 +315,17 @@ runs:
     # openssl-src, and route C (jemalloc) through sccache; both C builds are
     # the bulk of an uncached darwin leg. OPENSSL_STATIC keeps the shipped
     # binary free of a Homebrew dylib dependency (checked after build).
-    # CARGO_TARGET_DIR: act's host executor uses a fresh workdir per run, and
-    # OUT_DIR paths under it are part of sccache's key, so a fixed target dir
-    # (wiped each run; mint runs one job at a time) keeps keys stable.
     - name: macOS build environment
-      if: ${{ runner.os == 'macOS' && steps.host.outputs.native == 'true' }}
+      if: ${{ steps.host.outputs.slot == 'true' }}
       shell: bash
       run: |
         set -euo pipefail
-        tdir=/tmp/plugin-build-target/${{ inputs.target }}
-        rm -rf "$tdir"; mkdir -p "$tdir"
         ssl=$(brew --prefix openssl@3 2>/dev/null || true)
         if [ -z "$ssl" ] || [ ! -f "$ssl/lib/libssl.a" ] || [ ! -f "$ssl/lib/libcrypto.a" ]; then
           echo "::warning title=No Homebrew openssl@3::static libssl/libcrypto not found; vendored OpenSSL will compile from source (brew install openssl@3)"
           ssl=""
         fi
         {
-          echo "CARGO_TARGET_DIR=$tdir"
           if [ -n "$ssl" ]; then
             echo "OPENSSL_NO_VENDOR=1"
             echo "OPENSSL_STATIC=1"
@@ -353,6 +355,7 @@ runs:
         cargo fetch --locked
 
     - name: Build release binaries
+      if: ${{ steps.host.outputs.slot != 'true' }}
       shell: bash
       env:
         RUSTC_WRAPPER: ${{ steps.sccache.outputs.ok == 'true' && 'sccache' || '' }}
@@ -369,6 +372,27 @@ runs:
         echo "→ $builder --release --locked --target ${{ inputs.target }}$bin_flags"
         # shellcheck disable=SC2086
         $builder --release --locked --target "${{ inputs.target }}" $bin_flags
+
+    # Persistent per-slot target dir keeps deps warm across runs; the slot
+    # copies the binaries back to target/<triple>/release/ for staging.
+    - name: Build release binaries (mint slot)
+      if: ${{ steps.host.outputs.slot == 'true' }}
+      shell: bash
+      env:
+        SLOT_RUN: |
+          export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true CARGO_BUILD_TARGET="$TARGET"
+          bin_flags=""
+          for b in $BINS; do bin_flags="$bin_flags --bin $b"; done
+          echo "→ cargo build --release --locked --target $TARGET$bin_flags"
+          # shellcheck disable=SC2086
+          cargo build --release --locked --target "$TARGET" $bin_flags
+        SLOT_TARGET: ${{ inputs.target }}
+        SLOT_BINS: ${{ steps.bins.outputs.list }}
+        SLOT_SCOPE: plugin
+        SLOT_CAP_GB: "4"
+        SLOT_SCCACHE: ${{ steps.sccache.outputs.ok == 'true' && 'true' || 'false' }}
+      run: /bin/bash "$GITHUB_ACTION_PATH/../mint-cargo-slot/slot.sh"
 
     # The lock's sourced entries are guarded unchanged and the build is --locked,
     # so this plugin-toolkit source is the orca revision CI tested and this
@@ -414,6 +438,8 @@ runs:
     - name: Timings + sccache summary
       if: ${{ always() }}
       shell: bash
+      env:
+        SLOT: ${{ steps.host.outputs.slot }}
       run: |
         phases="${RUNNER_TEMP:-/tmp}/plugin-build-phases"
         {
@@ -423,7 +449,8 @@ runs:
           if [ -f "$phases" ]; then
             while IFS='|' read -r p t e; do echo "| $p | $t | $e |"; done < "$phases"
           fi
-          if [ "${{ steps.sccache.outputs.ok }}" = "true" ]; then
+          # The slot build reports its own sccache stats before stopping its server.
+          if [ "${{ steps.sccache.outputs.ok }}" = "true" ] && [ "$SLOT" != "true" ]; then
             echo
             echo "### ${{ inputs.target }} — sccache"
             stats=$(sccache --show-stats 2>&1) || stats="(sccache server not running)"
@@ -443,7 +470,7 @@ runs:
         fi
 
     - name: Stop sccache server (persistent macOS host)
-      if: ${{ always() && runner.os == 'macOS' }}
+      if: ${{ always() && runner.os == 'macOS' && steps.host.outputs.slot != 'true' }}
       shell: bash
       run: sccache --stop-server >/dev/null 2>&1 || true
 
