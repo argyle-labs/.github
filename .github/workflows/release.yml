@@ -241,7 +241,7 @@ jobs:
         if: steps.sel.outputs.skip != 'true'
         run: |
           export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
-          cargo fetch
+          cargo fetch --locked
 
       - name: Build at release version
         if: steps.sel.outputs.skip != 'true'

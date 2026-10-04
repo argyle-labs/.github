@@ -327,9 +327,15 @@ runs:
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       run: |
         export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
-        # The version write changed the member versions; refresh only those lock
-        # entries so every dependency stays at the revision CI tested.
+        # The version write changed the member versions. Snapshot every sourced
+        # (non-member) lock entry, refresh only the member versions, and fail if
+        # any sourced entry moved: `cargo update --workspace` silently re-resolves
+        # a drifted lock, which would make `--locked` prove nothing.
+        snap() { awk '/^\[\[package\]\]/{if(s)print n,v,s;n=v=s=""} /^name = /{n=$3} /^version = /{v=$3} /^source = /{s=$3} END{if(s)print n,v,s}' Cargo.lock; }
+        before=$(snap)
         cargo update --workspace
+        after=$(snap)
+        [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with no .cargo/config.toml and commit"; diff <(echo "$before") <(echo "$after"); exit 1; }
         cargo fetch --locked
 
     - name: Build release binaries
@@ -350,8 +356,9 @@ runs:
         # shellcheck disable=SC2086
         $builder --release --locked --target "${{ inputs.target }}" $bin_flags
 
-    # The build is --locked, so the lock's plugin-toolkit source is the orca
-    # revision this binary compiled against: the same one CI tested.
+    # The lock's sourced entries are guarded unchanged and the build is --locked,
+    # so this plugin-toolkit source is the orca revision CI tested and this
+    # binary compiled against.
     - name: Record resolved orca source
       id: orca-src
       shell: bash

@@ -125,8 +125,11 @@ jobs:
           set +e -uo pipefail
           problems=()
           probe_fail() {
-            echo "::warning title=Cargo.lock drift check skipped::$1"
-            [ "${#problems[@]}" -eq 0 ] && exit 0
+            if [ "${#problems[@]}" -eq 0 ]; then
+              echo "::warning title=Cargo.lock drift check skipped::$1"
+              exit 0
+            fi
+            echo "::warning title=Cargo.lock drift check partially skipped::$1"
           }
           fix="regenerate with \`cargo update --workspace\` with no .cargo/config.toml present, then commit Cargo.lock"
           command -v jq >/dev/null || probe_fail "jq not available in this image"
