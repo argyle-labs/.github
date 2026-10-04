@@ -327,7 +327,10 @@ runs:
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       run: |
         export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
-        cargo fetch
+        # The version write changed the member versions; refresh only those lock
+        # entries so every dependency stays at the revision CI tested.
+        cargo update --workspace
+        cargo fetch --locked
 
     - name: Build release binaries
       shell: bash
@@ -343,12 +346,12 @@ runs:
         bin_flags=""
         while IFS= read -r b; do [ -n "$b" ] && bin_flags="$bin_flags --bin $b"; done <<< '${{ steps.bins.outputs.list }}'
         export CARGO_BUILD_TARGET="${{ inputs.target }}"
-        echo "→ $builder --release --target ${{ inputs.target }}$bin_flags"
+        echo "→ $builder --release --locked --target ${{ inputs.target }}$bin_flags"
         # shellcheck disable=SC2086
-        $builder --release --target "${{ inputs.target }}" $bin_flags
+        $builder --release --locked --target "${{ inputs.target }}" $bin_flags
 
-    # Read from the lock AFTER the build: without --locked a stale lock is
-    # re-resolved in place, so this is the orca revision actually compiled.
+    # The build is --locked, so the lock's plugin-toolkit source is the orca
+    # revision this binary compiled against: the same one CI tested.
     - name: Record resolved orca source
       id: orca-src
       shell: bash
