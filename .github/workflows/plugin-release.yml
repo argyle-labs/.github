@@ -31,7 +31,8 @@ on:
       targets:
         description: >-
           JSON array of target triples to build+publish (unrequested = skipped,
-          no runner). ARM builds only for macOS.
+          no runner). aarch64 Linux is opt-in via targets; Linux hosts fetch
+          musl first, then gnu.
         required: false
         type: string
         default: >-

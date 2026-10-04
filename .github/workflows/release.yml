@@ -331,7 +331,7 @@ jobs:
               echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          if errs=$(grep -m 20 -iE 'error|warn|failed' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
+          if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
             echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
           fi
 
@@ -451,12 +451,10 @@ jobs:
           write_cargo_version "$REL_VERSION"
           rustup target add aarch64-apple-darwin || true
           sccache --stop-server >/dev/null 2>&1 || true
-          # A failed write check (e.g. full disk) still starts the server, silently
-          # in ReadOnly mode; sccache reports it only on stderr, redirected into
-          # this append-only log, so it starts clean. Reads still work: not fatal.
-          : > "$SCCACHE_ERROR_LOG"
+          # A failed write check leaves sccache up but READ-ONLY, reported only in this append-only log.
+          : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
           sccache --start-server
-          if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG"); then
+          if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
             echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (disk write check failed): cache will not fill; check mint's disk ($SCCACHE_DIR). $(tr '\n' ' ' <<< "$ro")"
           fi
           sccache --zero-stats >/dev/null 2>&1 || true
@@ -478,6 +476,9 @@ jobs:
               echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check mint's disk)."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
+            echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
+          fi
           echo "── dist-release (macOS build leg) ──"; ls -la dist-release || true
 
       - name: Ensure raw binary + checksum, then smoke-test it
