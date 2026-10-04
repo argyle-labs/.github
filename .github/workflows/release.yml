@@ -430,6 +430,9 @@ jobs:
           set -euo pipefail
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
+          # write_cargo_version exports this only to its own shell; the build
+          # step's build.rs needs it to bake the exact release version.
+          echo "ORCA_RELEASE_VERSION=$REL_VERSION" >> "$GITHUB_ENV"
           rustup target add aarch64-apple-darwin || true
 
       # Persistent per-slot target dir keeps deps warm across releases; the slot
@@ -470,10 +473,7 @@ jobs:
           out=$("./$bin" --version)
           echo "$out"
           # Guards against staging a binary left over from an earlier release.
-          case "$out" in
-            *"$REL_VERSION"|*"$REL_VERSION"[-+]*) ;;
-            *) echo "::error::darwin binary reports '$out', expected version $REL_VERSION"; exit 1 ;;
-          esac
+          [ "$out" = "orca $REL_VERSION" ] || { echo "::error::darwin binary reports '$out', expected 'orca $REL_VERSION'"; exit 1; }
 
       - uses: actions/upload-artifact@v3
         with:

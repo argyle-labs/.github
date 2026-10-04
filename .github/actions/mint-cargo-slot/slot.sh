@@ -15,12 +15,14 @@ SLOT_JANITOR_DAYS="${SLOT_JANITOR_DAYS:-14}"
 SLOT_BUSY_RETRIES="${SLOT_BUSY_RETRIES:-5}"
 SLOT_BUSY_WAIT="${SLOT_BUSY_WAIT:-30}"
 
-# These become path components.
+# These become path components. set -f: unquoted $SLOT_BINS must not glob.
+set -f
 for v in "$SLOT_SCOPE" "$SLOT_TARGET" "$SLOT_PROFILE" $SLOT_BINS; do
   case "$v" in
     ''|.*|*[!A-Za-z0-9._-]*) echo "::error::mint-cargo-slot: invalid scope/target/profile/bin '$v'"; exit 1 ;;
   esac
 done
+set +f
 for v in "$SLOT_COUNT" "$SLOT_CAP_GB" "$SLOT_MIN_FREE_GB" "$SLOT_JANITOR_DAYS" \
   "$SLOT_BUSY_RETRIES" "$SLOT_BUSY_WAIT"; do
   case "$v" in
@@ -92,7 +94,9 @@ inner() {
 
   # cargo re-uplifts a Fresh binary, so a missing one after the build means the
   # build did not produce it; a stale one must never be copied back.
+  set -f
   for b in $SLOT_BINS; do rm -f "$slot/$SLOT_TARGET/$SLOT_PROFILE/$b"; done
+  set +f
 
   echo "slot s$k: CARGO_TARGET_DIR=$slot sccache=$use_sccache port=$SCCACHE_SERVER_PORT nofile=$(ulimit -n)"
   t0=$SECONDS
@@ -134,12 +138,14 @@ inner() {
   # before the caller stages it.
   out="$PWD/target/$SLOT_TARGET/$SLOT_PROFILE"
   mkdir -p "$out"
+  set -f
   for b in $SLOT_BINS; do
     src="$slot/$SLOT_TARGET/$SLOT_PROFILE/$b"
     [ -f "$src" ] || { echo "::error::binary not found at $src"; ls -la "$slot/$SLOT_TARGET/$SLOT_PROFILE" || true; return 1; }
     cp "$src" "$out/$b"
     echo "copied $src -> $out/$b"
   done
+  set +f
 }
 
 if [ "${1:-}" = __inner ]; then
