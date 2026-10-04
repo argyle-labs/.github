@@ -1,0 +1,146 @@
+name: sccache pre-warm
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Seed the shared sccache bucket for a pinned orca tag, so the first plugin CI
+# or release after an orca bump fetches orca's crates from cache instead of
+# compiling them cold. Builds a skeleton plugin per canonical plugin-toolkit
+# feature profile, in the same ci-rust image and with the same compile env as
+# plugin-ci.yml (test build) and plugin-build (release build).
+#
+# Hits depend on the consumer resolving the SAME package source: a plugin pinned
+# `tag = "<orca_tag>"` shares keys with this warm; one pinned `branch = "main"`
+# has a different source id and does not. Dependency versions and features are
+# unified per plugin graph, so this is best-effort for plugins that add extra
+# features to shared crates.
+#
+# Dispatch after cutting an orca tag that plugins are about to pin.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      orca_tag:
+        description: orca tag plugins pin plugin-toolkit to.
+        type: string
+        default: v0.2.1-rc.10
+      release_targets:
+        description: Space-separated triples to warm a release build for (empty = test build only).
+        type: string
+        default: x86_64-unknown-linux-musl
+
+concurrency:
+  group: sccache-prewarm-${{ inputs.orca_tag }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_INCREMENTAL: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_BUCKET: sccache
+  SCCACHE_ENDPOINT: ${{ vars.SCCACHE_ENDPOINT }}
+  SCCACHE_S3_USE_SSL: "false"
+  SCCACHE_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+  SCCACHE_IDLE_TIMEOUT: "0"
+  SCCACHE_ERROR_LOG: /tmp/sccache-error.log
+
+jobs:
+  warm:
+    name: warm ${{ matrix.profile }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      # Each leg is a full orca compile; keep runner slots free for real work.
+      max-parallel: 2
+      # Static list: Gitea's act does not expand a matrix built from inputs.
+      # These are the plugin-toolkit feature sets plugins actually pin
+      # (`default` = default features, i.e. `full`).
+      matrix:
+        profile:
+          - default
+          - tools,db
+          - tools,db,delegated-http
+          - tools,db,containers
+          - tools,db,http,graphql
+    steps:
+      - name: Generate skeleton plugin
+        env:
+          ORCA_TAG: ${{ inputs.orca_tag }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          dir="$GITHUB_WORKSPACE/warm-plugin"
+          mkdir -p "$dir/src"
+          if [ "$PROFILE" = default ]; then
+            dep="{ git = \"https://github.com/argyle-labs/orca\", tag = \"${ORCA_TAG}\" }"
+          else
+            IFS=, read -ra fs <<< "$PROFILE"
+            feats=$(printf '"%s", ' "${fs[@]}"); feats=${feats%, }
+            dep="{ git = \"https://github.com/argyle-labs/orca\", tag = \"${ORCA_TAG}\", default-features = false, features = [${feats}] }"
+          fi
+          cat > "$dir/Cargo.toml" <<EOF
+          [package]
+          name = "sccache-warm"
+          version = "0.0.0"
+          edition = "2024"
+          rust-version = "1.95"
+          publish = false
+
+          [dependencies]
+          plugin-toolkit = ${dep}
+          EOF
+          echo 'fn main() {}' > "$dir/src/main.rs"
+          cat "$dir/Cargo.toml"
+
+      - name: sccache preflight
+        run: timeout 60 sccache --start-server
+
+      # Same env and flags as plugin-ci's test phase.
+      - name: Warm test build (plugin-ci profile)
+        working-directory: warm-plugin
+        env:
+          OPENSSL_NO_VENDOR: "1"
+          CC: "sccache cc"
+          CXX: "sccache c++"
+        run: cargo test --workspace --all-features --no-run
+
+      # Same env as plugin-build's release step: vendored OpenSSL, zig's CC.
+      - name: Warm release builds (plugin-build profile)
+        if: inputs.release_targets != ''
+        working-directory: warm-plugin
+        env:
+          TARGETS: ${{ inputs.release_targets }}
+        run: |
+          set -euo pipefail
+          for t in $TARGETS; do
+            flags=""
+            case "$t" in *-musl) flags="-C target-feature=+crt-static" ;; esac
+            if [ "$t" = x86_64-unknown-linux-gnu ]; then builder=(cargo build); else builder=(cargo zigbuild); fi
+            echo "→ ${builder[*]} --release --target $t"
+            CARGO_BUILD_TARGET="$t" RUSTFLAGS="$flags" "${builder[@]}" --release --target "$t"
+          done
+
+      - name: sccache summary
+        if: ${{ !cancelled() }}
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          {
+            echo "### ${PROFILE} — sccache"
+            echo '```'
+            sccache --show-stats 2>&1 || echo "(sccache server not running)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s "$SCCACHE_ERROR_LOG" ]; then
+            echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
+          fi
