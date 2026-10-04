@@ -5,7 +5,8 @@ name: CI
 # workflow_dispatch; Gitea ignores `jobs.<id>.environment` (no reviewer
 # protection), so that dispatch is the approval gate.
 #
-# Caller (the workflow name makes the status row `CI / ci`):
+# Caller. The caller's job and this workflow's job both report the status
+# context `CI / ci (pull_request)`, or `CI / ci (push)` on a push:
 #
 #   name: CI
 #   on:

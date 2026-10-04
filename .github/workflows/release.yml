@@ -17,7 +17,7 @@ name: Release
 #                   compute vX.Y.Z → build at that version → publish stable to
 #                   Gitea → mirror to GitHub.
 #
-# `asset-profile`: binaries (plugins) | full (orca: + deb/rpm/apk/PKGBUILD/
+# `asset-profile`: binaries (plugins) | full (orca: + deb/rpm/PKGBUILD/
 # homebrew/plg/checksums/install.sh, and — best-effort — the macOS .pkg on the
 # mint runner when `mint-runner-label` is set).
 #
@@ -380,7 +380,7 @@ jobs:
           find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── dist-release ──"; ls -la dist-release
 
-      - name: Build native packages (deb/rpm/apk/PKGBUILD/homebrew/plg)
+      - name: Build native packages (deb/rpm/PKGBUILD/homebrew/plg)
         uses: ./.ci/.github/actions/package-native
 
       - name: Assemble checksums + install.sh
@@ -584,16 +584,27 @@ jobs:
           path: incoming
 
       - name: Collect release assets
-        # Allow-list by basename; any other file fails the release. orca-*-staging
-        # dirs are build_native_packages scratch (apk sources, packager-less
-        # fallbacks), never assets. The same binary arrives in several artifacts,
-        # so identical copies dedupe and differing ones fail.
+        # Allow-list by basename; any other file fails the release. orca-apk-staging
+        # is build_native_packages scratch; any other orca-*-staging dir means a
+        # packager fell back to emitting sources, so it fails. The same binary
+        # arrives in several artifacts, so identical copies dedupe and differing
+        # ones fail. The full profile then checks a required-asset manifest.
+        env:
+          PROFILE: ${{ inputs.asset-profile }}
+          TAG: ${{ needs.version.outputs.tag }}
+          TARGETS: ${{ inputs.targets }}
+          MINT: ${{ inputs.mint-runner-label }}
         run: |
           set -euo pipefail
+          shopt -s nullglob
           mkdir -p release-assets
           bad=0
-          while IFS= read -r f; do
-            case "$f" in */orca-*-staging/*) continue ;; esac
+          mapfile -t files < <(find incoming -type f); wait $!
+          for f in "${files[@]}"; do
+            case "$f" in
+              */orca-apk-staging/*) continue ;;
+              */orca-*-staging/*) echo "::error::packager fallback output $f"; bad=1; continue ;;
+            esac
             name=$(basename "$f")
             case "$name" in
               *.sha256|install.sh|*.deb|*.rpm|*.pkg|*.rb|*.plg|PKGBUILD) ;;
@@ -607,9 +618,36 @@ jobs:
             else
               cp "$f" release-assets/
             fi
-          done < <(find incoming -type f)
+          done
           [ "$bad" = 0 ] || exit 1
-          [ -n "$(ls -A release-assets)" ] || { echo "::error::no release assets collected"; exit 1; }
+          assets=(release-assets/*)
+          [ ${#assets[@]} -gt 0 ] || { echo "::error::no release assets collected"; exit 1; }
+          for f in "${assets[@]}"; do
+            case "$f" in
+              */checksums.sha256) ;;
+              *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; bad=1; } ;;
+              *-linux-gnu|*-linux-musl|*-apple-darwin)
+                [ -f "$f.sha256" ] || { echo "::error::missing checksum for $f"; bad=1; } ;;
+            esac
+          done
+          # Linux legs skip darwin triples; the darwin binary comes from build-macos.
+          IFS=, read -ra requested <<< "${TARGETS//[][\"[:space:]]/}"
+          targets=()
+          for t in "${requested[@]}"; do
+            case "$t" in *-apple-darwin) ;; *) targets+=("$t") ;; esac
+          done
+          if [ "$PROFILE" = full ] && [ -n "$MINT" ]; then targets+=(aarch64-apple-darwin); fi
+          for t in "${targets[@]}"; do
+            if [ "$PROFILE" = full ]; then bins=(release-assets/orca-"$t"); else bins=(release-assets/*-"${TAG}-${t}"); fi
+            [ -f "${bins[0]:-}" ] || { echo "::error::no binary for requested target $t"; bad=1; }
+          done
+          if [ "$PROFILE" = full ]; then
+            for want in '*.deb' '*.rpm' '*.plg' '*.rb' PKGBUILD install.sh checksums.sha256; do
+              compgen -G "release-assets/$want" >/dev/null || { echo "::error::required asset $want missing"; bad=1; }
+            done
+            compgen -G 'release-assets/*.pkg' >/dev/null || echo "::warning::no macOS .pkg (best-effort leg)"
+          fi
+          [ "$bad" = 0 ] || exit 1
           # Restore +x on the raw per-target binaries (artifact round-trips drop it).
           find release-assets -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── release-assets ──"; ls -la release-assets

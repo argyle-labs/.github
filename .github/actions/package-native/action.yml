@@ -1,6 +1,6 @@
 name: Build native packages (orca full profile)
 description: >
-  Produce orca's native packages (deb/rpm/apk/PKGBUILD/homebrew/plg) on a Linux
+  Produce orca's native packages (deb/rpm/PKGBUILD/homebrew/plg) on a Linux
   runner by REUSING orca's tested `build_native_packages` seam from
   scripts/release-lib.sh (explicitly designed to be sourced by Gitea pipelines).
   Expects the per-target `orca-<triple>` binaries already staged in
