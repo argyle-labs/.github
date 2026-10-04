@@ -139,7 +139,10 @@ runs:
         fi
         echo "RUSTUP_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
 
+    # Skipped on macOS: the build there uses a CARGO_TARGET_DIR outside the
+    # workspace that rust-cache does not track.
     - uses: Swatinem/rust-cache@v2
+      if: ${{ runner.os != 'macOS' }}
       with:
         key: ${{ inputs.target }}
 
@@ -271,6 +274,9 @@ runs:
           SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="${RUNNER_TEMP:-/tmp}/sccache-error.log"
         # macOS has no coreutils `timeout` unless Homebrew's gtimeout is present.
         to=$(command -v timeout || command -v gtimeout || true)
+        # mint is a persistent host and IDLE_TIMEOUT=0 never lets a server exit;
+        # a leftover one would hold the port with another job's config.
+        if [ "$(uname -s)" = Darwin ]; then sccache --stop-server >/dev/null 2>&1 || true; fi
         if ${to:+$to 60} sccache --start-server; then
           echo "ok=true" >> "$GITHUB_OUTPUT"
         else
@@ -279,9 +285,9 @@ runs:
         fi
 
     # On the macOS host: link Homebrew's static OpenSSL instead of compiling
-    # openssl-src, and route C (jemalloc) through sccache. Together those were
-    # ~45 min per run on the throttled mint runner. OPENSSL_STATIC keeps the
-    # shipped binary free of a Homebrew dylib dependency (checked after build).
+    # openssl-src, and route C (jemalloc) through sccache; both C builds are
+    # the bulk of an uncached darwin leg. OPENSSL_STATIC keeps the shipped
+    # binary free of a Homebrew dylib dependency (checked after build).
     # CARGO_TARGET_DIR: act's host executor uses a fresh workdir per run, and
     # OUT_DIR paths under it are part of sccache's key, so a fixed target dir
     # (wiped each run; mint runs one job at a time) keeps keys stable.
@@ -399,6 +405,11 @@ runs:
         if [ -s "${SCCACHE_ERROR_LOG:-}" ]; then
           echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
         fi
+
+    - name: Stop sccache server (persistent macOS host)
+      if: ${{ always() && runner.os == 'macOS' }}
+      shell: bash
+      run: sccache --stop-server >/dev/null 2>&1 || true
 
     - uses: actions/upload-artifact@v3
       with:

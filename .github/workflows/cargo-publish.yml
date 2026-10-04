@@ -119,8 +119,9 @@ jobs:
           echo "publish order:"; echo "$order" | nl
           { echo "list<<EOF"; echo "$order"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
+      # Explicit comparison: a caller passing the string "false" must not publish.
       - name: Dry run (package + verify the whole workspace)
-        if: ${{ !inputs.execute }}
+        if: ${{ !(inputs.execute == true || inputs.execute == 'true') }}
         env:
           ORDER: ${{ steps.order.outputs.list }}
         run: |
@@ -131,7 +132,7 @@ jobs:
           echo "dry-run OK — re-dispatch with execute=true to publish" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish in dependency order
-        if: ${{ inputs.execute }}
+        if: ${{ inputs.execute == true || inputs.execute == 'true' }}
         env:
           ORDER: ${{ steps.order.outputs.list }}
         run: |

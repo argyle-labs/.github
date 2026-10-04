@@ -132,10 +132,8 @@ runs:
               AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
             backend=s3
           else
-            # Local-disk backend on a persistent runner: a fixed host path
-            # survives across jobs with zero cache-protocol dependency. Do NOT
-            # use SCCACHE_GHA_ENABLED — act_runner's cache server wire-compat
-            # with sccache's GHA backend is unproven.
+            # No MinIO configured: local disk, which only helps on a runner
+            # whose filesystem outlives the job.
             export SCCACHE_DIR=/root/.cache/sccache SCCACHE_CACHE_SIZE=20G
             backend=disk
           fi

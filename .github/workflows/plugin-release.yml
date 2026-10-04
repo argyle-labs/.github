@@ -439,7 +439,7 @@ jobs:
           # AFTER every build went green, producing no release at all.
           # Double-quoting alone does NOT fix this: `…` still substitutes inside "…".
           NOTES: ${{ inputs.notes }}
-          # First leg that resolved plugin-toolkit; every leg builds the same lock.
+          # Legs resolve independently; musl (the asset Linux hosts fetch first) wins.
           ORCA_SOURCE: >-
             ${{ needs.build-x86_64-linux-musl.outputs.orca-source
             || needs.build-x86_64-linux-gnu.outputs.orca-source

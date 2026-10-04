@@ -418,8 +418,10 @@ jobs:
       # what sccache requires. Env set here via $GITHUB_ENV flows into the build
       # step below (RUSTC_WRAPPER is honoured by the cargo builds in
       # build_orca_targets).
-      # SCCACHE_IDLE_TIMEOUT=0: the idle timer only resets on new requests, so a
-      # single long rustc could outlive the 600s default and kill the server.
+      # SCCACHE_IDLE_TIMEOUT=0: the idle timer resets only on new requests, so a
+      # single long rustc could outlive the 600s default and lose its server.
+      # mint is persistent, so the server is stopped before and after the build
+      # rather than left holding the port with this job's (local-disk) config.
       - name: Enable sccache (persistent compile cache)
         run: |
           set -euo pipefail
@@ -440,6 +442,8 @@ jobs:
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
           rustup target add aarch64-apple-darwin || true
+          sccache --stop-server >/dev/null 2>&1 || true
+          sccache --start-server
           sccache --zero-stats >/dev/null 2>&1 || true
           t0=$SECONDS
           # build_orca_targets REQUIRES explicit targets (dies "no targets given"
@@ -466,6 +470,10 @@ jobs:
           # an artifact that aborts on launch.
           echo "── smoke: $bin --version ──"
           "./$bin" --version
+
+      - name: Stop sccache server
+        if: ${{ always() }}
+        run: sccache --stop-server >/dev/null 2>&1 || true
 
       - uses: actions/upload-artifact@v3
         with:
