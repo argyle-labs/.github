@@ -47,11 +47,11 @@ on:
       lock-check:
         description: >-
           Cargo.lock drift gate: `warn` (annotate only) or `enforce` (fail the
-          job). Flip the default to `enforce` once every plugin's lock is
-          git-sourced, or opt in per repo with `with: { lock-check: enforce }`.
+          job). Defaults to `enforce`; a repo can opt down with
+          `with: { lock-check: warn }`.
         required: false
         type: string
-        default: warn
+        default: enforce
 
 env:
   CARGO_TERM_COLOR: always
@@ -229,7 +229,7 @@ jobs:
       - name: Fetch dependencies
         run: |
           export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          cargo fetch
+          cargo fetch --locked
 
       # Clippy first: check mode is the cheaper build, so lint failures report
       # sooner. The two phases share only build scripts and proc-macros (library
@@ -239,13 +239,13 @@ jobs:
       - name: Clippy
         run: |
           export t0=$SECONDS; trap 'echo "clippy|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
         if: ${{ !cancelled() }}
         run: |
           export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          cargo test --workspace --all-features
+          cargo test --locked --workspace --all-features
 
       - name: Timings + sccache summary
         if: ${{ !cancelled() }}
