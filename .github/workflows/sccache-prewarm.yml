@@ -116,6 +116,8 @@ jobs:
         run: cargo test --workspace --all-features --no-run
 
       # Same env as plugin-build's release step: vendored OpenSSL, zig's CC.
+      # Both LTO modes: plugin-build turns LTO off for RCs, which changes every
+      # crate's cache key.
       - name: Warm release builds (plugin-build profile)
         if: inputs.release_targets != ''
         working-directory: warm-plugin
@@ -123,12 +125,18 @@ jobs:
           TARGETS: ${{ inputs.release_targets }}
         run: |
           set -euo pipefail
-          for t in $TARGETS; do
-            flags=""
-            case "$t" in *-musl) flags="-C target-feature=+crt-static" ;; esac
-            if [ "$t" = x86_64-unknown-linux-gnu ]; then builder=(cargo build); else builder=(cargo zigbuild); fi
-            echo "→ ${builder[*]} --release --target $t"
-            CARGO_BUILD_TARGET="$t" RUSTFLAGS="$flags" "${builder[@]}" --release --target "$t"
+          for lto in profile off; do
+            for t in $TARGETS; do
+              flags=""
+              case "$t" in *-musl) flags="-C target-feature=+crt-static" ;; esac
+              if [ "$t" = x86_64-unknown-linux-gnu ]; then builder=(cargo build); else builder=(cargo zigbuild); fi
+              echo "→ ${builder[*]} --release --target $t (lto: $lto)"
+              if [ "$lto" = off ]; then
+                CARGO_PROFILE_RELEASE_LTO=off CARGO_BUILD_TARGET="$t" RUSTFLAGS="$flags" "${builder[@]}" --release --target "$t"
+              else
+                CARGO_BUILD_TARGET="$t" RUSTFLAGS="$flags" "${builder[@]}" --release --target "$t"
+              fi
+            done
           done
 
       - name: sccache summary
