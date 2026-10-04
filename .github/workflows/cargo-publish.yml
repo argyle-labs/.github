@@ -1,0 +1,159 @@
+name: Cargo publish to Gitea (reusable)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Publish a Rust workspace's crates to the org's Gitea cargo registry in
+# dependency order (.github#53 slice 4), so plugins can depend on versioned
+# orca crates instead of a git source. Dispatch-only: the caller is a
+# workflow_dispatch in orca:
+#
+#   on: { workflow_dispatch: { inputs: { execute: { type: boolean, default: false } } } }
+#   jobs:
+#     publish:
+#       uses: argyle-labs/.github/.github/workflows/cargo-publish.yml@main
+#       with:
+#         ref: ${{ github.ref_name }}
+#         execute: ${{ inputs.execute }}
+#       secrets: inherit          # CARGO_PUBLISH_TOKEN
+#
+# Dry-run by default (`cargo publish --workspace --dry-run`, which packages and
+# verifies every crate against the others locally). With execute=true each
+# crate is published with `cargo publish -p` in topological order; a version
+# already in the index is skipped, so a failed run can be re-dispatched.
+#
+# Requirements on the published workspace: every internal path dependency also
+# carries a `version`, no published crate has a git dependency, and crates that
+# must stay private set `publish = false` (they are skipped).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref (tag recommended) to publish.
+        required: true
+        type: string
+      execute:
+        description: Actually publish. false = dry-run.
+        required: false
+        type: boolean
+        default: false
+      registry-index:
+        description: Sparse index URL. Empty = <server>/api/packages/<owner>/cargo/.
+        required: false
+        type: string
+        default: ""
+      exclude:
+        description: Space-separated workspace crates to skip in addition to publish = false ones.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      CARGO_PUBLISH_TOKEN:
+        description: Gitea token with write:package on the owner.
+        required: false
+      CI_REGISTRY_USER:
+        required: false
+      CI_REGISTRY_TOKEN:
+        required: false
+
+concurrency:
+  group: cargo-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Configure registry
+        env:
+          INDEX: ${{ inputs.registry-index }}
+          SERVER: ${{ github.server_url }}
+          OWNER: ${{ github.repository_owner }}
+          TOKEN: ${{ secrets.CARGO_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -f .cargo/config.toml
+          index="${INDEX:-sparse+${SERVER}/api/packages/${OWNER}/cargo/}"
+          mkdir -p "$CARGO_HOME"
+          printf '[registries.gitea]\nindex = "%s"\n' "$index" >> "$CARGO_HOME/config.toml"
+          echo "CARGO_PUBLISH_INDEX=$index" >> "$GITHUB_ENV"
+          # Gitea expects the token with a Bearer prefix.
+          if [ -n "$TOKEN" ]; then echo "CARGO_REGISTRIES_GITEA_TOKEN=Bearer $TOKEN" >> "$GITHUB_ENV"; fi
+          echo "registry gitea → $index"
+
+      - name: Resolve publish order
+        id: order
+        env:
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --no-deps --format-version 1)
+          # Members that may be published (publish = null means any registry).
+          pubs=$(echo "$meta" | jq -r '.packages[] | select(.publish == null or (.publish | index("gitea"))) | .name' | sort)
+          for x in $EXCLUDE; do pubs=$(echo "$pubs" | grep -vxF "$x" || true); done
+          [ -n "$pubs" ] || { echo "::error::no publishable crates"; exit 1; }
+          # "dep crate" edges between publishable members (normal + build deps;
+          # path-only dev-deps are stripped by cargo publish), plus "crate crate"
+          # so isolated crates still appear. tsort prints deps first.
+          order=$(echo "$meta" | jq -r --argjson pubs "$(echo "$pubs" | jq -R . | jq -s .)" '
+            .packages[] | select(.name as $n | $pubs | index($n)) | .name as $n
+            | ([$n, $n] | join(" ")),
+              (.dependencies[] | select(.path != null and .kind != "dev")
+                | select(.name as $d | $pubs | index($d)) | "\(.name) \($n)")
+          ' | tsort)
+          echo "publish order:"; echo "$order" | nl
+          { echo "list<<EOF"; echo "$order"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Dry run (package + verify the whole workspace)
+        if: ${{ !inputs.execute }}
+        env:
+          ORDER: ${{ steps.order.outputs.list }}
+        run: |
+          set -euo pipefail
+          pkgs=()
+          while IFS= read -r c; do [ -n "$c" ] && pkgs+=(-p "$c"); done <<< "$ORDER"
+          cargo publish --registry gitea --dry-run "${pkgs[@]}"
+          echo "dry-run OK — re-dispatch with execute=true to publish" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish in dependency order
+        if: ${{ inputs.execute }}
+        env:
+          ORDER: ${{ steps.order.outputs.list }}
+        run: |
+          set -euo pipefail
+          [ -n "${CARGO_REGISTRIES_GITEA_TOKEN:-}" ] || { echo "::error::CARGO_PUBLISH_TOKEN secret is not set"; exit 1; }
+          base="${CARGO_PUBLISH_INDEX#sparse+}"
+          meta=$(cargo metadata --no-deps --format-version 1)
+          while IFS= read -r crate; do
+            [ -z "$crate" ] && continue
+            ver=$(echo "$meta" | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')
+            lc=$(echo "$crate" | tr '[:upper:]' '[:lower:]')
+            case ${#lc} in
+              1) path="1/$lc" ;; 2) path="2/$lc" ;; 3) path="3/${lc:0:1}/$lc" ;;
+              *) path="${lc:0:2}/${lc:2:2}/$lc" ;;
+            esac
+            if curl -fsS -H "Authorization: $CARGO_REGISTRIES_GITEA_TOKEN" "${base}${path}" 2>/dev/null \
+                | jq -e --arg v "$ver" 'select(.vers == $v)' >/dev/null; then
+              echo "skip $crate $ver (already published)"
+              echo "| $crate | $ver | skipped |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            echo "→ publish $crate $ver"
+            cargo publish --registry gitea -p "$crate" --no-verify
+            echo "| $crate | $ver | published |" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$ORDER"
