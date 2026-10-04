@@ -52,6 +52,22 @@ on:
         required: false
         type: string
         default: enforce
+      build-jobs:
+        description: >-
+          CARGO_BUILD_JOBS for the Rust gate. Empty (default) keeps cargo's
+          default parallelism; a crate whose single rustc peaks past runner RAM
+          can serialize with `with: { build-jobs: '1' }`.
+        required: false
+        type: string
+        default: ''
+      debuginfo:
+        description: >-
+          CARGO_PROFILE_DEV_DEBUG / CARGO_PROFILE_TEST_DEBUG for the Rust gate.
+          Empty (default) keeps the profile default; `'0'` drops debuginfo to
+          cut peak compile memory without changing what is checked.
+        required: false
+        type: string
+        default: ''
 
 env:
   CARGO_TERM_COLOR: always
@@ -107,6 +123,19 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # Job-level env cannot be conditional, so set only the knobs a caller passed.
+      - name: Compile memory knobs
+        env:
+          BUILD_JOBS: ${{ inputs.build-jobs }}
+          DEBUGINFO: ${{ inputs.debuginfo }}
+        run: |
+          if [ -n "$BUILD_JOBS" ]; then
+            echo "CARGO_BUILD_JOBS=$BUILD_JOBS" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$DEBUGINFO" ]; then
+            { echo "CARGO_PROFILE_DEV_DEBUG=$DEBUGINFO"; echo "CARGO_PROFILE_TEST_DEBUG=$DEBUGINFO"; } >> "$GITHUB_ENV"
+          fi
 
       - name: Drop local-dev cargo patch
         run: rm -f .cargo/config.toml
