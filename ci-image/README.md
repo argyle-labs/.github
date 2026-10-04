@@ -34,9 +34,9 @@ on the next CI run — no per-repo edit.
   plain HTTP, the runner docker daemon needs it in `insecure-registries`. The
   real LAN endpoint lives in the var, never committed (this repo mirrors public).
 
-## Consumer switch (follow-up PR, slice 3)
-Once the image is in the registry and the secrets/vars exist, flip
-`plugin-ci.yml` (and `plugin-release.yml` linux jobs) to run in
-`container: ${{ vars.CI_IMAGE || 'gitea.scottkey.me/argyle-labs/ci-rust:latest' }}`
-and delete the per-job rustup / toolchain / sccache-install steps. Kept separate
-so plugin CI never breaks by merging ahead of the image existing.
+## Consumers
+`plugin-ci.yml`, the Linux legs of `plugin-release.yml`, the shared
+`release.yml` build leg, `sccache-prewarm.yml` and `cargo-publish.yml` run in
+`ci-rust:1.95.0`. The composites (`plugin-build`, `rust-setup`, `build-target`)
+detect the baked toolchain and skip their rustup / toolchain / zig / sccache
+bootstraps; macOS legs run on the host and keep them.
