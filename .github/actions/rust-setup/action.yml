@@ -199,4 +199,16 @@ runs:
         # See [[gitea-canonical-github-mirror-only]].
         base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
         auth="${base/:\/\//://x-access-token:${ORCA_FETCH_TOKEN}@}"
-        git config --global url."${auth}/".insteadOf "https://github.com/"
+        if [ -n "$ORCA_FETCH_TOKEN" ]; then echo "::add-mask::$ORCA_FETCH_TOKEN"; fi
+        # Job-scoped via GIT_CONFIG_* env, not `git config --global`: on a host
+        # runner (mint) --global is the operator's real ~/.gitconfig. Needs git >= 2.31.
+        v=$(git --version | awk '{print $3}'); major=${v%%.*}; rest=${v#*.}; minor=${rest%%.*}
+        if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 31 ]; }; then
+          echo "::error::git $v lacks GIT_CONFIG_COUNT support (needs >= 2.31)"; exit 1
+        fi
+        n="${GIT_CONFIG_COUNT:-0}"
+        {
+          echo "GIT_CONFIG_KEY_${n}=url.${auth}/.insteadOf"
+          echo "GIT_CONFIG_VALUE_${n}=https://github.com/"
+          echo "GIT_CONFIG_COUNT=$((n + 1))"
+        } >> "$GITHUB_ENV"
