@@ -34,14 +34,29 @@ inputs:
     required: false
     default: ""
   sccache-endpoint:
+    description: MinIO host:port (pass vars.SCCACHE_ENDPOINT). Empty = no sccache.
     required: false
-    default: "10.10.10.31:9000"
+    default: ""
   sccache-bucket:
     required: false
     default: "sccache"
   macos-sdk-version:
     required: false
     default: "14.5"
+  rust-toolchain:
+    description: >-
+      Toolchain for hosts without the ci-rust image (macOS, plain Linux).
+      Tracks orca/rust-toolchain.toml and the ci-rust image tag.
+    required: false
+    default: "1.95.0"
+
+outputs:
+  orca-source:
+    description: >-
+      Cargo.lock `source` of plugin-toolkit as resolved by this build (e.g.
+      git+https://github.com/argyle-labs/orca?tag=v0.2.1-rc.10#<sha>). Empty
+      when it is path-sourced or absent.
+    value: ${{ steps.orca-src.outputs.source }}
 
 runs:
   using: composite
@@ -53,30 +68,6 @@ runs:
         # perl -i is portable across GNU (ubuntu) and BSD (macOS) runners.
         perl -i -pe 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
         grep -m1 '^version = ' Cargo.toml
-
-    # `dtolnay/rust-toolchain` bootstraps rustup via a single no-retry
-    # rustup-init download; the runner's egress to static.rust-lang.org
-    # intermittently resets, failing the whole job. Ensure rustup is present
-    # first with a retrying curl so dtolnay's next step is a no-op fast path.
-    - name: Ensure rustup (resilient bootstrap)
-      shell: bash
-      run: |
-        command -v rustup >/dev/null 2>&1 && { echo "rustup already present"; exit 0; }
-        n=0
-        until curl --proto '=https' --tlsv1.2 -fsSL --retry 6 --retry-all-errors \
-                --retry-delay 5 https://sh.rustup.rs \
-                | sh -s -- -y --profile minimal --default-toolchain none; do
-          n=$((n + 1))
-          [ "$n" -ge 4 ] && { echo "::error::rustup bootstrap failed after $n attempts"; exit 1; }
-          echo "rustup bootstrap attempt $n failed; retrying in $((n * 10))s"; sleep $((n * 10))
-        done
-        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-    - uses: dtolnay/rust-toolchain@stable
-
-    - uses: Swatinem/rust-cache@v2
-      with:
-        key: ${{ inputs.target }}
 
     - name: Detect native vs cross
       id: host
@@ -94,23 +85,85 @@ runs:
         if [ "$ho" = "$to" ] && [ "$ha" = "$ta" ]; then native=true; fi
         # musl is native only on a musl host (Alpine); glibc host must zig-cross.
         case "$t" in *-musl) [ -f /etc/alpine-release ] || native=false ;; esac
-        # sccache binary we fetch is x86_64-linux; enable only there, with creds.
+        # The ci-rust container bakes the pinned toolchain, zig, cargo-zigbuild
+        # and sccache, so every per-job bootstrap below is skipped there.
+        prebaked=false
+        if [ "$ho" = Linux ] && command -v rustup >/dev/null && command -v cargo-zigbuild >/dev/null \
+           && command -v zig >/dev/null && command -v sccache >/dev/null; then
+          prebaked=true
+        fi
+        # sccache is installed per host below: x86_64-linux tarball, or the
+        # macOS binary (Homebrew or the aarch64-apple-darwin tarball).
         use_sccache=false
-        if [ -n '${{ inputs.sccache-access-key }}' ] && [ "$ho" = Linux ] && [ "$ha" = x86_64 ]; then
-          use_sccache=true
+        if [ -n '${{ inputs.sccache-access-key }}' ] && [ -n '${{ inputs.sccache-endpoint }}' ]; then
+          case "$ho/$ha" in Linux/x86_64|Darwin/arm64) use_sccache=true ;; esac
         fi
         {
           echo "native=$native"
+          echo "prebaked=$prebaked"
           echo "use_sccache=$use_sccache"
         } >> "$GITHUB_OUTPUT"
-        echo "host=$ho/$ha target=$t native=$native sccache=$use_sccache"
+        echo "host=$ho/$ha target=$t native=$native prebaked=$prebaked sccache=$use_sccache"
+
+    # rustup-init is a single no-retry download and the runner's egress to
+    # static.rust-lang.org intermittently resets, so bootstrap it with a
+    # retrying curl.
+    - name: Ensure rustup (resilient bootstrap)
+      if: ${{ steps.host.outputs.prebaked != 'true' }}
+      shell: bash
+      run: |
+        command -v rustup >/dev/null 2>&1 && { echo "rustup already present"; exit 0; }
+        n=0
+        until curl --proto '=https' --tlsv1.2 -fsSL --retry 6 --retry-all-errors \
+                --retry-delay 5 https://sh.rustup.rs \
+                | sh -s -- -y --profile minimal --default-toolchain none; do
+          n=$((n + 1))
+          [ "$n" -ge 4 ] && { echo "::error::rustup bootstrap failed after $n attempts"; exit 1; }
+          echo "rustup bootstrap attempt $n failed; retrying in $((n * 10))s"; sleep $((n * 10))
+        done
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+    # A persistent host (mint) already has the pinned toolchain; installing
+    # only when missing avoids the stable-channel update check on every run.
+    - name: Ensure pinned toolchain
+      if: ${{ steps.host.outputs.prebaked != 'true' }}
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.rust-toolchain }}
+      run: |
+        set -euo pipefail
+        if rustup toolchain list | grep -q "^${TOOLCHAIN}-"; then
+          echo "toolchain ${TOOLCHAIN} already installed"
+        else
+          rustup toolchain install "$TOOLCHAIN" --profile minimal --no-self-update
+        fi
+        echo "RUSTUP_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
+
+    # Skipped on macOS: the build there uses a CARGO_TARGET_DIR outside the
+    # workspace that rust-cache does not track.
+    - uses: Swatinem/rust-cache@v2
+      if: ${{ runner.os != 'macOS' }}
+      with:
+        key: ${{ inputs.target }}
 
     - name: Install sccache
-      if: ${{ steps.host.outputs.use_sccache == 'true' }}
+      if: ${{ steps.host.outputs.use_sccache == 'true' && steps.host.outputs.prebaked != 'true' }}
       shell: bash
       run: |
         set -euo pipefail
         ver=v0.8.2
+        if [ "$(uname -s)" = Darwin ]; then
+          # The host executor's PATH may not include Homebrew.
+          if [ -x /opt/homebrew/bin/sccache ]; then
+            echo "/opt/homebrew/bin" >> "$GITHUB_PATH"; /opt/homebrew/bin/sccache --version; exit 0
+          fi
+          command -v sccache >/dev/null && { sccache --version; exit 0; }
+          dest="$HOME/.local/bin"; mkdir -p "$dest"
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-aarch64-apple-darwin.tar.gz" \
+            | tar -xz --strip-components=1 -C "$dest" "sccache-${ver}-aarch64-apple-darwin/sccache"
+          echo "$dest" >> "$GITHUB_PATH"; "$dest/sccache" --version
+          exit 0
+        fi
         curl -fsSL "https://github.com/mozilla/sccache/releases/download/${ver}/sccache-${ver}-x86_64-unknown-linux-musl.tar.gz" \
           | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/sccache'
         chmod +x /usr/local/bin/sccache
@@ -126,7 +179,7 @@ runs:
         ORCA_FETCH_TOKEN: ${{ inputs.orca-fetch-token }}
       run: |
         # Target THIS runner's own Gitea via GITHUB_SERVER_URL: internal
-        # act_runners see http://10.10.10.20:3000 (resolves); the external
+        # act_runners see the LAN http://<ip>:3000 (resolves); the external
         # hostname gitea.scottkey.me does NOT resolve on them.
         base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
         auth="${base/:\/\//://x-access-token:${ORCA_FETCH_TOKEN}@}"
@@ -137,6 +190,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # ci-rust images built before jq was baked in lack it.
+        if ! command -v jq >/dev/null && [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null; then
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends jq >/dev/null
+        fi
         requested='${{ inputs.bins }}'
         if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
           bins=$(echo "$requested" | jq -r '.[]')
@@ -149,7 +206,7 @@ runs:
         echo "bins: $(echo "$bins" | paste -sd, -)"
 
     - name: Install cross toolchain (zig + cargo-zigbuild)
-      if: ${{ steps.host.outputs.native != 'true' }}
+      if: ${{ steps.host.outputs.native != 'true' && steps.host.outputs.prebaked != 'true' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -187,21 +244,96 @@ runs:
       shell: bash
       run: rustup target add "${{ inputs.target }}"
 
+    # Starting the server up front runs sccache's storage check, so a dead
+    # MinIO backend degrades to an uncached build in seconds, visibly.
+    # IDLE_TIMEOUT=0: the idle timer only resets on new requests, so a single
+    # rustc running past the 600s default made the server shut down under it.
+    - name: sccache preflight
+      id: sccache
+      if: ${{ steps.host.outputs.use_sccache == 'true' }}
+      shell: bash
+      env:
+        SCCACHE_BUCKET: ${{ inputs.sccache-bucket }}
+        SCCACHE_ENDPOINT: ${{ inputs.sccache-endpoint }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.sccache-access-key }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-key }}
+      run: |
+        set -uo pipefail
+        {
+          echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
+          echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
+          echo "SCCACHE_S3_USE_SSL=false"
+          echo "SCCACHE_REGION=us-east-1"
+          echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+          echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+          echo "SCCACHE_IDLE_TIMEOUT=0"
+          echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+          echo "SCCACHE_ERROR_LOG=${RUNNER_TEMP:-/tmp}/sccache-error.log"
+        } >> "$GITHUB_ENV"
+        export SCCACHE_S3_USE_SSL=false SCCACHE_REGION=us-east-1 SCCACHE_IDLE_TIMEOUT=0 \
+          SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="${RUNNER_TEMP:-/tmp}/sccache-error.log"
+        # macOS has no coreutils `timeout` unless Homebrew's gtimeout is present.
+        to=$(command -v timeout || command -v gtimeout || true)
+        # mint is a persistent host and IDLE_TIMEOUT=0 never lets a server exit;
+        # a leftover one would hold the port with another job's config.
+        if [ "$(uname -s)" = Darwin ]; then sccache --stop-server >/dev/null 2>&1 || true; fi
+        if ${to:+$to 60} sccache --start-server; then
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning title=sccache unavailable::sccache server did not start against the MinIO backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # On the macOS host: link Homebrew's static OpenSSL instead of compiling
+    # openssl-src, and route C (jemalloc) through sccache; both C builds are
+    # the bulk of an uncached darwin leg. OPENSSL_STATIC keeps the shipped
+    # binary free of a Homebrew dylib dependency (checked after build).
+    # CARGO_TARGET_DIR: act's host executor uses a fresh workdir per run, and
+    # OUT_DIR paths under it are part of sccache's key, so a fixed target dir
+    # (wiped each run; mint runs one job at a time) keeps keys stable.
+    - name: macOS build environment
+      if: ${{ runner.os == 'macOS' && steps.host.outputs.native == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        tdir=/tmp/plugin-build-target/${{ inputs.target }}
+        rm -rf "$tdir"; mkdir -p "$tdir"
+        ssl=$(brew --prefix openssl@3 2>/dev/null || true)
+        if [ -z "$ssl" ] || [ ! -f "$ssl/lib/libssl.a" ] || [ ! -f "$ssl/lib/libcrypto.a" ]; then
+          echo "::warning title=No Homebrew openssl@3::static libssl/libcrypto not found; vendored OpenSSL will compile from source (brew install openssl@3)"
+          ssl=""
+        fi
+        {
+          echo "CARGO_TARGET_DIR=$tdir"
+          if [ -n "$ssl" ]; then
+            echo "OPENSSL_NO_VENDOR=1"
+            echo "OPENSSL_STATIC=1"
+            echo "OPENSSL_DIR=$ssl"
+          fi
+          if [ "${{ steps.sccache.outputs.ok }}" = "true" ]; then
+            echo "CC=sccache cc"
+            echo "CXX=sccache c++"
+          fi
+        } >> "$GITHUB_ENV"
+
+    - name: Fetch dependencies
+      shell: bash
+      env:
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      run: |
+        export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
+        cargo fetch
+
     - name: Build release binaries
       shell: bash
       env:
-        RUSTC_WRAPPER: ${{ steps.host.outputs.use_sccache == 'true' && 'sccache' || '' }}
-        CARGO_INCREMENTAL: ${{ steps.host.outputs.use_sccache == 'true' && '0' || '' }}
-        SCCACHE_BUCKET: ${{ inputs.sccache-bucket }}
-        SCCACHE_ENDPOINT: ${{ inputs.sccache-endpoint }}
-        SCCACHE_S3_USE_SSL: "false"
-        SCCACHE_REGION: us-east-1
-        AWS_ACCESS_KEY_ID: ${{ inputs.sccache-access-key }}
-        AWS_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-key }}
+        RUSTC_WRAPPER: ${{ steps.sccache.outputs.ok == 'true' && 'sccache' || '' }}
+        CARGO_INCREMENTAL: ${{ steps.sccache.outputs.ok == 'true' && '0' || '' }}
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
       run: |
         set -euo pipefail
+        export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
         if [ "${{ steps.host.outputs.native }}" = "true" ]; then builder="cargo build"; else builder="cargo zigbuild"; fi
         bin_flags=""
         while IFS= read -r b; do [ -n "$b" ] && bin_flags="$bin_flags --bin $b"; done <<< '${{ steps.bins.outputs.list }}'
@@ -209,7 +341,20 @@ runs:
         echo "→ $builder --release --target ${{ inputs.target }}$bin_flags"
         # shellcheck disable=SC2086
         $builder --release --target "${{ inputs.target }}" $bin_flags
-        [ -n "${RUSTC_WRAPPER:-}" ] && sccache --show-stats || true
+
+    # Read from the lock AFTER the build: without --locked a stale lock is
+    # re-resolved in place, so this is the orca revision actually compiled.
+    - name: Record resolved orca source
+      id: orca-src
+      shell: bash
+      run: |
+        src=$(awk '
+          /^\[\[package\]\]/            { want=0; next }
+          /^name = "plugin-toolkit"$/ { want=1; next }
+          want && /^source = /        { gsub(/"/, "", $3); print $3; exit }
+        ' Cargo.lock 2>/dev/null || true)
+        echo "plugin-toolkit source: ${src:-<none>}"
+        echo "source=$src" >> "$GITHUB_OUTPUT"
 
     - name: Stage artifacts (+ thinness report)
       shell: bash
@@ -219,8 +364,11 @@ runs:
         budget="${{ inputs.size-budget-mib }}"; target="${{ inputs.target }}"
         while IFS= read -r bin; do
           [ -z "$bin" ] && continue
-          path="target/${target}/release/${bin}"
-          [ -f "$path" ] || { echo "::error::binary not found at $path"; ls -la "target/${target}/release" || true; exit 1; }
+          path="${CARGO_TARGET_DIR:-target}/${target}/release/${bin}"
+          [ -f "$path" ] || { echo "::error::binary not found at $path"; ls -la "${CARGO_TARGET_DIR:-target}/${target}/release" || true; exit 1; }
+          if [ "$(uname -s)" = Darwin ] && otool -L "$path" | grep -q /opt/homebrew; then
+            echo "::error::$path links a Homebrew dylib:"; otool -L "$path"; exit 1
+          fi
           asset="${bin}-${{ inputs.tag }}-${target}"
           cp "$path" "dist/$asset"
           ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
@@ -233,6 +381,35 @@ runs:
             echo "::warning title=Plugin over size budget::${asset} is ${mib} MiB (budget ${budget} MiB)."
           fi
         done <<< '${{ steps.bins.outputs.list }}'
+
+    - name: Timings + sccache summary
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        phases="${RUNNER_TEMP:-/tmp}/plugin-build-phases"
+        {
+          echo "### ${{ inputs.target }} — phase timings"
+          echo "| phase | seconds | exit |"
+          echo "|---|---:|---:|"
+          if [ -f "$phases" ]; then
+            while IFS='|' read -r p t e; do echo "| $p | $t | $e |"; done < "$phases"
+          fi
+          if [ "${{ steps.sccache.outputs.ok }}" = "true" ]; then
+            echo
+            echo "### ${{ inputs.target }} — sccache"
+            echo '```'
+            sccache --show-stats 2>&1 || echo "(sccache server not running)"
+            echo '```'
+          fi
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+        if [ -s "${SCCACHE_ERROR_LOG:-}" ]; then
+          echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
+        fi
+
+    - name: Stop sccache server (persistent macOS host)
+      if: ${{ always() && runner.os == 'macOS' }}
+      shell: bash
+      run: sccache --stop-server >/dev/null 2>&1 || true
 
     - uses: actions/upload-artifact@v3
       with:

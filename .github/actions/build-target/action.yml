@@ -54,6 +54,9 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if command -v cargo-zigbuild >/dev/null && command -v zig >/dev/null; then
+          echo "cargo-zigbuild + zig already present (ci-rust image)"; exit 0
+        fi
         # Retry: the runner's egress to files.pythonhosted.org intermittently
         # times out mid-stream, and a bare `pip install` fails the whole build on
         # one blip. --timeout widens the per-read socket window; the loop re-runs
@@ -95,6 +98,7 @@ runs:
         RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
       run: |
         set -euo pipefail
+        export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
         # zig's linker opens every input object at once (thousands for a release
         # binary — e.g. orca's darwin link touches ~3k .o files). The container's
         # default open-file soft limit (1024) then trips

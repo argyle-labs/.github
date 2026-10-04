@@ -75,13 +75,13 @@ jobs:
       - name: Clone every repo (shallow, from Gitea)
         run: |
           set -euo pipefail
-          # SERVER (github.server_url) may be http://10.10.10.20:3000 on the
+          # SERVER (github.server_url) may be a plain-http LAN <ip>:3000 on the
           # internal runner or https://gitea.scottkey.me — preserve its scheme
           # and strip only the scheme, never hardcode https (plaintext :3000
           # would fail the TLS handshake).
           scheme=${SERVER%%://*}; host=${SERVER#*://}
           mkdir -p work/src
-          while IFS=$'\t' read -r name vis br; do
+          while IFS=$'\t' read -r name _ _; do
             git clone -q --depth 1 \
               "${scheme}://x-access-token:${READ_TOKEN}@${host}/argyle-labs/${name}.git" \
               "work/src/${name}"

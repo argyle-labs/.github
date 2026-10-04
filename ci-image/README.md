@@ -9,6 +9,11 @@ via `container:`. Epic: [.github#53](https://gitea.scottkey.me/argyle-labs/.gith
 - Rust **1.95.0** (tracks `orca/rust-toolchain.toml`) + `clippy`, `rustfmt`, `llvm-tools-preview`
 - Linux targets: `x86_64`/`aarch64` × `gnu`/`musl`
 - `zig` + `cargo-zigbuild` (cross), `sccache`, `cargo-nextest`, `cargo-llvm-cov`
+- `jq`, `libssl-dev`, `mold`
+- A warm `CARGO_HOME`: `cargo fetch` of `warm/Cargo.lock` (every plugin-facing
+  `plugin-toolkit` dependency) plus the orca git db at `ORCA_TAG`. When the
+  pinned orca tag moves, bump the tag in `warm/Cargo.toml` and `ORCA_TAG` in the
+  Dockerfile together and regenerate the lock (`cargo generate-lockfile`).
 
 ## Tags
 `ci-rust:<rust-version>` (pinned) and `ci-rust:latest` (current toolchain).
@@ -29,9 +34,9 @@ on the next CI run — no per-repo edit.
   plain HTTP, the runner docker daemon needs it in `insecure-registries`. The
   real LAN endpoint lives in the var, never committed (this repo mirrors public).
 
-## Consumer switch (follow-up PR, slice 3)
-Once the image is in the registry and the secrets/vars exist, flip
-`plugin-ci.yml` (and `plugin-release.yml` linux jobs) to run in
-`container: ${{ vars.CI_IMAGE || 'gitea.scottkey.me/argyle-labs/ci-rust:latest' }}`
-and delete the per-job rustup / toolchain / sccache-install steps. Kept separate
-so plugin CI never breaks by merging ahead of the image existing.
+## Consumers
+`plugin-ci.yml`, the Linux legs of `plugin-release.yml`, the shared
+`release.yml` build leg, `sccache-prewarm.yml` and `cargo-publish.yml` run in
+`ci-rust:1.95.0`. The composites (`plugin-build`, `rust-setup`, `build-target`)
+detect the baked toolchain and skip their rustup / toolchain / zig / sccache
+bootstraps; macOS legs run on the host and keep them.

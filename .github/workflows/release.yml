@@ -154,6 +154,16 @@ jobs:
   build:
     needs: version
     runs-on: ubuntu-latest
+    # Prebaked toolchain, zig, cargo-zigbuild and sccache: rust-setup and
+    # build-target skip their rustup/dtolnay/pip/curl bootstraps here.
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
     # Label by the target this shard builds (evaluated at job-creation time).
     name: build ${{ fromJSON(inputs.targets)[matrix.shard] }}
     strategy:
@@ -161,6 +171,16 @@ jobs:
       matrix:
         shard: [0, 1]
     steps:
+      # build.rs runs `git describe` on a checkout owned by another uid, and
+      # ci-rust images built before jq was baked in lack it.
+      - name: Prepare container
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory '*'
+          if ! command -v jq >/dev/null; then
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends jq >/dev/null
+          fi
+
       - name: Select this shard's target
         id: sel
         env:
@@ -198,6 +218,9 @@ jobs:
         with:
           cache-key: release-${{ steps.sel.outputs.target }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
       - name: Resolve bin list
         if: steps.sel.outputs.skip != 'true'
@@ -213,6 +236,12 @@ jobs:
           fi
           [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
           { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch dependencies
+        if: steps.sel.outputs.skip != 'true'
+        run: |
+          export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
+          cargo fetch
 
       - name: Build at release version
         if: steps.sel.outputs.skip != 'true'
@@ -275,6 +304,29 @@ jobs:
             echo "── smoke: $f --version ──"
             "./$f" --version
           done <<< "$BINS"
+
+      - name: Timings + sccache summary
+        if: ${{ !cancelled() && steps.sel.outputs.skip != 'true' }}
+        env:
+          TARGET: ${{ steps.sel.outputs.target }}
+        run: |
+          phases="${RUNNER_TEMP:-/tmp}/release-phases"
+          {
+            echo "### ${TARGET} — phase timings"
+            echo "| phase | seconds | exit |"
+            echo "|---|---:|---:|"
+            if [ -f "$phases" ]; then
+              while IFS='|' read -r p t e; do echo "| $p | $t | $e |"; done < "$phases"
+            fi
+            echo
+            echo "### ${TARGET} — sccache"
+            echo '```'
+            sccache --show-stats 2>&1 || echo "(sccache not in use)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s "${SCCACHE_ERROR_LOG:-}" ]; then
+            echo "::warning title=sccache errors::$(tail -n 5 "$SCCACHE_ERROR_LOG" | tr '\n' ' ')"
+          fi
 
       - uses: actions/upload-artifact@v3
         if: steps.sel.outputs.skip != 'true'
@@ -366,13 +418,21 @@ jobs:
       # what sccache requires. Env set here via $GITHUB_ENV flows into the build
       # step below (RUSTC_WRAPPER is honoured by the cargo builds in
       # build_orca_targets).
+      # SCCACHE_IDLE_TIMEOUT=0: the idle timer resets only on new requests, so a
+      # single long rustc could outlive the 600s default and lose its server.
+      # mint is persistent, so the server is stopped before and after the build
+      # rather than left holding the port with this job's (local-disk) config.
       - name: Enable sccache (persistent compile cache)
         run: |
           set -euo pipefail
           command -v sccache >/dev/null 2>&1 || brew install sccache
-          echo "RUSTC_WRAPPER=sccache"                        >> "$GITHUB_ENV"
-          echo "SCCACHE_DIR=$HOME/Library/Caches/orca-sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=20G"                       >> "$GITHUB_ENV"
+          {
+            echo "RUSTC_WRAPPER=sccache"
+            echo "SCCACHE_DIR=$HOME/Library/Caches/orca-sccache"
+            echo "SCCACHE_CACHE_SIZE=20G"
+            echo "SCCACHE_IDLE_TIMEOUT=0"
+            echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+          } >> "$GITHUB_ENV"
 
       - name: Build darwin binary natively
         env:
@@ -382,14 +442,21 @@ jobs:
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
           rustup target add aarch64-apple-darwin || true
+          sccache --stop-server >/dev/null 2>&1 || true
+          sccache --start-server
           sccache --zero-stats >/dev/null 2>&1 || true
+          t0=$SECONDS
           # build_orca_targets REQUIRES explicit targets (dies "no targets given"
           # otherwise, and its die exit isn't caught by `|| true`). Build the
           # shipped arm64 slice on the arm64 mint runner.
           build_orca_targets aarch64-apple-darwin
+          {
+            echo "### aarch64-apple-darwin — build $((SECONDS - t0))s"
+            echo '```'
+            sccache --show-stats 2>&1 || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
           echo "── dist-release (macOS build leg) ──"; ls -la dist-release || true
-          echo "── sccache stats (cache hit rate for this release) ──"
-          sccache --show-stats || true
 
       - name: Ensure raw binary + checksum, then smoke-test it
         run: |
@@ -403,6 +470,10 @@ jobs:
           # an artifact that aborts on launch.
           echo "── smoke: $bin --version ──"
           "./$bin" --version
+
+      - name: Stop sccache server
+        if: ${{ always() }}
+        run: sccache --stop-server >/dev/null 2>&1 || true
 
       - uses: actions/upload-artifact@v3
         with:
