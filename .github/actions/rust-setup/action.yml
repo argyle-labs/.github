@@ -116,7 +116,7 @@ runs:
       run: |
         # orca is spelled as a github.com dep but fetched from Gitea via a host
         # rewrite. Target THIS runner's own Gitea via GITHUB_SERVER_URL: internal
-        # act_runners see http://10.10.10.20:3000 (resolves), whereas the external
+        # act_runners see the LAN http://<ip>:3000 (resolves), whereas the external
         # hostname gitea.scottkey.me does NOT resolve on them. ORCA_FETCH_TOKEN
         # must be a Gitea token with read on argyle-labs/orca.
         # See [[gitea-canonical-github-mirror-only]].

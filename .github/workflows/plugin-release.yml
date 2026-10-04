@@ -181,6 +181,7 @@ jobs:
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   build-aarch64-linux-gnu:
     needs: [version, ui-build]
@@ -206,6 +207,7 @@ jobs:
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   build-x86_64-linux-musl:
     needs: [version, ui-build]
@@ -231,6 +233,7 @@ jobs:
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   build-aarch64-linux-musl:
     needs: [version, ui-build]
@@ -256,6 +259,7 @@ jobs:
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   build-aarch64-darwin:
     needs: [version, ui-build]
@@ -281,6 +285,7 @@ jobs:
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   build-x86_64-darwin:
     needs: [version, ui-build]
@@ -306,6 +311,7 @@ jobs:
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   # ── Gather every requested target's artifacts and publish one (pre)release. ──
   release:

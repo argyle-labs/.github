@@ -75,7 +75,7 @@ jobs:
       - name: Clone every repo (shallow, from Gitea)
         run: |
           set -euo pipefail
-          # SERVER (github.server_url) may be http://10.10.10.20:3000 on the
+          # SERVER (github.server_url) may be a plain-http LAN <ip>:3000 on the
           # internal runner or https://gitea.scottkey.me — preserve its scheme
           # and strip only the scheme, never hardcode https (plaintext :3000
           # would fail the TLS handshake).

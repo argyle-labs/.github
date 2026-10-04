@@ -34,8 +34,9 @@ inputs:
     required: false
     default: ""
   sccache-endpoint:
+    description: MinIO host:port (pass vars.SCCACHE_ENDPOINT). Empty = no sccache.
     required: false
-    default: "10.10.10.31:9000"
+    default: ""
   sccache-bucket:
     required: false
     default: "sccache"
@@ -96,7 +97,8 @@ runs:
         case "$t" in *-musl) [ -f /etc/alpine-release ] || native=false ;; esac
         # sccache binary we fetch is x86_64-linux; enable only there, with creds.
         use_sccache=false
-        if [ -n '${{ inputs.sccache-access-key }}' ] && [ "$ho" = Linux ] && [ "$ha" = x86_64 ]; then
+        if [ -n '${{ inputs.sccache-access-key }}' ] && [ -n '${{ inputs.sccache-endpoint }}' ] \
+           && [ "$ho" = Linux ] && [ "$ha" = x86_64 ]; then
           use_sccache=true
         fi
         {
@@ -126,7 +128,7 @@ runs:
         ORCA_FETCH_TOKEN: ${{ inputs.orca-fetch-token }}
       run: |
         # Target THIS runner's own Gitea via GITHUB_SERVER_URL: internal
-        # act_runners see http://10.10.10.20:3000 (resolves); the external
+        # act_runners see the LAN http://<ip>:3000 (resolves); the external
         # hostname gitea.scottkey.me does NOT resolve on them.
         base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
         auth="${base/:\/\//://x-access-token:${ORCA_FETCH_TOKEN}@}"
