@@ -455,6 +455,8 @@ jobs:
           echo "── dist-release (macOS build leg) ──"; ls -la dist-release
 
       - name: Ensure raw binary + checksum, then smoke-test it
+        env:
+          REL_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           bin="dist-release/orca-aarch64-apple-darwin"
@@ -465,7 +467,13 @@ jobs:
           # duplicate linked dylib) fails the release here rather than publishing
           # an artifact that aborts on launch.
           echo "── smoke: $bin --version ──"
-          "./$bin" --version
+          out=$("./$bin" --version)
+          echo "$out"
+          # Guards against staging a binary left over from an earlier release.
+          case "$out" in
+            *"$REL_VERSION"|*"$REL_VERSION"[-+]*) ;;
+            *) echo "::error::darwin binary reports '$out', expected version $REL_VERSION"; exit 1 ;;
+          esac
 
       - uses: actions/upload-artifact@v3
         with:
