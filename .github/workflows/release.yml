@@ -456,7 +456,7 @@ jobs:
           target: aarch64-apple-darwin
           bins: orca
           cap-gb: "6"
-          sccache: "true"
+          sccache: "false"
           run: |
             source scripts/release-lib.sh
             cargo_build_target "$TARGET" "$(release_cargo_jobs 1)"
