@@ -71,9 +71,11 @@ jobs:
 
       - name: Resolve bin list
         id: bins
+        env:
+          REQUESTED_BINS: ${{ inputs.bins }}
         run: |
           set -euo pipefail
-          requested='${{ inputs.bins }}'
+          requested="$REQUESTED_BINS"
           if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
             bins=$(echo "$requested" | jq -r '.[]')
           else

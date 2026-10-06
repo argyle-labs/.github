@@ -37,17 +37,19 @@ jobs:
 
       - name: Discover compose files
         id: find
+        env:
+          COMPOSE_PATHS: ${{ inputs.paths }}
         run: |
           set -euo pipefail
           found=""
-          for pat in ${{ inputs.paths }}; do
+          for pat in $COMPOSE_PATHS; do
             for f in $pat; do
               [ -f "$f" ] && found="$found $f"
             done
           done
           found="$(echo "$found" | xargs -n1 2>/dev/null | sort -u | xargs 2>/dev/null || true)"
           if [ -z "$found" ]; then
-            echo "::error::no compose files found (looked for: ${{ inputs.paths }})"
+            echo "::error::no compose files found (looked for: ${COMPOSE_PATHS})"
             exit 1
           fi
           echo "files=$found" >> "$GITHUB_OUTPUT"
@@ -59,13 +61,15 @@ jobs:
         # absent on a given runner image. PyYAML is pip-installed here so the gate
         # never depends on the base image shipping it (--break-system-packages
         # mirrors the Debian-12/PEP-668 handling in plugin-ci.yml).
+        env:
+          FILES: ${{ steps.find.outputs.files }}
         run: |
           set -euo pipefail
           python3 -m pip install --user --break-system-packages pyyaml >/dev/null 2>&1 \
             || pip install --user --break-system-packages pyyaml >/dev/null 2>&1 || true
           python3 - <<'PY'
-          import sys, glob, yaml
-          files = "${{ steps.find.outputs.files }}".split()
+          import os, sys, glob, yaml
+          files = os.environ["FILES"].split()
           bad = 0
           for f in files:
               try:
@@ -97,6 +101,8 @@ jobs:
         # so we validate the SPEC, not the absent runtime environment. Placeholders
         # are created only if the target does not already exist and are confined to
         # the ephemeral CI checkout.
+        env:
+          FILES: ${{ steps.find.outputs.files }}
         run: |
           set -euo pipefail
           if ! docker compose version >/dev/null 2>&1; then
@@ -104,7 +110,7 @@ jobs:
             exit 0
           fi
           rc=0
-          for f in ${{ steps.find.outputs.files }}; do
+          for f in $FILES; do
             # Create empty placeholders for any env_file the stack references
             # (scalar, list, or the `{path: …, required: …}` object form), resolved
             # relative to the compose file's directory. PyYAML was installed by the

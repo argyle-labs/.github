@@ -234,9 +234,11 @@ jobs:
       - name: Resolve bin list
         if: steps.sel.outputs.skip != 'true'
         id: bins
+        env:
+          REQUESTED_BINS: ${{ inputs.bins }}
         run: |
           set -euo pipefail
-          requested='${{ inputs.bins }}'
+          requested="$REQUESTED_BINS"
           if [ "$(echo "$requested" | tr -d '[:space:]')" != "[]" ]; then
             bins=$(echo "$requested" | jq -r '.[]')
           else
@@ -673,6 +675,7 @@ jobs:
         env:
           REL_VERSION: ${{ needs.version.outputs.version }}
           TAG: ${{ needs.version.outputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # Same first-workspace-version rewrite build-target uses (portable sed).
@@ -689,7 +692,7 @@ jobs:
             echo "committed version already ${REL_VERSION} — nothing to commit"
           else
             git commit -m "chore: release ${TAG}"
-            git push origin "HEAD:${{ github.ref_name }}"
+            git push origin "HEAD:${REF_NAME}"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "→ tag ${TAG} will point at $(git rev-parse HEAD)"

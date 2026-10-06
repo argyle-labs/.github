@@ -100,9 +100,12 @@ jobs:
       # aggregate. `if: always()` so failures are captured too.
       - name: Record status
         if: always()
+        env:
+          OUTCOME: ${{ steps.run.outcome }}
+          REPO_NAME: ${{ matrix.repo }}
         run: |
           mkdir -p status
-          echo "${{ steps.run.outcome }}" > "status/${{ matrix.repo }}.txt"
+          echo "$OUTCOME" > "status/${REPO_NAME}.txt"
       - uses: actions/upload-artifact@v3
         if: always()
         with:
@@ -152,12 +155,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FAILED_LIST: ${{ steps.fail.outputs.list }}
         run: |
           set -euo pipefail
           title="🐤 Fleet canary: plugins failing against orca main"
           # shellcheck disable=SC2016  # literal backticks are intended markdown, not expansion
           body="$(printf 'These plugins no longer build/test against orca \`main\` as of the latest fleet canary:\n\n%s\n\nRun: %s\n\n_Deterministic PR CI is unaffected (plugins build against the pinned stable orca). This is an early-warning canary._' \
-            "${{ steps.fail.outputs.list }}" "$RUN_URL")"
+            "$FAILED_LIST" "$RUN_URL")"
           existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
             --search "in:title Fleet canary" --json number --jq '.[0].number' || true)"
           if [ -n "${existing:-}" ]; then
