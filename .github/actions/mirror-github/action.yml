@@ -55,8 +55,8 @@ runs:
         up="https://uploads.github.com"
         auth=(-H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
         rel_api="${api}/repos/${REPO}/releases"
-        echo "::add-mask::$GH_TOKEN"
-        echo "::add-mask::$GITEA_TOKEN"
+        if [ -n "$GH_TOKEN" ]; then echo "::add-mask::$GH_TOKEN"; fi
+        if [ -n "$GITEA_TOKEN" ]; then echo "::add-mask::$GITEA_TOKEN"; fi
 
         gitea_base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
         gitea_url="${gitea_base/:\/\//://x-access-token:${GITEA_TOKEN}@}/${REPO}.git"
@@ -77,7 +77,7 @@ runs:
         if [ -z "$gh_sha" ]; then
           echo "→ pushing tag ${TAG} to GitHub"
           if ! git -C "$git_dir" -c credential.helper= push --quiet "$gh_url" "refs/tags/${TAG}:refs/tags/${TAG}"; then
-            echo "::error::GitHub rejected the ${TAG} tag push; if history touches .github/workflows, GH_RELEASE_TOKEN may lack the workflow scope"
+            echo "::error::GitHub rejected the ${TAG} tag push; if history touches .github/workflows, the github-token input may lack the workflow scope"
             exit 1
           fi
         elif [ "$gh_sha" != "$sha" ]; then

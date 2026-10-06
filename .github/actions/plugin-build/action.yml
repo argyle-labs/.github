@@ -67,8 +67,10 @@ runs:
         REL_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
+        [ -n "$REL_VERSION" ] || { echo "::error::version input is empty"; exit 1; }
         # perl -i is portable across GNU (ubuntu) and BSD (macOS) runners.
-        perl -i -pe 's/^version = ".*"/version = "$ENV{REL_VERSION}"/' Cargo.toml
+        # Only the first match: that is the workspace/package version.
+        perl -i -pe '$done ||= s/^version = ".*"/version = "$ENV{REL_VERSION}"/' Cargo.toml
         grep -m1 '^version = ' Cargo.toml
 
     - name: Detect native vs cross
