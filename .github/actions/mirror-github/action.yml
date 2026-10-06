@@ -3,11 +3,16 @@ description: >
   Mirror a release + its assets OUTWARD to GitHub Releases (the read-only
   public mirror; Gitea is canonical). Ports the proven plugin-release curl+jq
   pattern against api.github.com (the Gitea runner image lacks `gh`).
-  Idempotent — reuses an existing GitHub release for the tag.
+  Idempotent — reuses an existing GitHub release for the tag. The GitHub tag
+  is pushed at the exact object Gitea's tag points at; a GitHub tag that
+  already exists at a different commit fails the step (never force-moved).
 
 inputs:
   github-token:
     description: GitHub token with contents:write on the mirror repo.
+    required: true
+  gitea-token:
+    description: Gitea token with read on the repo (resolves the canonical tag).
     required: true
   tag:
     description: Tag name (e.g. v0.1.8-rc.9).
@@ -34,6 +39,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        GITEA_TOKEN: ${{ inputs.gitea-token }}
         REPO: ${{ github.repository }}
         TAG: ${{ inputs.tag }}
         REL_NAME: ${{ inputs.name }}
@@ -47,13 +53,39 @@ runs:
         auth=(-H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
         rel_api="${api}/repos/${REPO}/releases"
 
+        gitea_base="${GITHUB_SERVER_URL:-https://gitea.scottkey.me}"
+        gitea_url="${gitea_base/:\/\//://x-access-token:${GITEA_TOKEN}@}/${REPO}.git"
+        gh_url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+        git_dir=$(mktemp -d); trap 'rm -rf "$git_dir"' EXIT
+        git init --quiet --bare "$git_dir"
+        # Full history of the tag, so the push can supply any commits GitHub
+        # lacks (the release version-bump commit is never there yet).
+        git -C "$git_dir" fetch --quiet --no-tags "$gitea_url" "refs/tags/${TAG}:refs/tags/${TAG}"
+        sha=$(git -C "$git_dir" rev-parse "refs/tags/${TAG}^{commit}")
+        echo "→ Gitea tag ${TAG} → ${sha}"
+
+        # Peeled commit of the GitHub tag (empty if absent).
+        gh_tag_commit() {
+          git ls-remote "$gh_url" "refs/tags/${TAG}" "refs/tags/${TAG}^{}" \
+            | awk -v t="refs/tags/${TAG}" '$2==t"^{}"{p=$1} $2==t{l=$1} END{print (p!=""?p:l)}'
+        }
+        gh_sha=$(gh_tag_commit)
+        if [ -z "$gh_sha" ]; then
+          echo "→ pushing tag ${TAG} to GitHub"
+          git -C "$git_dir" push --quiet "$gh_url" "refs/tags/${TAG}:refs/tags/${TAG}"
+        elif [ "$gh_sha" != "$sha" ]; then
+          echo "::error::GitHub tag ${TAG} is at ${gh_sha}, Gitea's at ${sha} — refusing to move a published tag; reconcile by hand"
+          exit 1
+        fi
+
         existing=$(curl -fsS "${auth[@]}" "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
         rel_id=$(echo "$existing" | jq -r '.id // empty' 2>/dev/null || true)
 
         body_json=$(jq -n \
           --arg tag "$TAG" --arg name "$REL_NAME" --arg body "$REL_BODY" \
           --argjson pre "$PRERELEASE" \
-          '{tag_name:$tag, name:$name, body:$body, prerelease:$pre}')
+          --arg target "$sha" \
+          '{tag_name:$tag, target_commitish:$target, name:$name, body:$body, prerelease:$pre}')
 
         if [ -n "$rel_id" ]; then
           echo "→ updating existing GitHub release id=$rel_id ($TAG)"
@@ -80,3 +112,7 @@ runs:
           count=$((count+1))
         done
         echo "→ mirrored $count asset(s) to GitHub release $TAG (id=$rel_id)"
+
+        gh_sha=$(gh_tag_commit)
+        [ "$gh_sha" = "$sha" ] || { echo "::error::GitHub tag ${TAG} resolves to '${gh_sha}', expected ${sha}"; exit 1; }
+        echo "→ GitHub tag ${TAG} matches Gitea (${sha})"

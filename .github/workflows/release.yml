@@ -713,6 +713,7 @@ jobs:
         uses: ./.ci/.github/actions/mirror-github
         with:
           github-token: ${{ secrets.GH_RELEASE_TOKEN }}
+          gitea-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
           tag: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.rel-name }}
           body: ${{ inputs.notes }}
