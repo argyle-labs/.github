@@ -391,17 +391,25 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Verify no requested build failed
+        env:
+          R_UI_BUILD: ${{ needs.ui-build.result }}
+          R_GNU_X86: ${{ needs.build-x86_64-linux-gnu.result }}
+          R_GNU_ARM: ${{ needs.build-aarch64-linux-gnu.result }}
+          R_MUSL_X86: ${{ needs.build-x86_64-linux-musl.result }}
+          R_MUSL_ARM: ${{ needs.build-aarch64-linux-musl.result }}
+          R_DARWIN_ARM: ${{ needs.build-aarch64-darwin.result }}
+          R_DARWIN_X86: ${{ needs.build-x86_64-darwin.result }}
         run: |
           set -euo pipefail
           fail=0
           for r in \
-            "ui-build:${{ needs.ui-build.result }}" \
-            "gnu-x86:${{ needs.build-x86_64-linux-gnu.result }}" \
-            "gnu-arm:${{ needs.build-aarch64-linux-gnu.result }}" \
-            "musl-x86:${{ needs.build-x86_64-linux-musl.result }}" \
-            "musl-arm:${{ needs.build-aarch64-linux-musl.result }}" \
-            "darwin-arm:${{ needs.build-aarch64-darwin.result }}" \
-            "darwin-x86:${{ needs.build-x86_64-darwin.result }}"; do
+            "ui-build:${R_UI_BUILD}" \
+            "gnu-x86:${R_GNU_X86}" \
+            "gnu-arm:${R_GNU_ARM}" \
+            "musl-x86:${R_MUSL_X86}" \
+            "musl-arm:${R_MUSL_ARM}" \
+            "darwin-arm:${R_DARWIN_ARM}" \
+            "darwin-x86:${R_DARWIN_X86}"; do
             name=${r%%:*}; res=${r#*:}
             echo "  $name = $res"
             case "$res" in success|skipped) ;; *) echo "::error::$name = $res"; fail=1 ;; esac
@@ -488,12 +496,19 @@ jobs:
             || needs.build-aarch64-linux-musl.outputs.orca-source
             || needs.build-aarch64-linux-gnu.outputs.orca-source
             || needs.build-x86_64-darwin.outputs.orca-source }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          API_URL: ${{ github.api_url }}
+          SERVER_URL: ${{ github.server_url }}
+          CHANNEL: ${{ inputs.channel }}
+          SHA: ${{ github.sha }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           set -euo pipefail
-          repo="${{ github.repository }}"
-          tag="${{ needs.version.outputs.tag }}"
-          api="${{ github.api_url }}"
-          server="${{ github.server_url }}"
+          repo="$REPO"
+          tag="$TAG"
+          api="$API_URL"
+          server="$SERVER_URL"
           hdr_auth="Authorization: token ${GITEA_TOKEN}"
           accept="Accept: application/json"
           # ORCA_SOURCE is the lock source, e.g.
@@ -505,15 +520,15 @@ jobs:
             orca_ref="orca \`${pin/=/ }\` @ \`${rev:0:12}\`"
           fi
           notes="$NOTES"
-          [ -z "$notes" ] && notes="Automated ${{ inputs.channel }} release of \`${repo}\`, built against plugin-toolkit from ${orca_ref}. Plugin binary + sha256 per host target."
+          [ -z "$notes" ] && notes="Automated ${CHANNEL} release of \`${repo}\`, built against plugin-toolkit from ${orca_ref}. Plugin binary + sha256 per host target."
           ls -la dist
 
           payload=$(jq -n \
             --arg tag "$tag" \
-            --arg sha "${{ github.sha }}" \
+            --arg sha "$SHA" \
             --arg name "$tag" \
             --arg body "$notes" \
-            --argjson pre ${{ needs.version.outputs.prerelease }} \
+            --argjson pre "$PRERELEASE" \
             '{tag_name:$tag, target_commitish:$sha, name:$name, body:$body, prerelease:$pre, draft:false}')
           resp=$(curl -fsSL -X POST -H "$hdr_auth" -H "$accept" -H "Content-Type: application/json" \
             "$api/repos/$repo/releases" -d "$payload" 2>/dev/null || true)

@@ -12,9 +12,11 @@ jobs:
         with:
           fetch-depth: 0        # full history so the whole PR range is scanned
       - name: Fetch shared gitleaks config
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           curl -fsSL --max-time 30 \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github.raw" \
             "https://api.github.com/repos/argyle-labs/.github/contents/gitleaks/.gitleaks.toml?ref=main" \
             -o .gitleaks.shared.toml

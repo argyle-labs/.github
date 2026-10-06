@@ -96,12 +96,16 @@ runs:
 
     - name: Add rust target
       shell: bash
-      run: rustup target add "${{ inputs.target }}"
+      env:
+        TARGET: ${{ inputs.target }}
+      run: rustup target add "$TARGET"
 
     - name: Build release binaries
       shell: bash
       env:
         RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
+        TARGET: ${{ inputs.target }}
+        BINS: ${{ inputs.bins }}
       run: |
         set -euo pipefail
         export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
@@ -113,30 +117,33 @@ runs:
         ulimit -Hn 1048576 2>/dev/null || true
         ulimit -n 1048576 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
         echo "open-files limit (soft/hard): $(ulimit -Sn)/$(ulimit -Hn)"
-        case "${{ inputs.target }}" in
+        case "$TARGET" in
           x86_64-unknown-linux-gnu) builder="cargo build" ;;
           *)                        builder="cargo zigbuild" ;;
         esac
         bin_flags=""
         while IFS= read -r b; do
           [ -n "$b" ] && bin_flags="$bin_flags --bin $b"
-        done <<< '${{ inputs.bins }}'
-        export CARGO_BUILD_TARGET="${{ inputs.target }}"
-        echo "→ $builder --release --locked --target ${{ inputs.target }}$bin_flags"
+        done <<< "$BINS"
+        export CARGO_BUILD_TARGET="$TARGET"
+        echo "→ $builder --release --locked --target ${TARGET}$bin_flags"
         # shellcheck disable=SC2086
-        $builder --release --locked --target "${{ inputs.target }}" $bin_flags
+        $builder --release --locked --target "$TARGET" $bin_flags
 
     - name: Assert binaries built
       shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        BINS: ${{ inputs.bins }}
       run: |
         set -euo pipefail
         while IFS= read -r bin; do
           [ -z "$bin" ] && continue
-          path="target/${{ inputs.target }}/release/${bin}"
+          path="target/${TARGET}/release/${bin}"
           if [ ! -f "$path" ]; then
             echo "::error::binary not found at $path"
-            ls -la "target/${{ inputs.target }}/release" || echo "  (missing)"
+            ls -la "target/${TARGET}/release" || echo "  (missing)"
             exit 1
           fi
           echo "ok: $path"
-        done <<< '${{ inputs.bins }}'
+        done <<< "$BINS"

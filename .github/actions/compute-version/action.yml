@@ -39,11 +39,13 @@ runs:
     - name: Compute
       id: compute
       shell: bash
+      env:
+        BUMP: ${{ inputs.bump }}
       run: |
         set -euo pipefail
         git fetch --tags --quiet || true
 
-        bump="${{ inputs.bump }}"
+        bump="$BUMP"
         latest_stable=$(git tag -l 'v[0-9]*' \
           | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
           | sort -V | tail -1)
