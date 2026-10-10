@@ -4,7 +4,9 @@ description: >
   (`git ls-files -s` blob ids), the own-file hashes of every workspace crate it
   depends on (normal, dev and build, transitively), and the workspace-wide
   inputs (Cargo.lock, root Cargo.toml, rust-toolchain*, .cargo/config.toml,
-  the calling workflow file, image tag, `rustc -vV`). The closure is resolved
+  the calling workflow file, this repo's actions and workflows, image tag,
+  `rustc -vV`). Pin every argyle-labs/.github action to the same ref: nested
+  actions are pulled `@main`. The closure is resolved
   with all features enabled. Feeds ci-pass-cache's batch modes.
 
 inputs:
@@ -16,11 +18,15 @@ inputs:
     description: >
       Out-of-crate inputs, one `crate: path [path...]` per line, hashed as that
       crate's own files (so its dependents inherit them). `*: path` applies to
-      every crate.
+      every crate. Literal include_str!/include_bytes!/#[folder] targets outside
+      a crate are added automatically.
     required: false
     default: ""
   workflow-file:
-    description: 'Calling workflow path, used when GITHUB_WORKFLOW_REF is unset or unresolvable.'
+    description: >
+      Calling workflow path relative to the repo root (not working-directory),
+      e.g. `.github/workflows/ci.yml`. Falls back to GITHUB_WORKFLOW_REF when
+      empty.
     required: false
     default: ""
   working-directory:

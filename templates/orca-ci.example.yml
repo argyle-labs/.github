@@ -62,9 +62,7 @@ jobs:
         uses: argyle-labs/.github/.github/actions/crate-hashes@main
         with:
           image: ci-rust:1.95.0
-          # files embeds ../../docs (rust-embed #[folder]).
-          extra-paths: |
-            files: docs
+          workflow-file: .github/workflows/ci.yml
       - name: Check pass cache per crate
         id: pass
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
@@ -144,9 +142,7 @@ jobs:
         uses: argyle-labs/.github/.github/actions/crate-hashes@main
         with:
           image: ci-rust:1.95.0
-          # files embeds ../../docs (rust-embed #[folder]).
-          extra-paths: |
-            files: docs
+          workflow-file: .github/workflows/ci.yml
       - name: Check pass cache per crate
         id: pass
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main

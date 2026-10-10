@@ -6,15 +6,23 @@
 set -uo pipefail
 PUT_BODY=""
 
-all=$(jq -c 'keys' <<< "${HASHES:-}" 2>/dev/null) || all='[]'
-[ -n "$all" ] || all='[]'
+# An empty or malformed map would otherwise run nothing. record-batch only
+# warns: the job it records already passed.
+all=$(jq -ce 'if type == "object" and length > 0 then keys else error end' <<< "${HASHES:-}" 2>/dev/null) || {
+  if [ "$MODE" = record-batch ]; then
+    echo "::warning title=ci-pass record skipped::hashes input is empty or not a non-empty JSON object"
+    exit 0
+  fi
+  echo "::error title=ci-pass cache::hashes input is empty or not a non-empty JSON object"
+  exit 1
+}
 emit() {
   echo "missing=$(jq -c . <<< "$1")" >> "$GITHUB_OUTPUT"
   echo "packages=$(jq -r 'map("-p " + .) | join(" ")' <<< "$1")" >> "$GITHUB_OUTPUT"
 }
 
-if [ -z "$ENDPOINT" ] || [ -z "$S3_ACCESS_KEY" ] || [ "$all" = '[]' ]; then
-  echo "::warning title=ci-pass cache unavailable::no endpoint/credentials/hashes; running every crate"
+if [ -z "$ENDPOINT" ] || [ -z "$S3_ACCESS_KEY" ]; then
+  echo "::warning title=ci-pass cache unavailable::no endpoint/credentials; running every crate"
   [ "$MODE" = check-batch ] && emit "$all"
   exit 0
 fi

@@ -2,8 +2,11 @@ name: Source hash
 description: >
   Hash of every tracked input that can change a Rust build or test result, from
   `git ls-files -s` blob ids (no file contents are read). CI-only and doc-only
-  changes leave it unchanged, except the calling workflow file. Keyed per job by ci-pass-cache, so the hash
-  itself is job-independent.
+  changes leave it unchanged, except the calling workflow file and this repo's
+  shared actions and workflows. Callers must pin every argyle-labs/.github
+  action to the same ref: nested actions are pulled `@main`, so only then is
+  the hashed tree the one that runs. Keyed per job by ci-pass-cache, so the hash itself is
+  job-independent.
 
 inputs:
   image:
@@ -18,7 +21,10 @@ inputs:
     required: false
     default: ""
   workflow-file:
-    description: 'Calling workflow path, used when GITHUB_WORKFLOW_REF is unset or unresolvable.'
+    description: >
+      Calling workflow path relative to the repo root (not working-directory),
+      e.g. `.github/workflows/ci.yml`. Falls back to GITHUB_WORKFLOW_REF when
+      empty.
     required: false
     default: ""
   working-directory:
@@ -43,18 +49,30 @@ runs:
         WORKFLOW_FILE: ${{ inputs.workflow-file }}
       run: |
         set -euo pipefail
-        # GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`.
-        workflow=""
-        if [ -n "${GITHUB_WORKFLOW_REF:-}" ]; then
-          workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
+        workflow=$WORKFLOW_FILE
+        # GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`, <path> relative to
+        # the repo root.
+        if [ -z "$workflow" ] && [ -n "${GITHUB_WORKFLOW_REF:-}" ]; then
+          workflow=${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY:-}/"}
           workflow=${workflow%%@*}
         fi
-        [ -n "$workflow" ] && [ -f "$workflow" ] || workflow=$WORKFLOW_FILE
-        if [ -n "$workflow" ] && git ls-files --error-unmatch -- "$workflow" >/dev/null 2>&1; then
-          EXTRA_PATHS+=$'\n'"$workflow"
-        else
-          echo "::warning title=source-hash::calling workflow file not found; its changes will not change the hash"
+        if [ -z "$workflow" ] || ! git ls-files --error-unmatch -- ":(top)$workflow" >/dev/null 2>&1; then
+          echo "::error title=source-hash::calling workflow file '$workflow' not tracked (workflow-file / GITHUB_WORKFLOW_REF)"
+          exit 1
         fi
+        extras=()
+        while IFS= read -r line; do
+          read -ra ps <<< "$line"
+          for p in "${ps[@]}"; do
+            if [ -z "$(git ls-files -- "$p")" ]; then
+              echo "::error title=source-hash::extra-paths entry '$p' matches no tracked files"
+              exit 1
+            fi
+            extras+=("$p")
+          done
+        done <<< "$EXTRA_PATHS"
+        # This repo's actions and workflows, as checked out for this action.
+        actions=$(cd "$GITHUB_ACTION_PATH/../.." && find actions workflows -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
         specs=(
           ':(glob)**/*.rs'
           ':(glob)**/Cargo.toml'
@@ -63,21 +81,66 @@ runs:
           ':(glob)**/rust-toolchain*'
           ':(glob)**/.cargo/config.toml'
           ':(glob)**/tests/**'
+          ":(top)$workflow"
+          "${extras[@]}"
         )
-        # Literal include_str!/include_bytes! targets: hash the directory each
-        # one lives in, resolved relative to the including file.
-        while IFS=: read -r file arg; do
-          [ -n "$file" ] || continue
-          path=$(sed -E 's/^include_(str|bytes)!\("([^"]+)"\)$/\2/' <<< "$arg")
-          dir=$(realpath -m --relative-to=. "$(dirname "$file")/$(dirname "$path")")
-          case "$dir" in ..*) ;; *) specs+=("$dir") ;; esac
-        done < <(git grep -oE 'include_(str|bytes)!\("[^"]+"\)' -- '*.rs' || true)
-        while IFS= read -r p; do
-          [ -n "$p" ] && specs+=("$p")
-        done <<< "$EXTRA_PATHS"
+        # Literal include_str!/include_bytes! targets resolve against the
+        # including file's dir, rust-embed #[folder] against the crate dir;
+        # hash the directory each one lives in.
+        crate_dir() {
+          local d
+          d=$(dirname "$1")
+          until [ -n "$(git ls-files -- "$d/Cargo.toml")" ] || [ "$d" = . ]; do
+            d=$(dirname "$d")
+          done
+          echo "$d"
+        }
+        embed_re='include_(str|bytes)!\("[^"]+"\)|#\[folder *= *"[^"]+"\]|include_(str|bytes)!\( *(concat!\( *)?env!'
+        while IFS= read -r hit; do
+          file=${hit%%:*}
+          line=${hit#*:}
+          line=${line#*:}
+          [[ "$line" =~ ^[[:space:]]*// ]] && continue
+          while IFS= read -r arg; do
+            if [[ "$arg" == *'env!' ]]; then
+              echo "::error title=source-hash::$file uses env!() in an include path; add an extra-paths entry instead"
+              exit 1
+            fi
+            path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
+            base=$(dirname "$file")
+            [[ "$arg" == '#'* ]] && base=$(crate_dir "$file")
+            # shellcheck disable=SC2016 # literal variable names
+            for v in '${CARGO_MANIFEST_DIR}' '$CARGO_MANIFEST_DIR'; do
+              if [[ "$path" == "$v"* ]]; then
+                path=.${path#"$v"}
+                base=$(crate_dir "$file")
+              fi
+            done
+            if [[ "$path" == *'$'* ]]; then
+              echo "::error title=source-hash::$file includes '$path' with an unresolvable variable; add an extra-paths entry instead"
+              exit 1
+            fi
+            if [[ "$arg" == '#'* ]]; then
+              dir=$(realpath -m --relative-to=. "$base/$path")
+            else
+              dir=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
+            fi
+            case "$dir" in
+              ..|../*)
+                echo "::error title=source-hash::$file includes '$path', outside working-directory; move it in or widen working-directory"
+                exit 1 ;;
+            esac
+            if [ -z "$(git ls-files -- "$dir")" ]; then
+              echo "::error title=source-hash::$file includes '$path' but '$dir' has no tracked files"
+              exit 1
+            fi
+            specs+=("$dir")
+          done < <(grep -oE "$embed_re" <<< "$line")
+        done < <(git grep -nE "$embed_re" -- '*.rs' || true)
         hash=$(
           {
             echo "image=$IMAGE"
+            echo "actions=$actions"
             rustc -vV 2>/dev/null || true
             printf '%s\n' "${specs[@]}" | sort -u | xargs -d '\n' git ls-files -s --
           } | sha256sum | cut -d' ' -f1
