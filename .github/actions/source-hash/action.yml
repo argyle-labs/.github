@@ -1,0 +1,69 @@
+name: Source hash
+description: >
+  Hash of every tracked input that can change a Rust build or test result, from
+  `git ls-files -s` blob ids (no file contents are read). CI-only and doc-only
+  changes leave it unchanged. Keyed per job by ci-pass-cache, so the hash
+  itself is job-independent.
+
+inputs:
+  image:
+    description: 'CI image reference (e.g. `ci-rust:1.95.0`); a toolchain bump changes the hash.'
+    required: false
+    default: ""
+  extra-paths:
+    description: >
+      Extra pathspecs, one per line, that feed the build or tests: frontend
+      sources, data dirs reached by include_str!/include_bytes! through a
+      non-literal path (concat!/env!), or anything else the defaults miss.
+    required: false
+    default: ""
+  working-directory:
+    required: false
+    default: "."
+
+outputs:
+  hash:
+    description: 'sha256 hex of the inputs.'
+    value: ${{ steps.hash.outputs.hash }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute source hash
+      id: hash
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IMAGE: ${{ inputs.image }}
+        EXTRA_PATHS: ${{ inputs.extra-paths }}
+      run: |
+        set -euo pipefail
+        specs=(
+          ':(glob)**/*.rs'
+          ':(glob)**/Cargo.toml'
+          ':(glob)**/Cargo.lock'
+          ':(glob)**/build.rs'
+          ':(glob)**/rust-toolchain*'
+          ':(glob)**/.cargo/config.toml'
+          ':(glob)**/tests/**'
+        )
+        # Literal include_str!/include_bytes! targets: hash the directory each
+        # one lives in, resolved relative to the including file.
+        while IFS=: read -r file arg; do
+          [ -n "$file" ] || continue
+          path=$(sed -E 's/^include_(str|bytes)!\("([^"]+)"\)$/\2/' <<< "$arg")
+          dir=$(realpath -m --relative-to=. "$(dirname "$file")/$(dirname "$path")")
+          case "$dir" in ..*) ;; *) specs+=("$dir") ;; esac
+        done < <(git grep -oE 'include_(str|bytes)!\("[^"]+"\)' -- '*.rs' || true)
+        while IFS= read -r p; do
+          [ -n "$p" ] && specs+=("$p")
+        done <<< "$EXTRA_PATHS"
+        hash=$(
+          {
+            echo "image=$IMAGE"
+            rustc -vV 2>/dev/null || true
+            printf '%s\n' "${specs[@]}" | sort -u | xargs -d '\n' git ls-files -s --
+          } | sha256sum | cut -d' ' -f1
+        )
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+        echo "source hash: $hash"

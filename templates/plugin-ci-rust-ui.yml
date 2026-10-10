@@ -9,6 +9,8 @@
 # Each job composes tool actions as steps, so each job IS one
 # check (no reusable-workflow `caller / called` duplicates). Later lint steps
 # run `if: !cancelled()` so every linter reports even when an earlier one fails.
+# `build` and `test` skip their heavy steps when the source hash already
+# passed (see the README's pass cache section); `lint` always runs.
 name: CI
 
 on:
@@ -16,6 +18,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Ignore the pass cache and run build + test in full'
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -41,7 +49,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Source hash
+        id: src
+        uses: argyle-labs/.github/.github/actions/source-hash@main
+        with:
+          image: ci-rust:1.95.0
+          extra-paths: ui
+      - name: Check pass cache
+        id: pass
+        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+        with:
+          mode: check
+          job: build
+          also-require: test
+          hash: ${{ steps.src.outputs.hash }}
+          force: ${{ inputs.force && 'true' || 'false' }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+      - name: Reuse unchanged pass
+        if: ${{ steps.pass.outputs.hit == 'true' }}
+        env:
+          PASS_SHA: ${{ steps.pass.outputs.sha }}
+        run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Set up Rust (toolchain, sccache)
+        if: ${{ steps.pass.outputs.hit != 'true' }}
         uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           wrap-cc: 'true'
@@ -53,7 +85,18 @@ jobs:
         with:
           working-directory: ui
       - name: Build test archive (cargo llvm-cov nextest-archive)
+        if: ${{ steps.pass.outputs.hit != 'true' }}
         uses: argyle-labs/.github/.github/actions/cargo-build@main
+      - name: Record pass
+        if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+        with:
+          mode: record
+          job: build
+          hash: ${{ steps.src.outputs.hash }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
       - name: CI summary
         uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}
@@ -72,7 +115,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Source hash
+        id: src
+        uses: argyle-labs/.github/.github/actions/source-hash@main
+        with:
+          image: ci-rust:1.95.0
+          extra-paths: ui
+      - name: Check pass cache
+        id: pass
+        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+        with:
+          mode: check
+          job: test
+          hash: ${{ steps.src.outputs.hash }}
+          force: ${{ inputs.force && 'true' || 'false' }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+      - name: Reuse unchanged pass
+        if: ${{ steps.pass.outputs.hit == 'true' }}
+        env:
+          PASS_SHA: ${{ steps.pass.outputs.sha }}
+        run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Set up Rust (toolchain, sccache)
+        if: ${{ steps.pass.outputs.hit != 'true' }}
         uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           wrap-cc: 'true'
@@ -80,20 +146,31 @@ jobs:
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
       - name: Test + coverage (cargo nextest)
+        if: ${{ steps.pass.outputs.hit != 'true' }}
         uses: argyle-labs/.github/.github/actions/cargo-test@main
         with:
           artifacts: vite-dist:ui/dist
       - name: Vitest
         uses: argyle-labs/.github/.github/actions/vitest@main
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' }}
         with:
           working-directory: ui
       - name: svelte-check
         uses: argyle-labs/.github/.github/actions/svelte-check@main
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' }}
         with:
           working-directory: ui
           install: 'false'
+      - name: Record pass
+        if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+        with:
+          mode: record
+          job: test
+          hash: ${{ steps.src.outputs.hash }}
+          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
       - name: CI summary
         uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}

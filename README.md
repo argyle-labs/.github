@@ -194,6 +194,18 @@ Two compiles duplicate `build`'s work: doctests, which nextest cannot run so the
 
 Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every tool step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats). Every step has a `name:` naming the tool and what it does (e.g. `Clippy`, `Test + coverage (cargo nextest)`), so the run log does not show raw `uses:` paths; this holds for steps inside each composite `action.yml` too.
 
+### Pass cache: skipping unchanged source
+
+CI-only and doc-only changes do not rebuild or retest. `build` and `test` each run `source-hash` after checkout, then `ci-pass-cache` in `check` mode; on a hit, a `Reuse unchanged pass` step writes "Unchanged source — reusing pass from <sha>" to the log and step summary, and every heavy step is skipped (`if: steps.pass.outputs.hit != 'true'`). On success a `Record pass` step writes the marker. `lint` is unaffected and always runs.
+
+The hash covers `git ls-files -s` blob ids (no file contents are read) of: tracked `*.rs`, every `Cargo.toml` and `Cargo.lock`, `build.rs`, `rust-toolchain*`, `.cargo/config.toml`, everything under any `tests/` directory, the directory of each literal `include_str!`/`include_bytes!` target, plus the `image` input (the ci-rust tag) and `rustc -vV`. Paths the scan cannot see (non-literal include paths, frontend sources, fixtures elsewhere) go in `extra-paths`: the UI template passes `ui`, orca passes `peacock`. A change to the workflow file itself does NOT change the hash; force a run after changing build flags.
+
+Markers live at `s3://<sccache bucket>/ci-pass/<repo>/<job>/<hash>` on the sccache MinIO (same endpoint and keys as `rust-setup`), written with `curl --aws-sigv4`; the body is the commit sha that passed.
+
+Rule: `test` skips when its own marker exists. `build` skips only when BOTH the `build` and `test` markers exist, so whenever `test` misses, `build` has run and uploaded the nextest archive it needs. UI repos keep `vite-build` running on a hit because `lint` consumes `vite-dist`.
+
+Force a full run with `workflow_dispatch` and `force: true` (the templates declare the input). Any cache backend failure (no endpoint/keys, network error, non-200/404 reply) is a miss with a warning, so a MinIO outage means a full run, never a false pass; a failed record only warns.
+
 ### Adding a tool step
 
 Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` to the job of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
@@ -225,7 +237,7 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 
 `name-suffix` keeps artifact names unique when a repo builds more than once per run; cargo-build and its cargo-test take the same suffix.
 
-Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats).
+Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash` and `ci-pass-cache` (the pass cache above).
 
 ### Deprecated: reusable-workflow blocks
 
