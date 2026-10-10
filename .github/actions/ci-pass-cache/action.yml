@@ -5,17 +5,28 @@ description: >
   curl). `check` reports a hit only when every required marker exists; any
   backend error is a miss with a warning, never a false hit. `record` writes
   the marker (body = commit sha); call it only after the job succeeded.
+  `check-batch` / `record-batch` do the same per crate, at
+  s3://<bucket>/ci-pass/<repo>/<job>/crate/<name>/<hash>, from crate-hashes.
 
 inputs:
   mode:
-    description: '`check` or `record`.'
+    description: '`check`, `record`, `check-batch` or `record-batch`.'
     required: true
   job:
     description: 'Job kind the marker belongs to (e.g. `build`, `test`).'
     required: true
   hash:
-    description: 'Output of source-hash.'
-    required: true
+    description: 'check/record: output of source-hash.'
+    required: false
+    default: ""
+  hashes:
+    description: 'check-batch/record-batch: output of crate-hashes (JSON crate -> hash).'
+    required: false
+    default: ""
+  crates:
+    description: 'record-batch: JSON list of crates that ran and passed.'
+    required: false
+    default: "[]"
   also-require:
     description: 'check: other job kinds (space-separated) whose markers must ALSO exist for a hit.'
     required: false
@@ -45,12 +56,19 @@ outputs:
   sha:
     description: 'Commit sha stored in this job''s marker on a hit.'
     value: ${{ steps.run.outputs.sha }}
+  missing:
+    description: 'check-batch: JSON list of crates needing work (all of them on any backend failure).'
+    value: ${{ steps.batch.outputs.missing }}
+  packages:
+    description: 'check-batch: the same crates as `-p a -p b`.'
+    value: ${{ steps.batch.outputs.packages }}
 
 runs:
   using: composite
   steps:
     - name: CI pass cache (${{ inputs.mode }})
       id: run
+      if: ${{ inputs.mode == 'check' || inputs.mode == 'record' }}
       shell: bash
       env:
         MODE: ${{ inputs.mode }}
@@ -100,3 +118,21 @@ runs:
         echo "hit=true" >> "$GITHUB_OUTPUT"
         echo "sha=$sha" >> "$GITHUB_OUTPUT"
         echo "pass cache hit for $JOB${ALSO:+ (+ $ALSO)} at $HASH from ${sha:-unknown}"
+
+    - name: CI pass cache per crate (${{ inputs.mode }})
+      id: batch
+      if: ${{ inputs.mode == 'check-batch' || inputs.mode == 'record-batch' }}
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        JOB: ${{ inputs.job }}
+        HASHES: ${{ inputs.hashes }}
+        CRATES: ${{ inputs.crates }}
+        ALSO: ${{ inputs.also-require }}
+        FORCE: ${{ inputs.force }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        BUCKET: ${{ inputs.bucket }}
+        S3_ACCESS_KEY: ${{ inputs.access-key }}
+        S3_SECRET_KEY: ${{ inputs.secret-key }}
+      run: |
+        "$GITHUB_ACTION_PATH/batch.sh"
