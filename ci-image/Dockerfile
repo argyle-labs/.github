@@ -79,8 +79,11 @@ RUN set -eux; \
 RUN set -eux; \
     curl -fsSL "https://get.nexte.st/latest/linux" | tar -xz -C /usr/local/cargo/bin; \
     cargo-nextest --version
+ARG CARGO_HACK_VERSION=0.6.45
 RUN set -eux; \
-    cargo install --locked cargo-zigbuild cargo-llvm-cov
+    cargo install --locked cargo-zigbuild cargo-llvm-cov; \
+    cargo install --locked "cargo-hack@${CARGO_HACK_VERSION}"; \
+    cargo hack --version
 
 # Warm CARGO_HOME: the sparse index entries + .crate files for the union of
 # plugin dependencies, and the orca git db/checkout at ORCA_TAG. A job then
