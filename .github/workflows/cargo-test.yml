@@ -44,7 +44,7 @@ on:
         default: ''
       args:
         description: >-
-          Cargo arguments selecting packages/features.
+          Cargo arguments selecting packages/features. Split on whitespace with no quoting; pass features comma-separated.
         required: false
         type: string
         default: '--workspace --all-features'

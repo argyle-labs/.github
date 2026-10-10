@@ -25,7 +25,7 @@ on:
         default: ''
       command:
         description: >-
-          Command to run (an npm script works too, e.g. `npm run check`).
+          Command to run (an npm script works too, e.g. `npm run check`). Evaluated by bash: trusted input only, from the calling repo's own workflow file, never event data.
         required: false
         type: string
         default: 'npx svelte-check'

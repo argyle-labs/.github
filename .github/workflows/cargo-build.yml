@@ -45,7 +45,7 @@ on:
         default: ''
       args:
         description: >-
-          `cargo nextest archive` arguments selecting packages/features.
+          `cargo nextest archive` arguments selecting packages/features. Split on whitespace with no quoting; pass features comma-separated.
         required: false
         type: string
         default: '--workspace --all-features'

@@ -23,8 +23,13 @@ runs:
         set -euo pipefail
         i=0
         while IFS= read -r line; do
-          line=$(xargs <<< "$line")
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
           [ -n "$line" ] || continue
+          case "$line" in
+            ?*:?*) ;;
+            *) echo "::error title=fetch-artifacts::expected \`name:path\`, got '$line'"; exit 1 ;;
+          esac
           [ "$i" -lt 4 ] || { echo "::error title=fetch-artifacts::at most 4 artifacts per block"; exit 1; }
           { echo "name$i=${line%%:*}"; echo "path$i=${line#*:}"; } >> "$GITHUB_OUTPUT"
           i=$((i + 1))

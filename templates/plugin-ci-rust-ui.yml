@@ -5,7 +5,8 @@
 
 # Required checks are exactly `build`, `test` and `lint`: plain aggregate jobs
 # (stable check names, unlike the `caller / called` names of reusable calls)
-# that fail closed on anything but success/skipped in their needs. Tool blocks
+# that fail closed on anything but success in their needs (a skipped job
+# counts as a failure, so a failed build turns test and lint red too). Tool blocks
 # stay separate jobs so each shows its own result. To add a tool, add its block
 # job and list it in the matching aggregate's `needs:`; ci-needs-check enforces
 # that. `coverage` is report-only and in no aggregate. Every block after
@@ -116,30 +117,39 @@ jobs:
     needs: [vite-build, cargo-build]
     runs-on: ubuntu-latest
     steps:
-      - env:
+      - shell: bash
+        env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
+          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
           echo "$NEEDS"
-          jq -e 'length > 0 and all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
 
   test:
     if: always()
     needs: [cargo-test, vitest, svelte-check]
     runs-on: ubuntu-latest
     steps:
-      - env:
+      - shell: bash
+        env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
+          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
           echo "$NEEDS"
-          jq -e 'length > 0 and all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
 
   lint:
     if: always()
     needs: [ci-needs-check, cargo-fmt, cargo-clippy, cargo-lock-check]
     runs-on: ubuntu-latest
     steps:
-      - env:
+      - shell: bash
+        env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
+          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
           echo "$NEEDS"
-          jq -e 'length > 0 and all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"

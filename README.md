@@ -174,13 +174,13 @@ Every repo exposes exactly three required checks, each a plain aggregate job (st
 - `test`: cargo-test, vitest, svelte-check.
 - `lint`: cargo-fmt, cargo-clippy, cargo-lock-check, ci-needs-check, plus eslint / prettier / tsc / shellcheck / actionlint where used.
 
-Aggregates run `if: always()` and fail closed: `toJSON(needs)` must be non-empty with every result `success` or `skipped`. `coverage` is its own job, report-only, in no aggregate and never required. Adding a tool means adding its block job and listing it in the right aggregate's `needs:`; `ci-needs-check` fails `lint` if any job is in zero or several aggregates. Every block runs after `cargo-build` (`needs:`), which for fmt and lock-check is ordering only.
+Aggregates run `if: always()` and fail closed: `toJSON(needs)` must be non-empty with every result `success`; `skipped` counts as a failure, so a failed build also turns `test` and `lint` red. `coverage` is its own job, report-only, in no aggregate and never required. Adding a tool means adding its block job and listing it in the right aggregate's `needs:`; `ci-needs-check` fails `lint` if any job is in zero or several aggregates. Every block runs after `cargo-build` (`needs:`), which for fmt and lock-check is ordering only.
 
 ### Calling a block
 
 `uses: argyle-labs/.github/.github/workflows/<block>.yml@main`, passing secrets explicitly (not `secrets: inherit`): `CI_REGISTRY_USER` and `CI_REGISTRY_TOKEN` (job image pull) on every block, plus `SCCACHE_S3_ACCESS_KEY` and `SCCACHE_S3_SECRET_KEY` on cargo blocks that compile.
 
-Common inputs: `runs-on` (default `ubuntu-latest`; `ci-large` for heavy crates) and `working-directory` (default `.`). Blocks that compile or build take `artifacts`: lines of `name:path` (at most 4) downloaded by name before the step runs. Cargo blocks take `build-jobs`, `debuginfo` (default `'0'`), `args` and `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data). Node blocks take `command` to override the tool invocation (e.g. an npm script).
+Common inputs: `runs-on` (default `ubuntu-latest`; `ci-large` for heavy crates) and `working-directory` (default `.`). Blocks that compile or build take `artifacts`: lines of `name:path` (at most 4) downloaded by name before the step runs. Cargo blocks take `build-jobs`, `debuginfo` (default `'0'`), `args` (split on whitespace, no quoting: pass features comma-separated, e.g. `--features a,b`) and `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data). Node blocks take `command` to override the tool invocation (e.g. an npm script); it is `eval`ed, so it is trusted input only, from the repo's own workflow file.
 
 | Block | Runs | Extra inputs | Outputs |
 |---|---|---|---|
