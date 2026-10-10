@@ -192,11 +192,11 @@ Every repo has exactly three required checks, which are plain jobs named `build`
 
 Two compiles duplicate `build`'s work: doctests, which nextest cannot run so they build uninstrumented outside the archive, and clippy's check build, whose check-mode output cannot reuse a plain build's `target/`. Both rely on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. A repo that sets `coverage: 'false'` must set it on both `cargo-build` and `cargo-test`.
 
-Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every tool step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats).
+Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every tool step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats). Every step has a `name:` naming the tool and what it does (e.g. `Clippy`, `Test + coverage (cargo nextest)`), so the run log does not show raw `uses:` paths; this holds for steps inside each composite `action.yml` too.
 
 ### Adding a tool step
 
-Add `- uses: argyle-labs/.github/.github/actions/<tool>@main` to the job of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
+Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` to the job of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
 
 ### Job setup: `rust-setup`
 

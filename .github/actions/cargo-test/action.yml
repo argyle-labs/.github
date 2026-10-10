@@ -39,16 +39,19 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+    - name: Fetch artifacts
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
       with:
         artifacts: ${{ inputs.artifacts }}
 
-    - uses: actions/download-artifact@v3
+    - name: Download test archive
+      uses: actions/download-artifact@v3
       with:
         name: nextest-archive${{ inputs.name-suffix }}
         path: ${{ inputs.working-directory }}
 
-    - uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@main
+    - name: Coverage report (cargo llvm-cov)
+      uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@main
       if: ${{ inputs.coverage == 'true' }}
       with:
         working-directory: ${{ inputs.working-directory }}

@@ -52,7 +52,8 @@ runs:
           echo '```'
         } | tee -a "$GITHUB_STEP_SUMMARY" || echo "::warning title=coverage::coverage summary failed; coverage is report-only"
 
-    - uses: actions/upload-artifact@v3
+    - name: Upload lcov
+      uses: actions/upload-artifact@v3
       if: ${{ !cancelled() && hashFiles(format('{0}/lcov.info', inputs.working-directory)) != '' }}
       with:
         name: lcov${{ inputs.name-suffix }}
