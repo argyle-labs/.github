@@ -18,7 +18,10 @@ name: Mirror sync (Gitea ⇄ GitHub)
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # every 15 min
+    # Nightly: GitHub is only the public release channel, so a day of lag is
+    # fine and the 15-minute cadence spent ~96 runner slots a day. Run it by
+    # hand (workflow_dispatch) right after cutting a release.
+    - cron: "0 8 * * *"      # 01:00 MST (UTC-7); 02:00 in MDT
   workflow_dispatch:
     inputs:
       only_repo:
