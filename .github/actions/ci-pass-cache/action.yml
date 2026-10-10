@@ -1,0 +1,102 @@
+name: CI pass cache
+description: >
+  Records and looks up "this job passed for this source hash" markers at
+  s3://<bucket>/ci-pass/<repo>/<job>/<hash> on the sccache MinIO (SigV4 via
+  curl). `check` reports a hit only when every required marker exists; any
+  backend error is a miss with a warning, never a false hit. `record` writes
+  the marker (body = commit sha); call it only after the job succeeded.
+
+inputs:
+  mode:
+    description: '`check` or `record`.'
+    required: true
+  job:
+    description: 'Job kind the marker belongs to (e.g. `build`, `test`).'
+    required: true
+  hash:
+    description: 'Output of source-hash.'
+    required: true
+  also-require:
+    description: 'check: other job kinds (space-separated) whose markers must ALSO exist for a hit.'
+    required: false
+    default: ""
+  force:
+    description: 'check: `true` always reports a miss (forced full run).'
+    required: false
+    default: "false"
+  endpoint:
+    description: 'MinIO host:port (vars.SCCACHE_ENDPOINT); http:// is assumed when no scheme is given.'
+    required: false
+    default: ""
+  bucket:
+    required: false
+    default: "sccache"
+  access-key:
+    required: false
+    default: ""
+  secret-key:
+    required: false
+    default: ""
+
+outputs:
+  hit:
+    description: '`true` when every required marker exists.'
+    value: ${{ steps.run.outputs.hit }}
+  sha:
+    description: 'Commit sha stored in this job''s marker on a hit.'
+    value: ${{ steps.run.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: CI pass cache (${{ inputs.mode }})
+      id: run
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        JOB: ${{ inputs.job }}
+        HASH: ${{ inputs.hash }}
+        ALSO: ${{ inputs.also-require }}
+        FORCE: ${{ inputs.force }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        BUCKET: ${{ inputs.bucket }}
+        S3_ACCESS_KEY: ${{ inputs.access-key }}
+        S3_SECRET_KEY: ${{ inputs.secret-key }}
+      run: |
+        set -uo pipefail
+        echo "hit=false" >> "$GITHUB_OUTPUT"
+        if [ -z "$ENDPOINT" ] || [ -z "$S3_ACCESS_KEY" ] || [ -z "$HASH" ]; then
+          echo "::warning title=ci-pass cache unavailable::no endpoint/credentials/hash; running in full"
+          exit 0
+        fi
+        case "$ENDPOINT" in *://*) base="$ENDPOINT" ;; *) base="http://$ENDPOINT" ;; esac
+        url() { echo "$base/$BUCKET/ci-pass/$GITHUB_REPOSITORY/$1/$HASH"; }
+        s3() { curl -sS --max-time 20 --aws-sigv4 "aws:amz:us-east-1:s3" --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" "$@"; }
+        body="${RUNNER_TEMP:-/tmp}/ci-pass-$JOB"
+
+        if [ "$MODE" = record ]; then
+          code=$(s3 -o /dev/null -w '%{http_code}' -X PUT --data-binary "$GITHUB_SHA" "$(url "$JOB")") || code=err
+          if [ "$code" = 200 ]; then
+            echo "recorded $JOB pass for $HASH"
+          else
+            echo "::warning title=ci-pass record failed::$JOB marker not written (HTTP $code); the next run with this source runs in full"
+          fi
+          exit 0
+        fi
+
+        if [ "$FORCE" = true ]; then
+          echo "forced full run"
+          exit 0
+        fi
+        sha=""
+        for j in $JOB $ALSO; do
+          code=$(s3 -o "$body" -w '%{http_code}' "$(url "$j")") || code=err
+          case "$code" in
+            200) [ "$j" = "$JOB" ] && sha=$(head -c 64 "$body" | tr -cd '0-9a-f') ;;
+            404) echo "no $j pass for $HASH"; exit 0 ;;
+            *) echo "::warning title=ci-pass cache error::$j lookup failed (HTTP $code); running in full"; exit 0 ;;
+          esac
+        done
+        echo "hit=true" >> "$GITHUB_OUTPUT"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        echo "pass cache hit for $JOB${ALSO:+ (+ $ALSO)} at $HASH from ${sha:-unknown}"
