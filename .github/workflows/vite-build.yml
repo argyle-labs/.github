@@ -1,0 +1,99 @@
+name: vite build
+
+# `vite build`, uploading the output dir for later jobs (e.g. a crate that
+# embeds it).
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label; a crate over the default runners' memory cap can request `ci-large`.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: >-
+          Directory the tool runs in.
+        required: false
+        type: string
+        default: '.'
+      artifacts:
+        description: >-
+          Lines of `name:path`: artifacts from earlier jobs placed before the step runs (e.g. `vite-dist:ui/dist`).
+        required: false
+        type: string
+        default: ''
+      command:
+        description: >-
+          Command to run (an npm script works too, e.g. `npm run build`).
+        required: false
+        type: string
+        default: 'npx vite build'
+      dir:
+        description: >-
+          Build output dir, relative to working-directory.
+        required: false
+        type: string
+        default: 'dist'
+      artifact-name:
+        description: >-
+          Artifact name for the output dir.
+        required: false
+        type: string
+        default: 'vite-dist'
+    secrets:
+      CI_REGISTRY_USER:
+        required: false
+      CI_REGISTRY_TOKEN:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # CI-only: link the image's system OpenSSL instead of compiling openssl-src.
+  # Release builds do not set this, so shipped binaries keep vendoring it.
+  OPENSSL_NO_VENDOR: "1"
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runs-on }}
+    # The ci-rust image bakes in the toolchain, sccache and Node (act needs node
+    # in the job container for JS actions). Its tag tracks
+    # orca/rust-toolchain.toml; bump both together.
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    # Gitea runs `run:` in a custom container with sh (dash); force bash.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+        with:
+          artifacts: ${{ inputs.artifacts }}
+
+      - uses: argyle-labs/.github/.github/actions/node-install@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: vite build
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: |
+          export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          eval "$COMMAND"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/${{ inputs.dir }}
+          retention-days: 1
+
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}

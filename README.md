@@ -161,3 +161,47 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 ## Developing a plugin
 
 Each plugin is its own repo: an out-of-process subprocess whose only orca dependency is `plugin-toolkit`, declaring its index metadata in `Cargo.toml` (`description` + `[package.metadata.orca].category`). See the [orca plugin authoring guide](https://github.com/argyle-labs/orca/blob/main/docs/plugin-authoring.md), and [docker](https://github.com/argyle-labs/docker) or [unraid](https://github.com/argyle-labs/unraid) as worked references.
+
+## CI building blocks
+
+Each repo writes its own `.github/workflows/ci.yml` that calls single-purpose reusable workflows here, one per tool. CI is flat: **repo → block, at most one level**. Blocks never call other reusable workflows; they share code only through composite actions. Start from [`templates/plugin-ci-rust.yml`](templates/plugin-ci-rust.yml) (Rust only) or [`templates/plugin-ci-rust-ui.yml`](templates/plugin-ci-rust-ui.yml) (crate embedding a Vite build); [`templates/orca-ci.example.yml`](templates/orca-ci.example.yml) shows a scoped workspace plus an npm workspace. The old monolithic [`plugin-ci.yml`](.github/workflows/plugin-ci.yml) stays untouched until every repo has migrated, then is deleted.
+
+### Required checks: `build`, `test`, `lint`
+
+Every repo exposes exactly three required checks, each a plain aggregate job (stable check name) over separate tool-block jobs:
+
+- `build`: compile jobs (cargo-build, vite-build).
+- `test`: cargo-test, vitest, svelte-check.
+- `lint`: cargo-fmt, cargo-clippy, cargo-lock-check, ci-needs-check, plus eslint / prettier / tsc / shellcheck / actionlint where used.
+
+Aggregates run `if: always()` and fail closed: `toJSON(needs)` must be non-empty with every result `success` or `skipped`. `coverage` is its own job, report-only, in no aggregate and never required. Adding a tool means adding its block job and listing it in the right aggregate's `needs:`; `ci-needs-check` fails `lint` if any job is in zero or several aggregates. Every block runs after `cargo-build` (`needs:`), which for fmt and lock-check is ordering only.
+
+### Calling a block
+
+`uses: argyle-labs/.github/.github/workflows/<block>.yml@main`, passing secrets explicitly (not `secrets: inherit`): `CI_REGISTRY_USER` and `CI_REGISTRY_TOKEN` (job image pull) on every block, plus `SCCACHE_S3_ACCESS_KEY` and `SCCACHE_S3_SECRET_KEY` on cargo blocks that compile.
+
+Common inputs: `runs-on` (default `ubuntu-latest`; `ci-large` for heavy crates) and `working-directory` (default `.`). Blocks that compile or build take `artifacts`: lines of `name:path` (at most 4) downloaded by name before the step runs. Cargo blocks take `build-jobs`, `debuginfo` (default `'0'`), `args` and `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data). Node blocks take `command` to override the tool invocation (e.g. an npm script).
+
+| Block | Runs | Extra inputs | Outputs |
+|---|---|---|---|
+| `cargo-build` | `cargo nextest archive` (the build: test binaries, compiled once) | `args`, `name-suffix` | artifact `nextest-archive<name-suffix>` |
+| `cargo-test` | the archive via `cargo nextest run`, then doctests (sccache-backed compile) | `args`, `nextest-args`, `doctests`, `name-suffix` | |
+| `cargo-clippy` | `cargo clippy -- -D warnings` (also compiles bins/examples) | `args` | |
+| `cargo-fmt` | `cargo fmt --all --check` | | |
+| `cargo-lock-check` | Cargo.lock drift (path-patch entries, out of sync) | `mode`: `enforce` \| `warn` | |
+| `cargo-llvm-cov` | `cargo llvm-cov nextest`, report-only (failure only warns) | `args`, `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
+| `vite-build` | `npx vite build` | `dir` (default `dist`), `artifact-name` (default `vite-dist`) | artifact of `dir` |
+| `svelte-check` | `npx svelte-check` (type check) | | |
+| `tsc` | `npx tsc --noEmit` (type check) | | |
+| `vitest` | `npx vitest run` | | |
+| `eslint` | `npx eslint .` (lint) | | |
+| `prettier` | `npx prettier --check .` (format) | | |
+| `shellcheck` | shellcheck over tracked `*.sh` | `files` | |
+| `actionlint` | actionlint over the repo's workflows | `version` | |
+| `ci-needs-check` | the `build`/`test`/`lint` needs contract above | `files`, `exclude` (default `coverage`) | |
+
+`name-suffix` keeps artifact names unique when a repo calls a block more than once per run (orca: coverage per package group); cargo-build and its cargo-test take the same suffix.
+
+Clippy and coverage cannot reuse cargo-build's `target/` (check-mode and instrumented builds differ), so they rely on the shared sccache; cargo-test reuses the build exactly through the nextest archive.
+
+Composite actions under `.github/actions/`: `rust-setup` (sccache, compile-memory knobs, extra env, local-dev patch removal), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats).

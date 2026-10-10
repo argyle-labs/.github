@@ -1,0 +1,136 @@
+name: cargo llvm-cov
+
+# Report-only coverage via `cargo llvm-cov nextest`: lcov artifact plus a
+# summary in the step summary. A coverage failure only warns; setup failures
+# still fail the job. Instrumented builds share nothing with a plain target/,
+# so this leans on the shared sccache.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label; a crate over the default runners' memory cap can request `ci-large`.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: >-
+          Directory the tool runs in.
+        required: false
+        type: string
+        default: '.'
+      artifacts:
+        description: >-
+          Lines of `name:path`: artifacts from earlier jobs placed before the step runs (e.g. `vite-dist:ui/dist`).
+        required: false
+        type: string
+        default: ''
+      build-jobs:
+        description: >-
+          CARGO_BUILD_JOBS. Empty keeps cargo default parallelism.
+        required: false
+        type: string
+        default: ''
+      debuginfo:
+        description: >-
+          CARGO_PROFILE_{DEV,TEST}_DEBUG. '0' (default) drops debuginfo to cut compile memory; empty keeps the profile default.
+        required: false
+        type: string
+        default: '0'
+      env:
+        description: >-
+          Extra KEY=VALUE lines exported for the job.
+        required: false
+        type: string
+        default: ''
+      args:
+        description: >-
+          Cargo arguments selecting packages/features.
+        required: false
+        type: string
+        default: '--workspace --all-features'
+      name-suffix:
+        description: >-
+          Appended to the `lcov` artifact name; must be unique per call when a
+          repo runs coverage more than once (e.g. per package group).
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CI_REGISTRY_USER:
+        required: false
+      CI_REGISTRY_TOKEN:
+        required: false
+      SCCACHE_S3_ACCESS_KEY:
+        required: false
+      SCCACHE_S3_SECRET_KEY:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # CI-only: link the image's system OpenSSL instead of compiling openssl-src.
+  # Release builds do not set this, so shipped binaries keep vendoring it.
+  OPENSSL_NO_VENDOR: "1"
+
+jobs:
+  coverage:
+    runs-on: ${{ inputs.runs-on }}
+    # The ci-rust image bakes in the toolchain, sccache and Node (act needs node
+    # in the job container for JS actions). Its tag tracks
+    # orca/rust-toolchain.toml; bump both together.
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    # Gitea runs `run:` in a custom container with sh (dash); force bash.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+        with:
+          artifacts: ${{ inputs.artifacts }}
+
+      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          build-jobs: ${{ inputs.build-jobs }}
+          debuginfo: ${{ inputs.debuginfo }}
+          env: ${{ inputs.env }}
+          wrap-cc: 'true'
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+
+      - name: Coverage
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          ARGS: ${{ inputs.args }}
+        run: |
+          export t0=$SECONDS; trap 'echo "coverage|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          read -ra args <<< "$ARGS"
+          if ! cargo llvm-cov nextest --locked "${args[@]}" --lcov --output-path lcov.info; then
+            echo "::warning title=coverage::cargo llvm-cov nextest failed; coverage is report-only"
+            exit 0
+          fi
+          {
+            echo "### Coverage"
+            echo '```'
+            cargo llvm-cov report --summary-only
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v3
+        if: ${{ hashFiles(format('{0}/lcov.info', inputs.working-directory)) != '' }}
+        with:
+          name: lcov${{ inputs.name-suffix }}
+          path: ${{ inputs.working-directory }}/lcov.info
+          retention-days: 7
+
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}

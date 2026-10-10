@@ -1,0 +1,52 @@
+name: Fetch artifacts
+description: >
+  Download named artifacts uploaded by earlier jobs of this run, each to its
+  own path. Generic handoff between composed CI blocks.
+
+inputs:
+  artifacts:
+    description: 'Lines of `name:path` (path relative to the workspace). Empty is a no-op.'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Composite steps cannot loop over `uses:`, so up to 4 entries are mapped
+    # onto fixed download-artifact slots; more fails loudly.
+    - id: parse
+      if: ${{ inputs.artifacts != '' }}
+      shell: bash
+      env:
+        ARTIFACTS: ${{ inputs.artifacts }}
+      run: |
+        set -euo pipefail
+        i=0
+        while IFS= read -r line; do
+          line=$(xargs <<< "$line")
+          [ -n "$line" ] || continue
+          [ "$i" -lt 4 ] || { echo "::error title=fetch-artifacts::at most 4 artifacts per block"; exit 1; }
+          { echo "name$i=${line%%:*}"; echo "path$i=${line#*:}"; } >> "$GITHUB_OUTPUT"
+          i=$((i + 1))
+        done <<< "$ARTIFACTS"
+
+    - if: ${{ steps.parse.outputs.name0 != '' }}
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ steps.parse.outputs.name0 }}
+        path: ${{ steps.parse.outputs.path0 }}
+    - if: ${{ steps.parse.outputs.name1 != '' }}
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ steps.parse.outputs.name1 }}
+        path: ${{ steps.parse.outputs.path1 }}
+    - if: ${{ steps.parse.outputs.name2 != '' }}
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ steps.parse.outputs.name2 }}
+        path: ${{ steps.parse.outputs.path2 }}
+    - if: ${{ steps.parse.outputs.name3 != '' }}
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ steps.parse.outputs.name3 }}
+        path: ${{ steps.parse.outputs.path3 }}
