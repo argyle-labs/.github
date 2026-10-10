@@ -64,22 +64,15 @@ on:
       image_name:
         description: >-
           Container image to promote, e.g. argyle-labs/<repo>. Empty = no image.
-          CI's image job must have pushed :src-<hash> for the release commit.
+          The Image workflow must push :tree-<sha> for the release commit.
         required: false
         type: string
         default: ""
-      image_file:
-        description: "Dockerfile path; must match IMAGE_FILE in the repo's ci.yml."
+      image_wait_minutes:
+        description: "Minutes to wait for :tree-<sha> of the release commit before failing."
         required: false
-        type: string
-        default: Dockerfile
-      image_extra_paths:
-        description: >-
-          Extra source-hash pathspecs, one per line, matching the CI image job's
-          (e.g. `ui` for UI plugins), so the recomputed hash finds the CI tag.
-        required: false
-        type: string
-        default: ""
+        type: number
+        default: 15
 
 jobs:
   # ── Compute the version/tag once, shared by every build job + the release. ──
@@ -390,37 +383,6 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
-  # ── Retag CI's :src-<hash> image to <version> and the channel tag (`latest`
-  #    for stable). Never builds: a missing source image fails the release. ──
-  image:
-    needs: [version]
-    if: ${{ inputs.image_name != '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Source hash
-        id: src
-        uses: argyle-labs/.github/.github/actions/source-hash@main
-        with:
-          image: docker
-          workflow-file: .github/workflows/ci.yml
-          extra-paths: |
-            ${{ inputs.image_file }}
-            ${{ inputs.image_extra_paths }}
-      - name: Promote image
-        uses: argyle-labs/.github/.github/actions/image-promote@main
-        with:
-          name: ${{ inputs.image_name }}
-          hash: ${{ steps.src.outputs.hash }}
-          tags: |
-            ${{ needs.version.outputs.version }}
-            ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
-          registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
-          registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
-          username: ${{ secrets.CI_REGISTRY_USER }}
-          password: ${{ secrets.CI_REGISTRY_TOKEN }}
-
   # ── Gather every requested target's artifacts and publish one (pre)release. ──
   release:
     needs:
@@ -432,7 +394,6 @@ jobs:
       - build-aarch64-linux-musl
       - build-aarch64-darwin
       - build-x86_64-darwin
-      - image
     if: ${{ always() && needs.version.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -450,7 +411,6 @@ jobs:
           R_MUSL_ARM: ${{ needs.build-aarch64-linux-musl.result }}
           R_DARWIN_ARM: ${{ needs.build-aarch64-darwin.result }}
           R_DARWIN_X86: ${{ needs.build-x86_64-darwin.result }}
-          R_IMAGE: ${{ needs.image.result }}
         run: |
           set -euo pipefail
           fail=0
@@ -461,15 +421,15 @@ jobs:
             "musl-x86:${R_MUSL_X86}" \
             "musl-arm:${R_MUSL_ARM}" \
             "darwin-arm:${R_DARWIN_ARM}" \
-            "darwin-x86:${R_DARWIN_X86}" \
-            "image:${R_IMAGE}"; do
+            "darwin-x86:${R_DARWIN_X86}"; do
             name=${r%%:*}; res=${r#*:}
             echo "  $name = $res"
             case "$res" in success|skipped) ;; *) echo "::error::$name = $res"; fail=1 ;; esac
           done
           exit $fail
 
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Download all target artifacts
         uses: actions/download-artifact@v4
@@ -526,6 +486,22 @@ jobs:
             [ ${#bins[@]} -gt 0 ] || { echo "::error::no binary for requested target $t"; bad=1; }
           done
           [ "$bad" = 0 ] || exit 1
+
+      # Runs after every build passed, before publishing: retags the Image
+      # workflow's :tree-<sha> to <version> and the channel tag. Never builds.
+      - name: Promote image
+        if: ${{ inputs.image_name != '' }}
+        uses: argyle-labs/.github/.github/actions/image-promote@main
+        with:
+          name: ${{ inputs.image_name }}
+          tags: |
+            ${{ needs.version.outputs.version }}
+            ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+          wait-minutes: ${{ inputs.image_wait_minutes }}
+          registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
+          registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
+          username: ${{ secrets.CI_REGISTRY_USER }}
+          password: ${{ secrets.CI_REGISTRY_TOKEN }}
 
       - name: Create Gitea Release (pipeline-tagged)
         # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]]).

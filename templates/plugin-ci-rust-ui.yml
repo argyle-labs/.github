@@ -213,47 +213,24 @@ jobs:
         uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}
 
-  # Optional, not a required check: builds the repo's container image and pushes
-  # it as :src-<hash> for plugin-release to retag. Runs on the host (the ci-rust
-  # container has no docker) and does nothing without a Dockerfile at the repo
-  # root; set IMAGE_FILE for another path. Keep the source-hash inputs in step
-  # with plugin-release's image_extra_paths so release finds the same tag.
-  image:
-    needs: build
-    runs-on: ubuntu-latest
-    env:
-      IMAGE_FILE: Dockerfile
-      IMAGE_NAME: argyle-labs/${{ github.event.repository.name }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Detect Dockerfile
-        id: detect
-        run: |
-          if [ -f "$IMAGE_FILE" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "No $IMAGE_FILE — no image to build"
-          fi
-      - name: Source hash
-        id: src
-        if: ${{ steps.detect.outputs.present == 'true' }}
-        uses: argyle-labs/.github/.github/actions/source-hash@main
-        with:
-          image: docker
-          workflow-file: .github/workflows/ci.yml
-          extra-paths: |
-            ${{ env.IMAGE_FILE }}
-            ui
-      - name: Build and push image
-        if: ${{ steps.detect.outputs.present == 'true' }}
-        uses: argyle-labs/.github/.github/actions/image-build@main
-        with:
-          file: ${{ env.IMAGE_FILE }}
-          name: ${{ env.IMAGE_NAME }}
-          hash: ${{ steps.src.outputs.hash }}
-          registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
-          registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
-          username: ${{ secrets.CI_REGISTRY_USER }}
-          password: ${{ secrets.CI_REGISTRY_TOKEN }}
+  # Opt-in Dockerfile validation on PRs: uncomment to build the image without
+  # pushing. Reads the :buildcache the Image workflow writes; never writes it.
+  # image-check:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Registry login
+  #       uses: argyle-labs/.github/.github/actions/registry-login@main
+  #       with:
+  #         registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
+  #         registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
+  #         username: ${{ secrets.CI_REGISTRY_USER }}
+  #         password: ${{ secrets.CI_REGISTRY_TOKEN }}
+  #     - name: Build image (no push)
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         file: Dockerfile
+  #         push: false
+  #         cache-from: type=registry,ref=${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/${{ github.event.repository.name }}:buildcache

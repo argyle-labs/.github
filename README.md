@@ -214,11 +214,15 @@ A crate's hash is sha256 over: the `git ls-files -s` blob ids of its own directo
 
 Markers live at `s3://<sccache bucket>/ci-pass/<repo>/<job>/crate/<name>/<hash>`, body = the commit sha. All lookups run in one pass (parallel `curl --aws-sigv4`). As with the whole-repo cache, `build` skips a crate only when both its `build` and `test` markers exist, so the nextest archive always contains every crate `test` runs. Any backend failure (no endpoint/keys, network error, a reply other than 200/404, a missing result) reports every crate as needing work, never a false hit. An empty or malformed `hashes` input fails `check-batch`; `record-batch` warns and records nothing. Force a full run with `workflow_dispatch` and `force: true`; orca's nightly schedule forces one. S3 credentials reach curl through a mode-600 `--config` file, never argv.
 
-### Container images: built in CI, retagged by release
+### Container images: built on main, promoted by release
 
-A plugin with a `Dockerfile` at the repo root (or `IMAGE_FILE` set in the template's `image` job) gets its image built once, in CI. The `image` job (`needs: build`, on the host runner because the ci-rust container has no docker) runs `source-hash` with `image: docker`, `workflow-file: .github/workflows/ci.yml` and `extra-paths` of the Dockerfile (plus `ui` in the UI template), then `image-build`, which pushes `<registry>/argyle-labs/<repo>:src-<hash>` with a registry build cache at `:buildcache`; when that tag already exists the build is skipped. Without a Dockerfile every step is skipped. `image` is not a required check.
+A repo with a `Dockerfile` copies `templates/plugin-image.yml` to `.github/workflows/image.yml`; repos without one leave it out. That `Image` workflow runs on every push to `main` (and on `workflow_dispatch`), never on PRs. Its `image-build` step tags the image by the commit's tree sha, `<registry>/argyle-labs/<repo>:tree-<sha>` from `git rev-parse HEAD^{tree}`, with the name lowercased. If that tag already exists the build is skipped. Otherwise the image is built, pushed, and the registry build cache at `:buildcache` is written.
 
-Release never builds an image. A caller passing `image_name` to `plugin-release.yml` (with `image_file` / `image_extra_paths` matching the CI job) gets an `image` job that recomputes the same hash at the release commit and runs `image-promote`: `docker buildx imagetools create` retags `:src-<hash>` to `<version>` and to the channel (`latest` for stable, `rc` for rc), registry-side, so every platform is kept. A missing `:src-<hash>` fails the job, and `release` treats a failed `image` like a failed build: no tag is published. The hash matches only when the release commit's tree is the one CI built and this repo's actions are unchanged since; otherwise rerun CI on the release commit first.
+Release never builds an image. A caller passing `image_name` to `plugin-release.yml` gets a `Promote image` step in the `release` job. It runs only after every requested build job has passed, and before the release is published. `image-promote` polls for `:tree-<sha>` of the release commit for up to `image_wait_minutes` (default 15), so a release dispatched right after a merge waits for the `Image` run. It then retags registry-side with `docker buildx imagetools create`, so every platform is kept: `<version>`, plus `latest` for stable or `rc` for rc. If the image is still missing at the deadline, the release fails before anything is published. Both actions treat only a "not found" reply from `imagetools inspect` as missing. Any other error, such as auth or network, fails with its own message.
+
+PR validation is opt-in. Both `plugin-ci-rust*.yml` templates end with a commented `image-check` job. When enabled, it builds the Dockerfile with `push: false`, reads `:buildcache`, and never writes the cache or pushes.
+
+`registry-login` holds the shared Buildx setup (including the plain-HTTP buildkitd config) and the registry login that both image actions use.
 
 ### Adding a tool step
 
@@ -251,7 +255,7 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 
 `name-suffix` keeps artifact names unique when a repo builds more than once per run; cargo-build and its cargo-test take the same suffix.
 
-Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash`, `crate-hashes` and `ci-pass-cache` (the pass caches above), `image-build` and `image-promote` (container images, above).
+Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash`, `crate-hashes` and `ci-pass-cache` (the pass caches above), `registry-login`, `image-build` and `image-promote` (container images, above).
 
 ### Deprecated: reusable-workflow blocks
 

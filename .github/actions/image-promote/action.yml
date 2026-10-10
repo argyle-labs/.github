@@ -1,19 +1,21 @@
 name: Image promote
 description: >
-  Retag `<registry>/<name>:src-<hash>` (pushed by image-build in CI) to each
-  release tag, registry-side, so every platform in the manifest list is kept.
-  Fails when the source image is missing; never builds.
+  Retag `<registry>/<name>:tree-<sha>` (pushed by the Image workflow on main)
+  to each release tag, registry-side, so every platform in the manifest list is
+  kept. Waits up to `wait-minutes` for the source image, then fails; never
+  builds. Needs a checkout of the release commit.
 
 inputs:
   name:
-    description: 'Image name without registry, e.g. `argyle-labs/<repo>`.'
-    required: true
-  hash:
-    description: 'source-hash of the release commit, computed exactly as CI did.'
+    description: 'Image name without registry, e.g. `argyle-labs/<repo>`; lowercased.'
     required: true
   tags:
     description: 'Tags to apply, one per line (e.g. version and channel).'
     required: true
+  wait-minutes:
+    description: 'How long to poll for :tree-<sha> before failing.'
+    required: false
+    default: "15"
   registry:
     required: false
     default: gitea.scottkey.me
@@ -29,55 +31,43 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Buildkit registry config (only for a plain-HTTP endpoint)
-      id: buildkit
-      shell: bash
-      env:
-        REGISTRY: ${{ inputs.registry }}
-        REGISTRY_HTTP: ${{ inputs.registry-http }}
-      run: |
-        if [ "${REGISTRY_HTTP:-false}" = "true" ]; then
-          {
-            printf '[registry."%s"]\n' "$REGISTRY"
-            printf '  http = true\n'
-            printf '  insecure = true\n'
-          } > "${RUNNER_TEMP}/buildkitd.toml"
-          echo "config=${RUNNER_TEMP}/buildkitd.toml" >> "$GITHUB_OUTPUT"
-        else
-          echo "config=" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Set up Buildx
-      uses: docker/setup-buildx-action@v3
-      with:
-        driver-opts: network=host
-        buildkitd-config: ${{ steps.buildkit.outputs.config }}
-
-    - name: Log in to the registry
-      uses: docker/login-action@v3
+    - name: Registry login
+      uses: argyle-labs/.github/.github/actions/registry-login@main
       with:
         registry: ${{ inputs.registry }}
+        registry-http: ${{ inputs.registry-http }}
         username: ${{ inputs.username }}
         password: ${{ inputs.password }}
 
     - name: Retag source image
       shell: bash
       env:
-        REPO: ${{ inputs.registry }}/${{ inputs.name }}
-        HASH: ${{ inputs.hash }}
+        REGISTRY: ${{ inputs.registry }}
+        NAME: ${{ inputs.name }}
         TAGS: ${{ inputs.tags }}
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
       run: |
         set -euo pipefail
-        src="$REPO:src-$HASH"
-        if ! docker buildx imagetools inspect "$src" >/dev/null 2>&1; then
-          echo "::error title=image-promote::$src not found; CI's image job must pass on this commit first (release never rebuilds)"
-          exit 1
-        fi
+        repo="$REGISTRY/${NAME,,}"
+        src="$repo:tree-$(git rev-parse 'HEAD^{tree}')"
         args=()
         while IFS= read -r t; do
           t=${t//[[:space:]]/}
-          [ -n "$t" ] && args+=(--tag "$REPO:$t")
+          [ -n "$t" ] && args+=(--tag "$repo:$t")
         done <<< "$TAGS"
         [ ${#args[@]} -gt 0 ] || { echo "::error title=image-promote::no tags given"; exit 1; }
+        deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+        until err=$(docker buildx imagetools inspect "$src" 2>&1 >/dev/null); do
+          if ! grep -qi 'not found' <<< "$err"; then
+            echo "::error title=image-promote::inspecting $src failed: $err"
+            exit 1
+          fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "::error title=image-promote::$src not found after ${WAIT_MINUTES}m; the Image workflow must build the release commit on main first (release never rebuilds)"
+            exit 1
+          fi
+          echo "Waiting for $src"
+          sleep 30
+        done
         docker buildx imagetools create "${args[@]}" "$src"
         printf 'Promoted %s →%s\n' "$src" "$(printf ' %s' "${args[@]}" | sed 's/ --tag//g')" | tee -a "$GITHUB_STEP_SUMMARY"
