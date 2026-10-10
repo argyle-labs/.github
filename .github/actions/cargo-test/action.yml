@@ -1,0 +1,78 @@
+name: cargo test
+description: >
+  Runs the cargo-build nextest archive once (the job `needs:` the build job):
+  with `coverage` under cargo-llvm-cov (lcov + summary, report-only), else
+  plain `cargo nextest run`. Then doctests, which nextest does not run and
+  which compile against sccache.
+  Expects checkout and rust-setup earlier in the job.
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  artifacts:
+    description: 'Lines of `name:path`: artifacts from earlier jobs placed before the step runs (e.g. `vite-dist:ui/dist`).'
+    required: false
+    default: ""
+  args:
+    description: 'Cargo arguments for the doctests. Split on whitespace with no quoting; pass features comma-separated.'
+    required: false
+    default: "--workspace --all-features"
+  name-suffix:
+    description: 'The `name-suffix` given to the matching cargo-build.'
+    required: false
+    default: ""
+  nextest-args:
+    description: 'Extra `cargo nextest run` arguments.'
+    required: false
+    default: "--no-fail-fast"
+  coverage:
+    description: "Run under cargo-llvm-cov ('true' or 'false'). Must match cargo-build's `coverage`."
+    required: false
+    default: "true"
+  doctests:
+    description: "Also run `cargo test --doc` ('true' or 'false')."
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      with:
+        artifacts: ${{ inputs.artifacts }}
+
+    - uses: actions/download-artifact@v3
+      with:
+        name: nextest-archive${{ inputs.name-suffix }}
+        path: ${{ inputs.working-directory }}
+
+    - uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@main
+      if: ${{ inputs.coverage == 'true' }}
+      with:
+        working-directory: ${{ inputs.working-directory }}
+        nextest-args: ${{ inputs.nextest-args }}
+        name-suffix: ${{ inputs.name-suffix }}
+
+    - name: Test
+      if: ${{ inputs.coverage != 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NEXTEST_ARGS: ${{ inputs.nextest-args }}
+      run: |
+        export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        read -ra nextest_args <<< "$NEXTEST_ARGS"
+        cargo nextest run "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
+
+    - name: Doctests
+      if: ${{ !cancelled() && inputs.doctests == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ARGS: ${{ inputs.args }}
+      run: |
+        export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        read -ra args <<< "$ARGS"
+        cargo test --locked "${args[@]}" --doc

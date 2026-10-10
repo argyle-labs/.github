@@ -1,18 +1,13 @@
-# Example: how orca's ci.yml composes the same blocks. orca keeps its own
+# Example: how orca's ci.yml composes the same actions. orca keeps its own
 # change detection and test scoping, feeding the scoped package list into
-# `args` and its test env (ORCA_TEST_FAST_KDF, ...) into `env`. peacock is an
-# npm workspace, so its node blocks take `working-directory` and its npm
-# scripts as `command`.
+# `args` and its test env (ORCA_TEST_FAST_KDF, ...) into rust-setup's `env`.
+# peacock is an npm workspace, so its node steps take `working-directory` and
+# its npm scripts as `command`.
 
-# Required checks are exactly `build`, `test` and `lint`: plain aggregate jobs
-# (stable check names, unlike the `caller / called` names of reusable calls)
-# that fail closed on anything but success in their needs (a skipped job
-# counts as a failure, so a failed build turns test and lint red too). Tool blocks
-# stay separate jobs so each shows its own result. To add a tool, add its block
-# job and list it in the matching aggregate's `needs:`; ci-needs-check enforces
-# that. `coverage` is report-only and in no aggregate. Every block after
-# cargo-build `needs:` it; for cargo-fmt and cargo-lock-check that is ordering
-# only.
+# Required checks are exactly the jobs `build`, `test` and `lint`. Tests run
+# once, coverage-instrumented: `test` also reports coverage (report-only).
+# Each job composes tool actions as steps, so each job IS one
+# check. Later steps run `if: !cancelled()` so every tool reports.
 name: CI
 
 on:
@@ -20,6 +15,11 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 9 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  OPENSSL_NO_VENDOR: "1"
 
 jobs:
   changes:
@@ -34,155 +34,102 @@ jobs:
       - id: scope
         run: echo "packages=--workspace" >> "$GITHUB_OUTPUT"
 
-  cargo-build:
-    needs: changes
-    uses: argyle-labs/.github/.github/workflows/cargo-build.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-    with:
-      runs-on: ci-large
-      args: ${{ needs.changes.outputs.packages }} --all-features
-      env: |
-        ORCA_TEST_FAST_KDF=1
-
-  cargo-test:
-    needs: [changes, cargo-build]
-    uses: argyle-labs/.github/.github/workflows/cargo-test.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-    with:
-      runs-on: ci-large
-      args: ${{ needs.changes.outputs.packages }} --all-features
-      env: |
-        ORCA_TEST_FAST_KDF=1
-
-  peacock-svelte-check:
-    needs: cargo-build
-    uses: argyle-labs/.github/.github/workflows/svelte-check.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-    with:
-      working-directory: peacock
-      command: npm run check
-
-  peacock-vitest:
-    needs: cargo-build
-    uses: argyle-labs/.github/.github/workflows/vitest.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-    with:
-      working-directory: peacock
-      command: npm run test:run
-
-  cargo-fmt:
-    needs: cargo-build
-    uses: argyle-labs/.github/.github/workflows/cargo-fmt.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-
-  cargo-lock-check:
-    needs: cargo-build
-    uses: argyle-labs/.github/.github/workflows/cargo-lock-check.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-
-  cargo-clippy:
-    needs: [changes, cargo-build]
-    uses: argyle-labs/.github/.github/workflows/cargo-clippy.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-    with:
-      runs-on: ci-large
-      args: ${{ needs.changes.outputs.packages }} --all-targets --all-features
-
-  shellcheck:
-    needs: cargo-build
-    uses: argyle-labs/.github/.github/workflows/shellcheck.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-
-  actionlint:
-    needs: cargo-build
-    uses: argyle-labs/.github/.github/workflows/actionlint.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-
-  coverage:
-    needs: [changes, cargo-build]
-    uses: argyle-labs/.github/.github/workflows/cargo-llvm-cov.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-    with:
-      runs-on: ci-large
-      args: ${{ needs.changes.outputs.packages }} --all-features
-      # Unique per call when coverage is split across several jobs.
-      artifact-name: lcov-workspace
-      env: |
-        ORCA_TEST_FAST_KDF=1
-
-  ci-needs-check:
-    uses: argyle-labs/.github/.github/workflows/ci-needs-check.yml@main
-    secrets:
-      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
-
-  # ── Required checks ──
   build:
-    if: always()
-    needs: [changes, cargo-build]
-    runs-on: ubuntu-latest
+    needs: changes
+    runs-on: ci-large
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - shell: bash
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
-            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
-          echo "$NEEDS"
-          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
+      - uses: actions/checkout@v4
+      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          wrap-cc: 'true'
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          env: |
+            ORCA_TEST_FAST_KDF=1
+      - uses: argyle-labs/.github/.github/actions/cargo-build@main
+        with:
+          args: ${{ needs.changes.outputs.packages }} --all-features
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}
 
   test:
-    if: always()
-    needs: [cargo-test, peacock-svelte-check, peacock-vitest]
-    runs-on: ubuntu-latest
+    needs: [changes, build]
+    runs-on: ci-large
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - shell: bash
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
-            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
-          echo "$NEEDS"
-          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
+      - uses: actions/checkout@v4
+      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          wrap-cc: 'true'
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          env: |
+            ORCA_TEST_FAST_KDF=1
+      - uses: argyle-labs/.github/.github/actions/cargo-test@main
+        with:
+          args: ${{ needs.changes.outputs.packages }} --all-features
+      - uses: argyle-labs/.github/.github/actions/svelte-check@main
+        if: ${{ !cancelled() }}
+        with:
+          working-directory: peacock
+          command: npm run check
+      - uses: argyle-labs/.github/.github/actions/vitest@main
+        if: ${{ !cancelled() }}
+        with:
+          working-directory: peacock
+          command: npm run test:run
+          install: 'false'
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}
 
   lint:
-    if: always()
-    needs: [ci-needs-check, cargo-fmt, cargo-clippy, cargo-lock-check, shellcheck, actionlint]
-    runs-on: ubuntu-latest
+    needs: changes
+    runs-on: ci-large
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - shell: bash
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
-            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
-          echo "$NEEDS"
-          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
+      - uses: actions/checkout@v4
+      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          wrap-cc: 'true'
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+          env: |
+            ORCA_TEST_FAST_KDF=1
+      - uses: argyle-labs/.github/.github/actions/cargo-fmt@main
+      - uses: argyle-labs/.github/.github/actions/cargo-clippy@main
+        if: ${{ !cancelled() }}
+        with:
+          args: ${{ needs.changes.outputs.packages }} --all-targets --all-features
+      - uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
+        if: ${{ !cancelled() }}
+      - uses: argyle-labs/.github/.github/actions/shellcheck@main
+        if: ${{ !cancelled() }}
+      - uses: argyle-labs/.github/.github/actions/actionlint@main
+        if: ${{ !cancelled() }}
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}

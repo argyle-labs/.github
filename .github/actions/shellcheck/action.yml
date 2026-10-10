@@ -1,0 +1,33 @@
+name: shellcheck
+description: 'shellcheck over every tracked *.sh (or `files`).'
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  files:
+    description: 'Space-separated files; empty means every tracked *.sh.'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install shellcheck
+      shell: bash
+      run: command -v shellcheck || { apt-get update -qq && apt-get install -y -qq --no-install-recommends shellcheck; }
+
+    - name: shellcheck
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        FILES: ${{ inputs.files }}
+      run: |
+        export t0=$SECONDS; trap 'echo "shellcheck|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        if [ -n "$FILES" ]; then
+          read -ra files <<< "$FILES"
+          shellcheck "${files[@]}"
+        else
+          git ls-files -z '*.sh' | xargs -0 -r shellcheck
+        fi

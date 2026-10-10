@@ -1,0 +1,80 @@
+name: cargo lock check
+description: >
+  Cargo.lock drift check. A lock generated under a local path patch records
+  orca crates with no `source`, so CI silently re-resolves against whatever
+  orca main is at that moment and the sccache keys miss every time main moves.
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  mode:
+    description: '`warn` (annotate only) or `enforce` (fail the step).'
+    required: false
+    default: "enforce"
+
+runs:
+  using: composite
+  steps:
+    - name: Drop local-dev cargo patch
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: rm -f .cargo/config.toml
+
+    - name: Cargo.lock drift check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        MODE: ${{ inputs.mode }}
+      # Fail-open: a probe that cannot run (no jq in an older image, cargo
+      # metadata erroring for any reason other than a stale lock, e.g. a
+      # network or git fetch failure) warns and passes unless a problem was
+      # already detected; only MODE=enforce on a detected problem fails the step.
+      run: |
+        set +e -uo pipefail
+        problems=()
+        probe_fail() {
+          if [ "${#problems[@]}" -eq 0 ]; then
+            echo "::warning title=Cargo.lock drift check skipped::$1"
+            exit 0
+          fi
+          echo "::warning title=Cargo.lock drift check partially skipped::$1"
+        }
+        fix="regenerate with \`cargo update --workspace\` with no .cargo/config.toml present, then commit Cargo.lock"
+        command -v jq >/dev/null || probe_fail "jq not available in this image"
+        if [ -f Cargo.lock ]; then
+          meta=$(cargo metadata --no-deps --format-version 1 2>/dev/null) \
+            || probe_fail "cargo metadata --no-deps failed"
+          members=$(echo "$meta" | jq -r '.packages[].name') && [ -n "$members" ] \
+            || probe_fail "could not list workspace members"
+          # [[package]] blocks without a `source` that are not members of this
+          # workspace came from a path patch.
+          sourceless=$(awk '
+            /^\[\[package\]\]/ { if (name != "" && !src) print name; name=""; src=0; next }
+            /^name = /             { gsub(/"/, "", $3); name=$3 }
+            /^source = /           { src=1 }
+            END                    { if (name != "" && !src) print name }
+          ' Cargo.lock | grep -vxF -f <(printf '%s\n' "$members") || true)
+          if [ -n "$sourceless" ]; then
+            problems+=("Cargo.lock has path-sourced (sourceless) entries for non-member crates: $(echo "$sourceless" | paste -sd, -) — $fix")
+          fi
+          if ! err=$(cargo metadata --locked --format-version 1 2>&1 >/dev/null); then
+            if grep -qF -- '--locked was passed' <<< "$err"; then
+              problems+=("Cargo.lock is out of sync with Cargo.toml — $fix")
+            else
+              probe_fail "cargo metadata --locked failed: $(echo "$err" | grep -m1 -i error)"
+            fi
+          fi
+        else
+          problems+=("no Cargo.lock committed")
+        fi
+        [ "${#problems[@]}" -eq 0 ] && { echo "Cargo.lock is git-sourced and in sync"; exit 0; }
+        level=warning; [ "$MODE" = enforce ] && level=error
+        {
+          echo "### Cargo.lock drift (${MODE})"
+          for p in "${problems[@]}"; do echo "- $p"; done
+        } >> "$GITHUB_STEP_SUMMARY"
+        for p in "${problems[@]}"; do echo "::${level} title=Cargo.lock drift::$p"; done
+        [ "$MODE" = enforce ] && exit 1
+        exit 0
