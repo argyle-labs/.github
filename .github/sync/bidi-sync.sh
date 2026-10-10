@@ -38,8 +38,10 @@ warn() { printf '::warning::%s\n' "$*"; }
 notify() {
   CONFLICTS=$((CONFLICTS+1))
   printf '::error::%s\n' "$*"
-  [ -n "$NTFY_URL" ] && curl -fsS -m 10 -H 'Title: mirror-sync conflict' \
-    -d "$*" "$NTFY_URL" >/dev/null 2>&1 || true
+  if [ -n "$NTFY_URL" ]; then
+    curl -fsS -m 10 -H 'Title: mirror-sync conflict' \
+      -d "$*" "$NTFY_URL" >/dev/null 2>&1 || true
+  fi
 }
 
 # --- enumerate repos on each remote (paginated) ---
