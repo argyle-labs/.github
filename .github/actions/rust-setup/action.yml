@@ -54,6 +54,13 @@ inputs:
     description: 'Cargo workspace root (where a local-dev .cargo/config.toml is dropped).'
     required: false
     default: "."
+  drop-cargo-config:
+    description: >
+      'true' deletes .cargo/config.toml (plugins keep a local-dev path patch
+      there). 'false' keeps it, for repos that commit build config in it
+      (orca: LIBSQLITE3_FLAGS).
+    required: false
+    default: "true"
   sccache-bucket:
     required: false
     default: "sccache"
@@ -220,6 +227,7 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Drop local-dev cargo patch
+      if: ${{ inputs.drop-cargo-config == 'true' }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: rm -f .cargo/config.toml
