@@ -61,6 +61,18 @@ on:
         required: false
         type: number
         default: 20
+      image_name:
+        description: >-
+          Container image to promote, e.g. argyle-labs/<repo>. Empty = no image.
+          The Image workflow must push :tree-<sha> for the release commit.
+        required: false
+        type: string
+        default: ""
+      image_wait_minutes:
+        description: "Minutes to wait for :tree-<sha> of the release commit before failing."
+        required: false
+        type: number
+        default: 15
 
 jobs:
   # ── Compute the version/tag once, shared by every build job + the release. ──
@@ -71,7 +83,8 @@ jobs:
       tag: ${{ steps.ver.outputs.tag }}
       prerelease: ${{ steps.ver.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -138,7 +151,8 @@ jobs:
     outputs:
       has_ui: ${{ steps.detect.outputs.present }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Detect UI
         id: detect
         run: |
@@ -180,7 +194,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -217,7 +232,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -254,7 +270,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -291,7 +308,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -320,7 +338,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -349,7 +368,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -416,7 +436,8 @@ jobs:
           done
           exit $fail
 
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Download all target artifacts
         uses: actions/download-artifact@v4
@@ -473,6 +494,22 @@ jobs:
             [ ${#bins[@]} -gt 0 ] || { echo "::error::no binary for requested target $t"; bad=1; }
           done
           [ "$bad" = 0 ] || exit 1
+
+      # Runs after every build passed, before publishing: retags the Image
+      # workflow's :tree-<sha> to <version> and the channel tag. Never builds.
+      - name: Promote image
+        if: ${{ inputs.image_name != '' }}
+        uses: argyle-labs/.github/.github/actions/image-promote@main
+        with:
+          name: ${{ inputs.image_name }}
+          tags: |
+            ${{ needs.version.outputs.version }}
+            ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+          wait-minutes: ${{ inputs.image_wait_minutes }}
+          registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
+          registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
+          username: ${{ secrets.CI_REGISTRY_USER }}
+          password: ${{ secrets.CI_REGISTRY_TOKEN }}
 
       - name: Create Gitea Release (pipeline-tagged)
         # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]]).

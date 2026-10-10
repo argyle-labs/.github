@@ -212,3 +212,25 @@ jobs:
       - name: CI summary
         uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}
+
+  # Opt-in Dockerfile validation on PRs: uncomment to build the image without
+  # pushing. Reads the :buildcache the Image workflow writes; never writes it.
+  # image-check:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Registry login
+  #       uses: argyle-labs/.github/.github/actions/registry-login@main
+  #       with:
+  #         registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
+  #         registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
+  #         username: ${{ secrets.CI_REGISTRY_USER }}
+  #         password: ${{ secrets.CI_REGISTRY_TOKEN }}
+  #     - name: Build image (no push)
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         file: Dockerfile
+  #         push: false
+  #         cache-from: type=registry,ref=${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/<repo-lowercase>:buildcache

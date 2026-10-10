@@ -1,0 +1,73 @@
+name: Image promote
+description: >
+  Retag `<registry>/<name>:tree-<sha>` (pushed by the Image workflow on main)
+  to each release tag, registry-side, so every platform in the manifest list is
+  kept. Waits up to `wait-minutes` for the source image, then fails; never
+  builds. Needs a checkout of the release commit.
+
+inputs:
+  name:
+    description: 'Image name without registry, e.g. `argyle-labs/<repo>`; lowercased.'
+    required: true
+  tags:
+    description: 'Tags to apply, one per line (e.g. version and channel).'
+    required: true
+  wait-minutes:
+    description: 'How long to poll for :tree-<sha> before failing.'
+    required: false
+    default: "15"
+  registry:
+    required: false
+    default: gitea.scottkey.me
+  registry-http:
+    description: "'true' when the registry is a plain-HTTP endpoint (vars.CI_REGISTRY_HTTP)."
+    required: false
+    default: "false"
+  username:
+    required: true
+  password:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Registry login
+      uses: argyle-labs/.github/.github/actions/registry-login@main
+      with:
+        registry: ${{ inputs.registry }}
+        registry-http: ${{ inputs.registry-http }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Retag source image
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        NAME: ${{ inputs.name }}
+        TAGS: ${{ inputs.tags }}
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
+      run: |
+        set -euo pipefail
+        repo="$REGISTRY/${NAME,,}"
+        src="$repo:tree-$(git rev-parse 'HEAD^{tree}')"
+        args=()
+        while IFS= read -r t; do
+          t=${t//[[:space:]]/}
+          [ -n "$t" ] && args+=(--tag "$repo:$t")
+        done <<< "$TAGS"
+        [ ${#args[@]} -gt 0 ] || { echo "::error title=image-promote::no tags given"; exit 1; }
+        deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+        until err=$(docker buildx imagetools inspect "$src" 2>&1 >/dev/null); do
+          if ! grep -qi 'not found' <<< "$err"; then
+            echo "::error title=image-promote::inspecting $src failed: $err"
+            exit 1
+          fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "::error title=image-promote::$src not found after ${WAIT_MINUTES}m; the Image workflow must build the release commit on main first (release never rebuilds)"
+            exit 1
+          fi
+          echo "Waiting for $src"
+          sleep 30
+        done
+        docker buildx imagetools create "${args[@]}" "$src"
+        printf 'Promoted %s →%s\n' "$src" "$(printf ' %s' "${args[@]}" | sed 's/ --tag//g')" | tee -a "$GITHUB_STEP_SUMMARY"

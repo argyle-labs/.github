@@ -1,0 +1,95 @@
+name: Image build
+description: >
+  Build a container image and push it as `<registry>/<name>:tree-<sha>`, keyed
+  by the commit's tree sha so plugin-release can retag it without rebuilding.
+  Skips the build when that tag already exists. Needs a host docker daemon
+  (not the ci-rust container) and a checkout.
+
+inputs:
+  context:
+    description: 'Build context.'
+    required: false
+    default: "."
+  file:
+    description: 'Dockerfile path.'
+    required: false
+    default: Dockerfile
+  name:
+    description: 'Image name without registry, e.g. `argyle-labs/<repo>`; lowercased.'
+    required: true
+  platforms:
+    description: 'buildx platforms.'
+    required: false
+    default: linux/amd64
+  registry:
+    description: 'Registry host (callers pass `vars.CI_REGISTRY || gitea.scottkey.me`).'
+    required: false
+    default: gitea.scottkey.me
+  registry-http:
+    description: "'true' when the registry is a plain-HTTP endpoint (vars.CI_REGISTRY_HTTP)."
+    required: false
+    default: "false"
+  username:
+    required: true
+  password:
+    required: true
+
+outputs:
+  ref:
+    description: 'Pushed (or already present) image reference.'
+    value: ${{ steps.check.outputs.ref }}
+  built:
+    description: "'true' when this run built and pushed the image."
+    value: ${{ steps.check.outputs.exists == 'true' && 'false' || 'true' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Registry login
+      uses: argyle-labs/.github/.github/actions/registry-login@main
+      with:
+        registry: ${{ inputs.registry }}
+        registry-http: ${{ inputs.registry-http }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Check for an existing image
+      id: check
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        NAME: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        repo="$REGISTRY/${NAME,,}"
+        ref="$repo:tree-$(git rev-parse 'HEAD^{tree}')"
+        echo "repo=$repo" >> "$GITHUB_OUTPUT"
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+        if err=$(docker buildx imagetools inspect "$ref" 2>&1 >/dev/null); then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "Image $ref already exists; skipping build" | tee -a "$GITHUB_STEP_SUMMARY"
+        elif grep -qi 'not found' <<< "$err"; then
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error title=image-build::inspecting $ref failed: $err"
+          exit 1
+        fi
+
+    - name: Build and push
+      if: ${{ steps.check.outputs.exists != 'true' }}
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.file }}
+        platforms: ${{ inputs.platforms }}
+        push: true
+        tags: ${{ steps.check.outputs.ref }}
+        cache-from: type=registry,ref=${{ steps.check.outputs.repo }}:buildcache
+        cache-to: type=registry,ref=${{ steps.check.outputs.repo }}:buildcache,mode=max
+
+    - name: Summary
+      if: ${{ steps.check.outputs.exists != 'true' }}
+      shell: bash
+      env:
+        REF: ${{ steps.check.outputs.ref }}
+      run: echo "Published $REF" >> "$GITHUB_STEP_SUMMARY"
