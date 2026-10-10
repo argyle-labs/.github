@@ -500,7 +500,7 @@ runs:
       run: sccache --stop-server >/dev/null 2>&1 || true
 
     - name: Upload plugin package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: plugin-${{ inputs.target }}
         path: dist/*

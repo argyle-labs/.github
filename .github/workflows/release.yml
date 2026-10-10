@@ -346,7 +346,7 @@ jobs:
             echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
           fi
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: steps.sel.outputs.skip != 'true'
         with:
           name: build-${{ steps.sel.outputs.target }}
@@ -376,7 +376,7 @@ jobs:
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Collect built binaries
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: staged
 
@@ -401,7 +401,7 @@ jobs:
           ( cd dist-release && cat ./*.sha256 > checksums.sha256 2>/dev/null || true )
           [ -f scripts/install.sh ] && cp scripts/install.sh dist-release/ || true
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: native-packages
           path: dist-release/
@@ -491,7 +491,7 @@ jobs:
           # Guards against staging a binary left over from an earlier release.
           [ "$out" = "orca $REL_VERSION" ] || { echo "::error::darwin binary reports '$out', expected 'orca $REL_VERSION'"; exit 1; }
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: macos-darwin-binary
           if-no-files-found: error
@@ -517,7 +517,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch the darwin binary from build-macos
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: macos-darwin-binary
           path: dist-release
@@ -537,7 +537,7 @@ jobs:
           build_native_packages
           echo "── dist-release (.pkg) ──"; ls -la dist-release/*.pkg || true
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: macos-pkg
           if-no-files-found: warn
@@ -573,7 +573,7 @@ jobs:
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
       - name: Gather all release assets
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: incoming
 

@@ -38,25 +38,25 @@ runs:
 
     - name: Download artifact 0
       if: ${{ steps.parse.outputs.name0 != '' }}
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: ${{ steps.parse.outputs.name0 }}
         path: ${{ steps.parse.outputs.path0 }}
     - name: Download artifact 1
       if: ${{ steps.parse.outputs.name1 != '' }}
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: ${{ steps.parse.outputs.name1 }}
         path: ${{ steps.parse.outputs.path1 }}
     - name: Download artifact 2
       if: ${{ steps.parse.outputs.name2 != '' }}
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: ${{ steps.parse.outputs.name2 }}
         path: ${{ steps.parse.outputs.path2 }}
     - name: Download artifact 3
       if: ${{ steps.parse.outputs.name3 != '' }}
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: ${{ steps.parse.outputs.name3 }}
         path: ${{ steps.parse.outputs.path3 }}

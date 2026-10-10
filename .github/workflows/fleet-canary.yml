@@ -106,7 +106,7 @@ jobs:
         run: |
           mkdir -p status
           echo "$OUTCOME" > "status/${REPO_NAME}.txt"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: canary-status-${{ matrix.repo }}
@@ -123,7 +123,7 @@ jobs:
     steps:
       # @v3 (Gitea-compatible; @v4's Twirl API is unimplemented on Gitea). No
       # pattern/merge-multiple on @v3 — download all, then flatten into status/.
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           path: status
       - name: Flatten downloaded artifacts
