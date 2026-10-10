@@ -164,44 +164,69 @@ Each plugin is its own repo: an out-of-process subprocess whose only orca depend
 
 ## CI building blocks
 
-Each repo writes its own `.github/workflows/ci.yml` that calls single-purpose reusable workflows here, one per tool. CI is flat: **repo → block, at most one level**. Blocks never call other reusable workflows; they share code only through composite actions. Start from [`templates/plugin-ci-rust.yml`](templates/plugin-ci-rust.yml) (Rust only) or [`templates/plugin-ci-rust-ui.yml`](templates/plugin-ci-rust-ui.yml) (crate embedding a Vite build); [`templates/orca-ci.example.yml`](templates/orca-ci.example.yml) shows a scoped workspace plus an npm workspace. The old monolithic [`plugin-ci.yml`](.github/workflows/plugin-ci.yml) stays untouched until every repo has migrated, then is deleted.
+Each repo writes its own `.github/workflows/ci.yml` out of **composite actions only, no reusable workflows**: one action per tool under [`.github/actions/`](.github/actions), used as steps inside the repo's own jobs. A reusable-workflow call posts a status for the caller job and for each inner job, so every check showed twice and the runner queue carried double the jobs; a step posts nothing of its own.
+
+Start from a template:
+
+| Repo type | Template |
+|---|---|
+| Rust-only plugin | [`templates/plugin-ci-rust.yml`](templates/plugin-ci-rust.yml) |
+| Plugin crate embedding a Vite frontend (`ui/`) | [`templates/plugin-ci-rust-ui.yml`](templates/plugin-ci-rust-ui.yml) |
+| Scoped workspace plus an npm workspace (orca) | [`templates/orca-ci.example.yml`](templates/orca-ci.example.yml) |
 
 ### Required checks: `build`, `test`, `lint`
 
-Every repo exposes exactly three required checks, each a plain aggregate job (stable check name) over separate tool-block jobs:
+Every repo has exactly three required checks, which are plain jobs named `build`, `test` and `lint`. There are no aggregate jobs, no needs-check job and no separate coverage job: the jobs ARE the checks.
 
-- `build`: compile jobs (cargo-build, vite-build).
-- `test`: cargo-test, vitest, svelte-check.
-- `lint`: cargo-fmt, cargo-clippy, cargo-lock-check, ci-needs-check, plus eslint / prettier / tsc / shellcheck / actionlint where used.
+- `build`: `cargo-build` (UI repos run `vite-build` first in the same job).
+- `test` (`needs: build`): `cargo-test`, which runs the suite once under cargo-llvm-cov and also reports coverage, plus `vitest` / `svelte-check` where used.
+- `lint` (`needs: build`): `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, plus `eslint` / `prettier` / `tsc` / `shellcheck` / `actionlint` where used.
 
-Aggregates run `if: always()` and fail closed: `toJSON(needs)` must be non-empty with every result `success`; `skipped` counts as a failure, so a failed build also turns `test` and `lint` red. `coverage` is its own job, report-only, in no aggregate and never required. Adding a tool means adding its block job and listing it in the right aggregate's `needs:`; `ci-needs-check` fails `lint` if any job is in zero or several aggregates. Every block runs after `cargo-build` (`needs:`), which for fmt and lock-check is ordering only.
+### What each job compiles
 
-### Calling a block
+| Job | Compiles | Reuses |
+|---|---|---|
+| `build` | the Vite bundle (UI repos); every test binary, once, coverage-instrumented, into the nextest archive | |
+| `test` | doctests only (`cargo test --doc`, sccache-backed) | the nextest archive: tests run once from it under `cargo llvm-cov nextest`, giving results plus lcov and summary |
+| `lint` | clippy's check build (`--all-targets`, sccache-backed); fmt and lock-check compile nothing | |
 
-`uses: argyle-labs/.github/.github/workflows/<block>.yml@main`, passing secrets explicitly (not `secrets: inherit`): `CI_REGISTRY_USER` and `CI_REGISTRY_TOKEN` (job image pull) on every block, plus `SCCACHE_S3_ACCESS_KEY` and `SCCACHE_S3_SECRET_KEY` on cargo blocks that compile.
+The only duplicate compile is clippy's check build: check-mode output cannot reuse a plain build's `target/`, so it relies on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. A repo that sets `coverage: 'false'` must set it on both `cargo-build` and `cargo-test`.
 
-Common inputs: `runs-on` (default `ubuntu-latest`; `ci-large` for heavy crates) and `working-directory` (default `.`). Blocks that compile or build take `artifacts`: lines of `name:path` (at most 4) downloaded by name before the step runs. Cargo blocks take `build-jobs`, `debuginfo` (default `'0'`), `args` (split on whitespace, no quoting: pass features comma-separated, e.g. `--features a,b`) and `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data). Node blocks take `command` to override the tool invocation (e.g. an npm script); it is `eval`ed, so it is trusted input only, from the repo's own workflow file.
+Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats).
 
-| Block | Runs | Extra inputs | Outputs |
+### Adding a tool step
+
+Add `- uses: argyle-labs/.github/.github/actions/<tool>@main` to the job of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
+
+### Job setup: `rust-setup`
+
+Composite actions cannot read `secrets`, so credentials come in as inputs set from `secrets.*` by the caller. `rust-setup` runs once per job and owns the job-wide cargo environment: `sccache-endpoint` (`vars.SCCACHE_ENDPOINT`), `sccache-access-key` / `sccache-secret-key` (`secrets.SCCACHE_S3_ACCESS_KEY` / `secrets.SCCACHE_S3_SECRET_KEY`), `wrap-cc: 'true'`, `build-jobs`, `debuginfo` (default `'0'`), `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data), `orca-fetch-token`, and `working-directory`.
+
+### Action catalogue
+
+Common inputs: `working-directory` (default `.`) on every action; `artifacts` (lines of `name:path`, at most 4, downloaded by name before the tool runs) on every action that compiles or builds. Cargo `args` are split on whitespace with no quoting: pass features comma-separated, e.g. `--features a,b`. Node `command` overrides the tool invocation (e.g. an npm script); it is `eval`ed, so it is trusted input only, from the repo's own workflow file.
+
+| Action | Runs | Extra inputs | Outputs |
 |---|---|---|---|
-| `cargo-build` | `cargo nextest archive` (the build: test binaries, compiled once) | `args`, `name-suffix` | artifact `nextest-archive<name-suffix>` |
-| `cargo-test` | the archive via `cargo nextest run`, then doctests (sccache-backed compile) | `args`, `nextest-args`, `doctests`, `name-suffix` | |
+| `cargo-build` | `cargo llvm-cov nextest-archive` (the build: test binaries, compiled once, coverage-instrumented; plain `cargo nextest archive` when `coverage: 'false'`) | `args`, `coverage` (default `'true'`), `name-suffix` | artifact `nextest-archive<name-suffix>` |
+| `cargo-test` | the archive, once, via `cargo-llvm-cov` (plain `cargo nextest run` when `coverage: 'false'`), then doctests | `args`, `coverage` (default `'true'`), `nextest-args`, `doctests` (`'true'`/`'false'`), `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
 | `cargo-clippy` | `cargo clippy -- -D warnings` (also compiles bins/examples) | `args` | |
 | `cargo-fmt` | `cargo fmt --all --check` | | |
 | `cargo-lock-check` | Cargo.lock drift (path-patch entries, out of sync) | `mode`: `enforce` \| `warn` | |
-| `cargo-llvm-cov` | `cargo llvm-cov nextest`, report-only (failure only warns) | `args`, `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
-| `vite-build` | `npx vite build` | `dir` (default `dist`), `artifact-name` (default `vite-dist`) | artifact of `dir` |
-| `svelte-check` | `npx svelte-check` (type check) | | |
-| `tsc` | `npx tsc --noEmit` (type check) | | |
-| `vitest` | `npx vitest run` | | |
-| `eslint` | `npx eslint .` (lint) | | |
-| `prettier` | `npx prettier --check .` (format) | | |
+| `cargo-llvm-cov` | how `cargo-test` runs with coverage: the archive under `cargo llvm-cov nextest --no-report`, then a report-only lcov/summary | `nextest-args`, `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
+| `vite-build` | `npx vite build` | `command`, `install`, `dir` (default `dist`), `artifact-name` (default `vite-dist`) | artifact of `dir` |
+| `svelte-check` | `npx svelte-check` (type check) | `command`, `install` | |
+| `tsc` | `npx tsc --noEmit` (type check) | `command`, `install` | |
+| `vitest` | `npx vitest run` | `command`, `install` | |
+| `eslint` | `npx eslint .` (lint) | `command`, `install` | |
+| `prettier` | `npx prettier --check .` (format) | `command`, `install` | |
 | `shellcheck` | shellcheck over tracked `*.sh` | `files` | |
 | `actionlint` | actionlint over the repo's workflows | `version` | |
-| `ci-needs-check` | the `build`/`test`/`lint` needs contract above | `files`, `exclude` (default `coverage`) | |
 
-`name-suffix` keeps artifact names unique when a repo calls a block more than once per run (orca: coverage per package group); cargo-build and its cargo-test take the same suffix.
+`name-suffix` keeps artifact names unique when a repo builds more than once per run; cargo-build and its cargo-test take the same suffix.
 
-Clippy and coverage cannot reuse cargo-build's `target/` (check-mode and instrumented builds differ), so they rely on the shared sccache; cargo-test reuses the build exactly through the nextest archive.
+Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats).
 
-Composite actions under `.github/actions/`: `rust-setup` (sccache, compile-memory knobs, extra env, local-dev patch removal), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats).
+### Deprecated: reusable-workflow blocks
+
+The reusable workflows `.github/workflows/{cargo-build,cargo-test,cargo-clippy,cargo-fmt,cargo-lock-check,cargo-llvm-cov,vite-build,svelte-check,tsc,vitest,eslint,prettier,shellcheck,actionlint,ci-needs-check}.yml` are deprecated and stay only while callers migrate to the actions above; do not add new callers. The old monolithic [`plugin-ci.yml`](.github/workflows/plugin-ci.yml) also stays untouched until every repo has migrated, then is deleted.

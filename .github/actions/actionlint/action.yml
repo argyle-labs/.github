@@ -1,0 +1,26 @@
+name: actionlint
+description: "actionlint over the repo's workflows."
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  version:
+    description: 'actionlint release.'
+    required: false
+    default: "1.7.7"
+
+runs:
+  using: composite
+  steps:
+    - name: actionlint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        export t0=$SECONDS; trap 'echo "actionlint|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        v="$VERSION"
+        curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz" | tar -xz -C /tmp actionlint
+        /tmp/actionlint

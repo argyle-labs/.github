@@ -1,0 +1,18 @@
+name: cargo fmt
+description: '`cargo fmt --all --check`; needs no compile.'
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Format check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        export t0=$SECONDS; trap 'echo "fmt|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        cargo fmt --all --check

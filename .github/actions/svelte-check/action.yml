@@ -1,0 +1,42 @@
+name: svelte-check
+description: 'Svelte + TypeScript type check.'
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  artifacts:
+    description: 'Lines of `name:path`: artifacts from earlier jobs placed before the step runs (e.g. `vite-dist:ui/dist`).'
+    required: false
+    default: ""
+  command:
+    description: 'Command to run (an npm script works too, e.g. `npm run check`). Evaluated by bash: trusted input only, from the calling repo''s own workflow file, never event data.'
+    required: false
+    default: "npx svelte-check"
+  install:
+    description: "Run `npm ci` first. 'false' when an earlier node step in the same job already installed."
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      with:
+        artifacts: ${{ inputs.artifacts }}
+
+    - if: ${{ inputs.install == 'true' }}
+      uses: argyle-labs/.github/.github/actions/node-install@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: svelte-check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        COMMAND: ${{ inputs.command }}
+      run: |
+        export t0=$SECONDS; trap 'echo "check|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        eval "$COMMAND"
+

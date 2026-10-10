@@ -1,0 +1,55 @@
+name: vite build
+description: '`vite build`, uploading the output dir for later jobs (e.g. a crate that embeds it).'
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  artifacts:
+    description: 'Lines of `name:path`: artifacts from earlier jobs placed before the step runs (e.g. `vite-dist:ui/dist`).'
+    required: false
+    default: ""
+  command:
+    description: 'Command to run (an npm script works too, e.g. `npm run build`). Evaluated by bash: trusted input only, from the calling repo''s own workflow file, never event data.'
+    required: false
+    default: "npx vite build"
+  install:
+    description: "Run `npm ci` first. 'false' when an earlier node step in the same job already installed."
+    required: false
+    default: "true"
+  dir:
+    description: 'Build output dir, relative to working-directory.'
+    required: false
+    default: "dist"
+  artifact-name:
+    description: 'Artifact name for the output dir.'
+    required: false
+    default: "vite-dist"
+
+runs:
+  using: composite
+  steps:
+    - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      with:
+        artifacts: ${{ inputs.artifacts }}
+
+    - if: ${{ inputs.install == 'true' }}
+      uses: argyle-labs/.github/.github/actions/node-install@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: vite build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        COMMAND: ${{ inputs.command }}
+      run: |
+        export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        eval "$COMMAND"
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/${{ inputs.dir }}
+        retention-days: 1
