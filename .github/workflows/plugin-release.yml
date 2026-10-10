@@ -83,7 +83,8 @@ jobs:
       tag: ${{ steps.ver.outputs.tag }}
       prerelease: ${{ steps.ver.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -150,7 +151,8 @@ jobs:
     outputs:
       has_ui: ${{ steps.detect.outputs.present }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Detect UI
         id: detect
         run: |
@@ -192,7 +194,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -229,7 +232,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -266,7 +270,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -303,7 +308,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -332,7 +338,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
@@ -361,7 +368,8 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)

@@ -209,4 +209,4 @@ jobs:
   #         context: .
   #         file: Dockerfile
   #         push: false
-  #         cache-from: type=registry,ref=${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/${{ github.event.repository.name }}:buildcache
+  #         cache-from: type=registry,ref=${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/<repo-lowercase>:buildcache
