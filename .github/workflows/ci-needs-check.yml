@@ -1,0 +1,99 @@
+name: ci needs check
+
+# Asserts a repo's ci.yml keeps the required-check contract: every job is in
+# exactly one of the `build` / `test` / `lint` aggregates' `needs:` (minus
+# `exclude`, by default the report-only `coverage`). A job missing from every
+# aggregate would not gate merges.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      files:
+        description: >-
+          Space-separated workflow files to check.
+        required: false
+        type: string
+        default: '.github/workflows/ci.yml'
+      exclude:
+        description: >-
+          Space-separated job ids allowed outside every aggregate.
+        required: false
+        type: string
+        default: 'coverage'
+      yq-version:
+        description: >-
+          mikefarah/yq release.
+        required: false
+        type: string
+        default: '4.44.3'
+    secrets:
+      CI_REGISTRY_USER:
+        required: false
+      CI_REGISTRY_TOKEN:
+        required: false
+
+jobs:
+  needs-check:
+    runs-on: ${{ inputs.runs-on }}
+    # The ci-rust image carries jq and Node (act needs node in the job
+    # container for JS actions).
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        env:
+          VERSION: ${{ inputs.yq-version }}
+        run: |
+          curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${VERSION}/yq_linux_amd64"
+          chmod +x /usr/local/bin/yq
+
+      - name: Check aggregate needs
+        env:
+          FILES: ${{ inputs.files }}
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          read -ra files <<< "$FILES"
+          excl=$(jq -Rc 'split(" ") | map(select(. != ""))' <<< "$EXCLUDE")
+          rc=0
+          for f in "${files[@]}"; do
+            if ! out=$(yq -o=json '.jobs' "$f" | jq -r --argjson excl "$excl" -f <(cat <<'JQ'
+              def needs: (.needs // []) | if type == "string" then [.] else . end;
+              . as $jobs
+              | ["build", "test", "lint"] as $aggs
+              | ($aggs - ($jobs | keys)) as $missing
+              | ($aggs | map(. as $a | $jobs[$a] | needs) | add // []) as $all
+              | [($missing[] | "missing aggregate job `\(.)`"),
+                 ($jobs | keys[] | select(. as $j | ($aggs + $excl | index($j)) | not)
+                   | . as $j | ($all | map(select(. == $j)) | length) as $n
+                   | select($n != 1)
+                   | if $n == 0 then "job `\($j)` is in no aggregate's needs"
+                     else "job `\($j)` is in \($n) aggregates' needs" end),
+                 ($excl[] | . as $e | select($all | index($e)) | "excluded job `\($e)` must not be in an aggregate")]
+              | .[]
+          JQ
+            )); then
+              echo "::error file=$f::could not parse jobs"; rc=1; continue
+            fi
+            if [ -n "$out" ]; then
+              while IFS= read -r m; do echo "::error file=$f::$m"; done <<< "$out"
+              rc=1
+            else
+              echo "$f: ok"
+            fi
+          done
+          exit "$rc"

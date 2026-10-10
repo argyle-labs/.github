@@ -13,8 +13,9 @@ inputs:
     required: false
     default: ""
   cache-key:
-    description: 'Swatinem/rust-cache shared key — distinct per job/target so caches do not collide.'
-    required: true
+    description: 'Swatinem/rust-cache shared key — distinct per job/target so caches do not collide. Empty skips rust-cache (sccache only).'
+    required: false
+    default: ""
   orca-fetch-token:
     description: >
       Gitea token with read on argyle-labs/orca, for the private git dep.
@@ -29,6 +30,30 @@ inputs:
       disk cache.
     required: false
     default: ""
+  build-jobs:
+    description: 'CARGO_BUILD_JOBS. Empty keeps cargo default parallelism.'
+    required: false
+    default: ""
+  debuginfo:
+    description: 'CARGO_PROFILE_DEV_DEBUG / CARGO_PROFILE_TEST_DEBUG. Empty keeps the profile default.'
+    required: false
+    default: "0"
+  wrap-cc:
+    description: 'Also route CC/CXX through sccache (caches C deps built by cc-rs). Leave off for cross builds.'
+    required: false
+    default: "false"
+  env:
+    description: >
+      Extra KEY=VALUE lines appended verbatim to GITHUB_ENV for the rest of the
+      job. Trusted input: it can set any variable (RUSTC_WRAPPER, LD_PRELOAD, ...),
+      so it must come from the calling repo's own workflow file, never from
+      PR titles, branch names or other event data.
+    required: false
+    default: ""
+  working-directory:
+    description: 'Cargo workspace root (where a local-dev .cargo/config.toml is dropped).'
+    required: false
+    default: "."
   sccache-bucket:
     required: false
     default: "sccache"
@@ -110,7 +135,7 @@ runs:
         fi
 
     - name: Cache cargo registry + dep builds
-      if: ${{ runner.os == 'Linux' }}
+      if: ${{ runner.os == 'Linux' && inputs.cache-key != '' }}
       uses: Swatinem/rust-cache@v2
       with:
         key: ${{ inputs.cache-key }}
@@ -122,6 +147,10 @@ runs:
         S3_BUCKET: ${{ inputs.sccache-bucket }}
         S3_ACCESS_KEY: ${{ inputs.sccache-access-key }}
         S3_SECRET_KEY: ${{ inputs.sccache-secret-key }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
+        DEBUGINFO: ${{ inputs.debuginfo }}
+        WRAP_CC: ${{ inputs.wrap-cc }}
+        EXTRA_ENV: ${{ inputs.env }}
       run: |
         set -uo pipefail
         err_log="${RUNNER_TEMP:-/tmp}/sccache-error.log"
@@ -162,6 +191,7 @@ runs:
             echo "SCCACHE_IDLE_TIMEOUT=0"
             echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
             echo "SCCACHE_ERROR_LOG=$err_log"
+            if [ "$WRAP_CC" = true ]; then echo "CC=sccache cc"; echo "CXX=sccache c++"; fi
           fi
           if [ "$backend" = s3 ]; then
             echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
@@ -179,13 +209,19 @@ runs:
           # ── compile-memory controls ──
           # The proxmox build.rs generates 1261 JsonSchema types; clippy's
           # `lib test` variant at default debuginfo=2 OOM-killed the memory-capped
-          # runner. CI never debugs binaries, so drop debuginfo in dev+test.
-          echo "CARGO_PROFILE_DEV_DEBUG=0"
-          echo "CARGO_PROFILE_TEST_DEBUG=0"
+          # runner. CI never debugs binaries, so `debuginfo` defaults to 0 here
+          # and in every cargo-* block; an explicit empty value keeps the profile.
+          if [ -n "$DEBUGINFO" ]; then
+            echo "CARGO_PROFILE_DEV_DEBUG=$DEBUGINFO"
+            echo "CARGO_PROFILE_TEST_DEBUG=$DEBUGINFO"
+          fi
+          if [ -n "$BUILD_JOBS" ]; then echo "CARGO_BUILD_JOBS=$BUILD_JOBS"; fi
+          if [ -n "$EXTRA_ENV" ]; then printf '%s\n' "$EXTRA_ENV"; fi
         } >> "$GITHUB_ENV"
 
     - name: Drop local-dev cargo patch
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: rm -f .cargo/config.toml
 
     - name: Authenticate private orca git dependency (Gitea)

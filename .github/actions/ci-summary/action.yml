@@ -1,0 +1,35 @@
+name: CI summary
+description: >
+  Render /tmp/ci-phases (`name|seconds|exit` lines appended by each timed
+  step's EXIT trap) and sccache stats into the step summary.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        {
+          echo "### Phase timings"
+          echo "| phase | seconds | exit |"
+          echo "|---|---:|---:|"
+          if [ -f /tmp/ci-phases ]; then
+            while IFS='|' read -r p t e; do echo "| $p | $t | $e |"; done < /tmp/ci-phases
+          fi
+          if command -v sccache >/dev/null; then
+            echo
+            echo "### sccache"
+            stats=$(sccache --show-stats 2>&1) || stats="(sccache server not running)"
+            echo '```'
+            echo "$stats"
+            echo '```'
+            # ReadOnly mode fails every write without ever completing one.
+            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
+            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
+            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
+              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
+            fi
+          fi
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+        if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-/dev/null}" 2>/dev/null); then
+          echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
+        fi

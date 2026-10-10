@@ -1,0 +1,146 @@
+name: cargo test
+
+# Runs a cargo-build nextest archive (call with `needs:` on that job), then
+# doctests, which nextest does not run and which compile against sccache.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label; a crate over the default runners' memory cap can request `ci-large`.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: >-
+          Directory the tool runs in.
+        required: false
+        type: string
+        default: '.'
+      artifacts:
+        description: >-
+          Lines of `name:path`: artifacts from earlier jobs placed before the step runs (e.g. `vite-dist:ui/dist`).
+        required: false
+        type: string
+        default: ''
+      build-jobs:
+        description: >-
+          CARGO_BUILD_JOBS. Empty keeps cargo default parallelism.
+        required: false
+        type: string
+        default: ''
+      debuginfo:
+        description: >-
+          CARGO_PROFILE_{DEV,TEST}_DEBUG. '0' (default) drops debuginfo to cut compile memory; empty keeps the profile default.
+        required: false
+        type: string
+        default: '0'
+      env:
+        description: >-
+          Extra KEY=VALUE lines exported for the job.
+        required: false
+        type: string
+        default: ''
+      args:
+        description: >-
+          Cargo arguments selecting packages/features. Split on whitespace with no quoting; pass features comma-separated.
+        required: false
+        type: string
+        default: '--workspace --all-features'
+      name-suffix:
+        description: >-
+          Appended to the `nextest-archive` artifact name. Give cargo-build and
+          its cargo-test the same unique suffix when a repo builds more than once
+          per run.
+        required: false
+        type: string
+        default: ''
+      nextest-args:
+        description: >-
+          Extra `cargo nextest run` arguments.
+        required: false
+        type: string
+        default: '--no-fail-fast'
+      doctests:
+        description: >-
+          Also run `cargo test --doc`.
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      CI_REGISTRY_USER:
+        required: false
+      CI_REGISTRY_TOKEN:
+        required: false
+      SCCACHE_S3_ACCESS_KEY:
+        required: false
+      SCCACHE_S3_SECRET_KEY:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # CI-only: link the image's system OpenSSL instead of compiling openssl-src.
+  # Release builds do not set this, so shipped binaries keep vendoring it.
+  OPENSSL_NO_VENDOR: "1"
+
+jobs:
+  test:
+    runs-on: ${{ inputs.runs-on }}
+    # The ci-rust image bakes in the toolchain, sccache and Node (act needs node
+    # in the job container for JS actions). Its tag tracks
+    # orca/rust-toolchain.toml; bump both together.
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    # Gitea runs `run:` in a custom container with sh (dash); force bash.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+        with:
+          artifacts: ${{ inputs.artifacts }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: nextest-archive${{ inputs.name-suffix }}
+          path: ${{ inputs.working-directory }}
+
+      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          build-jobs: ${{ inputs.build-jobs }}
+          debuginfo: ${{ inputs.debuginfo }}
+          env: ${{ inputs.env }}
+          wrap-cc: 'true'
+          sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+          sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+
+      - name: Test
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          NEXTEST_ARGS: ${{ inputs.nextest-args }}
+        run: |
+          export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          read -ra nextest_args <<< "$NEXTEST_ARGS"
+          cargo nextest run "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
+
+      - name: Doctests
+        if: ${{ !cancelled() && inputs.doctests }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          ARGS: ${{ inputs.args }}
+        run: |
+          export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          read -ra args <<< "$ARGS"
+          cargo test --locked "${args[@]}" --doc
+
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}

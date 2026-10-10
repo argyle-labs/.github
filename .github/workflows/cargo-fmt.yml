@@ -1,0 +1,58 @@
+name: cargo fmt
+
+# `cargo fmt --check`; needs no compile.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label; a crate over the default runners' memory cap can request `ci-large`.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      working-directory:
+        description: >-
+          Directory the tool runs in.
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      CI_REGISTRY_USER:
+        required: false
+      CI_REGISTRY_TOKEN:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # CI-only: link the image's system OpenSSL instead of compiling openssl-src.
+  # Release builds do not set this, so shipped binaries keep vendoring it.
+  OPENSSL_NO_VENDOR: "1"
+
+jobs:
+  fmt:
+    runs-on: ${{ inputs.runs-on }}
+    # The ci-rust image bakes in the toolchain, sccache and Node (act needs node
+    # in the job container for JS actions). Its tag tracks
+    # orca/rust-toolchain.toml; bump both together.
+    container:
+      image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+    # Gitea runs `run:` in a custom container with sh (dash); force bash.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Format check
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          export t0=$SECONDS; trap 'echo "fmt|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          cargo fmt --all --check
+
+      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+        if: ${{ !cancelled() }}

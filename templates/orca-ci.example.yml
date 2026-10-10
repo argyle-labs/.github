@@ -1,0 +1,188 @@
+# Example: how orca's ci.yml composes the same blocks. orca keeps its own
+# change detection and test scoping, feeding the scoped package list into
+# `args` and its test env (ORCA_TEST_FAST_KDF, ...) into `env`. peacock is an
+# npm workspace, so its node blocks take `working-directory` and its npm
+# scripts as `command`.
+
+# Required checks are exactly `build`, `test` and `lint`: plain aggregate jobs
+# (stable check names, unlike the `caller / called` names of reusable calls)
+# that fail closed on anything but success in their needs (a skipped job
+# counts as a failure, so a failed build turns test and lint red too). Tool blocks
+# stay separate jobs so each shows its own result. To add a tool, add its block
+# job and list it in the matching aggregate's `needs:`; ci-needs-check enforces
+# that. `coverage` is report-only and in no aggregate. Every block after
+# cargo-build `needs:` it; for cargo-fmt and cargo-lock-check that is ordering
+# only.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.scope.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Emits e.g. "-p server -p system" for a PR, "--workspace" otherwise.
+      - id: scope
+        run: echo "packages=--workspace" >> "$GITHUB_OUTPUT"
+
+  cargo-build:
+    needs: changes
+    uses: argyle-labs/.github/.github/workflows/cargo-build.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+    with:
+      runs-on: ci-large
+      args: ${{ needs.changes.outputs.packages }} --all-features
+      env: |
+        ORCA_TEST_FAST_KDF=1
+
+  cargo-test:
+    needs: [changes, cargo-build]
+    uses: argyle-labs/.github/.github/workflows/cargo-test.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+    with:
+      runs-on: ci-large
+      args: ${{ needs.changes.outputs.packages }} --all-features
+      env: |
+        ORCA_TEST_FAST_KDF=1
+
+  peacock-svelte-check:
+    needs: cargo-build
+    uses: argyle-labs/.github/.github/workflows/svelte-check.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+    with:
+      working-directory: peacock
+      command: npm run check
+
+  peacock-vitest:
+    needs: cargo-build
+    uses: argyle-labs/.github/.github/workflows/vitest.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+    with:
+      working-directory: peacock
+      command: npm run test:run
+
+  cargo-fmt:
+    needs: cargo-build
+    uses: argyle-labs/.github/.github/workflows/cargo-fmt.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+
+  cargo-lock-check:
+    needs: cargo-build
+    uses: argyle-labs/.github/.github/workflows/cargo-lock-check.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+
+  cargo-clippy:
+    needs: [changes, cargo-build]
+    uses: argyle-labs/.github/.github/workflows/cargo-clippy.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+    with:
+      runs-on: ci-large
+      args: ${{ needs.changes.outputs.packages }} --all-targets --all-features
+
+  shellcheck:
+    needs: cargo-build
+    uses: argyle-labs/.github/.github/workflows/shellcheck.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+
+  actionlint:
+    needs: cargo-build
+    uses: argyle-labs/.github/.github/workflows/actionlint.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+
+  coverage:
+    needs: [changes, cargo-build]
+    uses: argyle-labs/.github/.github/workflows/cargo-llvm-cov.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+      SCCACHE_S3_ACCESS_KEY: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
+      SCCACHE_S3_SECRET_KEY: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
+    with:
+      runs-on: ci-large
+      args: ${{ needs.changes.outputs.packages }} --all-features
+      # Unique per call when coverage is split across several jobs.
+      artifact-name: lcov-workspace
+      env: |
+        ORCA_TEST_FAST_KDF=1
+
+  ci-needs-check:
+    uses: argyle-labs/.github/.github/workflows/ci-needs-check.yml@main
+    secrets:
+      CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+      CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+
+  # ── Required checks ──
+  build:
+    if: always()
+    needs: [changes, cargo-build]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
+          echo "$NEEDS"
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
+
+  test:
+    if: always()
+    needs: [cargo-test, peacock-svelte-check, peacock-vitest]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
+          echo "$NEEDS"
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
+
+  lint:
+    if: always()
+    needs: [ci-needs-check, cargo-fmt, cargo-clippy, cargo-lock-check, shellcheck, actionlint]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends jq; } \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends jq; }
+          echo "$NEEDS"
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS"
