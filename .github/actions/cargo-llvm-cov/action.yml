@@ -31,6 +31,8 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra nextest_args <<< "$NEXTEST_ARGS"
+        # nextest canonicalizes the --extract-to dir, which a fresh checkout lacks.
+        mkdir -p "${CARGO_TARGET_DIR:-target}/llvm-cov-target"
         cargo llvm-cov nextest --no-report "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
 
     - name: Coverage report
