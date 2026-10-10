@@ -19,6 +19,11 @@ if [ -z "$ENDPOINT" ] || [ -z "$S3_ACCESS_KEY" ] || [ "$all" = '[]' ]; then
   exit 0
 fi
 case "$ENDPOINT" in *://*) base="$ENDPOINT" ;; *) base="http://$ENDPOINT" ;; esac
+# Credentials go to curl via a mode-600 config file, never argv.
+CURL_CFG=$(umask 077 && mktemp "${RUNNER_TEMP:-/tmp}/ci-pass-curl.XXXXXX")
+trap 'rm -f "$CURL_CFG"' EXIT
+esc() { local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
+printf 'user = "%s:%s"\n' "$(esc "$S3_ACCESS_KEY")" "$(esc "$S3_SECRET_KEY")" > "$CURL_CFG"
 
 # One line per marker: "<crate> <job> <url>".
 markers() {
@@ -29,13 +34,13 @@ markers() {
 # Reads marker lines and runs one curl per line, 16 at a time; prints
 # "<crate> <job> <http code>". With PUT_BODY set it writes markers instead.
 s3_each() {
-  export S3_ACCESS_KEY S3_SECRET_KEY PUT_BODY
+  export CURL_CFG PUT_BODY
   # shellcheck disable=SC2016 # expanded by the inner bash
   xargs -P 16 -L 1 bash -c '
     put=()
     [ -z "${PUT_BODY:-}" ] || put=(-X PUT --data-binary "$PUT_BODY")
     code=$(curl -sS --max-time 20 --aws-sigv4 "aws:amz:us-east-1:s3" \
-      --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" -o /dev/null -w "%{http_code}" "${put[@]}" "$3" 2>/dev/null) || code=err
+      --config "$CURL_CFG" -o /dev/null -w "%{http_code}" "${put[@]}" "$3" 2>/dev/null) || code=err
     echo "$1 $2 $code"' _
 }
 

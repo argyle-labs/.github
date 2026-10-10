@@ -89,7 +89,12 @@ runs:
         fi
         case "$ENDPOINT" in *://*) base="$ENDPOINT" ;; *) base="http://$ENDPOINT" ;; esac
         url() { echo "$base/$BUCKET/ci-pass/$GITHUB_REPOSITORY/$1/$HASH"; }
-        s3() { curl -sS --max-time 20 --aws-sigv4 "aws:amz:us-east-1:s3" --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" "$@"; }
+        # Credentials go to curl via a mode-600 config file, never argv.
+        cfg=$(umask 077 && mktemp "${RUNNER_TEMP:-/tmp}/ci-pass-curl.XXXXXX")
+        trap 'rm -f "$cfg"' EXIT
+        esc() { local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
+        printf 'user = "%s:%s"\n' "$(esc "$S3_ACCESS_KEY")" "$(esc "$S3_SECRET_KEY")" > "$cfg"
+        s3() { curl -sS --max-time 20 --aws-sigv4 "aws:amz:us-east-1:s3" --config "$cfg" "$@"; }
         body="${RUNNER_TEMP:-/tmp}/ci-pass-$JOB"
 
         if [ "$MODE" = record ]; then
