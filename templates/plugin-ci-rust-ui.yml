@@ -54,6 +54,7 @@ jobs:
         uses: argyle-labs/.github/.github/actions/source-hash@main
         with:
           image: ci-rust:1.95.0
+          workflow-file: .github/workflows/ci.yml
           extra-paths: ui
       - name: Check pass cache
         id: pass
@@ -120,6 +121,7 @@ jobs:
         uses: argyle-labs/.github/.github/actions/source-hash@main
         with:
           image: ci-rust:1.95.0
+          workflow-file: .github/workflows/ci.yml
           extra-paths: ui
       - name: Check pass cache
         id: pass

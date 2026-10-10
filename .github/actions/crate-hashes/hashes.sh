@@ -33,25 +33,23 @@ closure=$(jq -c '
       | if $next == $seen then $seen else reach($next) end;
     $g | with_entries(.value = (reach(.value) - [.key]))' <<< "$full")
 
-top=$(git rev-parse --show-toplevel)
 
+workflow=${WORKFLOW_FILE:-}
 # GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`, <path> relative to the repo
-# root (not the workspace root).
-workflow=""
-if [ -n "${GITHUB_WORKFLOW_REF:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
-  workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
+# root.
+if [ -z "$workflow" ] && [ -n "${GITHUB_WORKFLOW_REF:-}" ]; then
+  workflow=${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY:-}/"}
   workflow=${workflow%%@*}
 fi
-[ -n "$workflow" ] && [ -f "$top/$workflow" ] || workflow=${WORKFLOW_FILE:-}
 workflow_blob=""
 [ -z "$workflow" ] || workflow_blob=$(git ls-files -s -- ":(top)$workflow")
 if [ -z "$workflow_blob" ]; then
-  echo "::error title=crate-hashes::calling workflow file not found (GITHUB_WORKFLOW_REF / workflow-file)" >&2
+  echo "::error title=crate-hashes::calling workflow file '$workflow' not tracked (workflow-file / GITHUB_WORKFLOW_REF)" >&2
   exit 1
 fi
 
-# Content of the shared composite actions this job runs.
-actions=$(cd "$(dirname "$0")/.." && find . -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+# This repo's actions and workflows, as checked out for this action.
+actions=$(cd "$(dirname "$0")/../.." && find actions workflows -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
 
 declare -A extra
 extra_all=()
@@ -63,6 +61,10 @@ while IFS= read -r line; do
   fi
   key=$(tr -d '[:space:]' <<< "${line%%:*}")
   read -ra paths <<< "${line#*:}"
+  if [ -z "$key" ] || [ "${#paths[@]}" -eq 0 ]; then
+    echo "::error title=crate-hashes::extra-paths line needs a crate and at least one path: $line" >&2
+    exit 1
+  fi
   for p in "${paths[@]}"; do
     if [ -z "$(git ls-files -- "$p")" ]; then
       echo "::error title=crate-hashes::extra-paths entry '$p' ($key) matches no tracked files" >&2
@@ -75,6 +77,41 @@ while IFS= read -r line; do
     extra[$key]="${extra[$key]:-} ${paths[*]}"
   fi
 done <<< "${EXTRA_PATHS:-}"
+
+# Literal include_str!/include_bytes! and rust-embed #[folder] targets outside
+# their crate's directory count as that crate's extra paths. include_* resolves
+# against the including file's dir, #[folder] against the crate root.
+owner() {
+  local best="" best_dir="" name dir
+  while IFS=$'\t' read -r name dir; do
+    if [ "$dir" = . ] || [[ "$1" == "$dir"/* ]]; then
+      if [ -z "$best" ] || [ "${#dir}" -gt "${#best_dir}" ] || [ "$best_dir" = . ]; then
+        best=$name best_dir=$dir
+      fi
+    fi
+  done <<< "$members"
+  printf '%s\t%s\n' "$best" "$best_dir"
+}
+while IFS=: read -r file arg; do
+  [ -n "$file" ] || continue
+  IFS=$'\t' read -r crate cdir < <(owner "$file")
+  [ -n "$crate" ] || continue
+  path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
+  case "$arg" in
+    '#'*) target=$(realpath -m --relative-to=. "$cdir/$path") ;;
+    *) target=$(realpath -m --relative-to=. "$(dirname "$file")/$(dirname "$path")") ;;
+  esac
+  if [ "$cdir" = . ]; then
+    case "$target" in ..|../*) ;; *) continue ;; esac
+  elif [ "$target" = "$cdir" ] || [[ "$target" == "$cdir"/* ]]; then
+    continue
+  fi
+  if [ -z "$(git ls-files -- "$target")" ]; then
+    echo "::error title=crate-hashes::$file embeds '$path' but '$target' has no tracked files" >&2
+    exit 1
+  fi
+  extra[$crate]="${extra[$crate]:-} $target"
+done < <(git grep -oE 'include_(str|bytes)!\("[^"]+"\)|#\[folder *= *"[^"]+"\]' -- '*.rs' || true)
 
 common=$(
   {
