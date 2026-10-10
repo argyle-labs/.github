@@ -69,7 +69,9 @@ inner() {
   if [ "$SLOT_SCCACHE" = true ]; then
     if command -v sccache >/dev/null 2>&1; then
       sccache --stop-server >/dev/null 2>&1 || true
-      [ -n "${SCCACHE_ERROR_LOG:-}" ] && : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
+      if [ -n "${SCCACHE_ERROR_LOG:-}" ]; then
+        : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
+      fi
       if sccache --start-server >/dev/null 2>&1; then
         use_sccache=true
         sccache --zero-stats >/dev/null 2>&1 || true
