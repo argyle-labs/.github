@@ -156,7 +156,7 @@ jobs:
           npm run build
       - name: Publish ui/dist artifact
         if: steps.detect.outputs.present == 'true'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -185,7 +185,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
         if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -222,7 +222,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
         if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -259,7 +259,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
         if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -296,7 +296,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
         if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -325,7 +325,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
         if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -354,7 +354,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
         if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ui-dist
           path: ui/dist
@@ -419,7 +419,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download all target artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Collect release assets

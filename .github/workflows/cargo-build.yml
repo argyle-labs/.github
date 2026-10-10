@@ -122,7 +122,7 @@ jobs:
           read -ra args <<< "$ARGS"
           cargo nextest archive --locked "${args[@]}" --archive-file nextest-archive.tar.zst
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: nextest-archive${{ inputs.name-suffix }}
           path: ${{ inputs.working-directory }}/nextest-archive.tar.zst

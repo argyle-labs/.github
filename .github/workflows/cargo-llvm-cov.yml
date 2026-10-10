@@ -125,7 +125,7 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ hashFiles(format('{0}/lcov.info', inputs.working-directory)) != '' }}
         with:
           name: lcov${{ inputs.name-suffix }}
