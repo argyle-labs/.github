@@ -33,23 +33,42 @@ closure=$(jq -c '
       | if $next == $seen then $seen else reach($next) end;
     $g | with_entries(.value = (reach(.value) - [.key]))' <<< "$full")
 
-# GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`.
+top=$(git rev-parse --show-toplevel)
+
+# GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`, <path> relative to the repo
+# root (not the workspace root).
 workflow=""
 if [ -n "${GITHUB_WORKFLOW_REF:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
   workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
   workflow=${workflow%%@*}
 fi
-[ -n "$workflow" ] && [ -f "$workflow" ] || workflow=${WORKFLOW_FILE:-}
+[ -n "$workflow" ] && [ -f "$top/$workflow" ] || workflow=${WORKFLOW_FILE:-}
 workflow_blob=""
-[ -z "$workflow" ] || workflow_blob=$(git ls-files -s -- "$workflow")
-[ -n "$workflow_blob" ] || echo "::warning title=crate-hashes::calling workflow file not found; its changes will not change the hashes" >&2
+[ -z "$workflow" ] || workflow_blob=$(git ls-files -s -- ":(top)$workflow")
+if [ -z "$workflow_blob" ]; then
+  echo "::error title=crate-hashes::calling workflow file not found (GITHUB_WORKFLOW_REF / workflow-file)" >&2
+  exit 1
+fi
+
+# Content of the shared composite actions this job runs.
+actions=$(cd "$(dirname "$0")/.." && find . -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
 
 declare -A extra
 extra_all=()
 while IFS= read -r line; do
   [ -n "${line//[[:space:]]/}" ] || continue
+  if [[ "$line" != *:* ]]; then
+    echo "::error title=crate-hashes::extra-paths line is not \`crate: path [path...]\`: $line" >&2
+    exit 1
+  fi
   key=$(tr -d '[:space:]' <<< "${line%%:*}")
   read -ra paths <<< "${line#*:}"
+  for p in "${paths[@]}"; do
+    if [ -z "$(git ls-files -- "$p")" ]; then
+      echo "::error title=crate-hashes::extra-paths entry '$p' ($key) matches no tracked files" >&2
+      exit 1
+    fi
+  done
   if [ "$key" = '*' ]; then
     extra_all+=("${paths[@]}")
   else
@@ -61,6 +80,7 @@ common=$(
   {
     echo "image=${IMAGE:-}"
     echo "workflow=$workflow_blob"
+    echo "actions=$actions"
     rustc -vV 2>/dev/null || true
     git ls-files -s -- Cargo.lock Cargo.toml ':(glob)rust-toolchain*' .cargo/config.toml
   } | sha256sum | cut -d' ' -f1
@@ -78,10 +98,18 @@ while IFS=$'\t' read -r name dir; do
   done <<< "$members"
   read -ra mine <<< "${extra[$name]:-}"
   unset "extra[$name]"
-  own[$name]=$(git ls-files -s -- "$dir" "${extra_all[@]}" "${mine[@]}" "${excludes[@]}" | sha256sum | cut -d' ' -f1)
+  # Excludes apply to the crate dir only, never to its extra paths.
+  own[$name]=$(
+    {
+      git ls-files -s -- "$dir" "${excludes[@]}"
+      extras=("${extra_all[@]}" "${mine[@]}")
+      [ "${#extras[@]}" -eq 0 ] || git ls-files -s -- "${extras[@]}"
+    } | sha256sum | cut -d' ' -f1
+  )
 done <<< "$members"
 for k in "${!extra[@]}"; do
-  echo "::warning title=crate-hashes::extra-paths names unknown crate '$k'" >&2
+  echo "::error title=crate-hashes::extra-paths names unknown crate '$k'" >&2
+  exit 1
 done
 
 while IFS=$'\t' read -r name _; do

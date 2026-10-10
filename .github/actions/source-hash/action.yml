@@ -2,8 +2,9 @@ name: Source hash
 description: >
   Hash of every tracked input that can change a Rust build or test result, from
   `git ls-files -s` blob ids (no file contents are read). CI-only and doc-only
-  changes leave it unchanged, except the calling workflow file. Keyed per job by ci-pass-cache, so the hash
-  itself is job-independent.
+  changes leave it unchanged, except the calling workflow file and the shared
+  composite actions. Keyed per job by ci-pass-cache, so the hash itself is
+  job-independent.
 
 inputs:
   image:
@@ -43,18 +44,29 @@ runs:
         WORKFLOW_FILE: ${{ inputs.workflow-file }}
       run: |
         set -euo pipefail
-        # GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`.
+        top=$(git rev-parse --show-toplevel)
+        # GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`, <path> relative to
+        # the repo root (not working-directory).
         workflow=""
         if [ -n "${GITHUB_WORKFLOW_REF:-}" ]; then
           workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
           workflow=${workflow%%@*}
         fi
-        [ -n "$workflow" ] && [ -f "$workflow" ] || workflow=$WORKFLOW_FILE
-        if [ -n "$workflow" ] && git ls-files --error-unmatch -- "$workflow" >/dev/null 2>&1; then
-          EXTRA_PATHS+=$'\n'"$workflow"
-        else
-          echo "::warning title=source-hash::calling workflow file not found; its changes will not change the hash"
+        [ -n "$workflow" ] && [ -f "$top/$workflow" ] || workflow=$WORKFLOW_FILE
+        if [ -z "$workflow" ] || ! git ls-files --error-unmatch -- ":(top)$workflow" >/dev/null 2>&1; then
+          echo "::error title=source-hash::calling workflow file not found (GITHUB_WORKFLOW_REF / workflow-file)"
+          exit 1
         fi
+        while IFS= read -r p; do
+          [ -n "$p" ] || continue
+          if [ -z "$(git ls-files -- "$p")" ]; then
+            echo "::error title=source-hash::extra-paths entry '$p' matches no tracked files"
+            exit 1
+          fi
+        done <<< "$EXTRA_PATHS"
+        EXTRA_PATHS+=$'\n'":(top)$workflow"
+        # Content of the shared composite actions this job runs.
+        actions=$(cd "$GITHUB_ACTION_PATH/.." && find . -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
         specs=(
           ':(glob)**/*.rs'
           ':(glob)**/Cargo.toml'
@@ -78,6 +90,7 @@ runs:
         hash=$(
           {
             echo "image=$IMAGE"
+            echo "actions=$actions"
             rustc -vV 2>/dev/null || true
             printf '%s\n' "${specs[@]}" | sort -u | xargs -d '\n' git ls-files -s --
           } | sha256sum | cut -d' ' -f1
