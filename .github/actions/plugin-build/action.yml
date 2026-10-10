@@ -153,7 +153,8 @@ runs:
 
     # Skipped on macOS: the build there uses a CARGO_TARGET_DIR outside the
     # workspace that rust-cache does not track.
-    - uses: Swatinem/rust-cache@v2
+    - name: Cache cargo (rust-cache)
+      uses: Swatinem/rust-cache@v2
       if: ${{ runner.os != 'macOS' }}
       with:
         key: ${{ inputs.target }}
@@ -498,7 +499,8 @@ runs:
       shell: bash
       run: sccache --stop-server >/dev/null 2>&1 || true
 
-    - uses: actions/upload-artifact@v3
+    - name: Upload plugin package
+      uses: actions/upload-artifact@v3
       with:
         name: plugin-${{ inputs.target }}
         path: dist/*

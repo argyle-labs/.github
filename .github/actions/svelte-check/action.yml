@@ -22,11 +22,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+    - name: Fetch artifacts
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
       with:
         artifacts: ${{ inputs.artifacts }}
 
-    - if: ${{ inputs.install == 'true' }}
+    - name: Install npm deps (npm ci)
+      if: ${{ inputs.install == 'true' }}
       uses: argyle-labs/.github/.github/actions/node-install@main
       with:
         working-directory: ${{ inputs.working-directory }}

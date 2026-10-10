@@ -39,18 +39,23 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Rust (toolchain, sccache)
+        uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           wrap-cc: 'true'
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - uses: argyle-labs/.github/.github/actions/vite-build@main
+      - name: Vite build
+        uses: argyle-labs/.github/.github/actions/vite-build@main
         with:
           working-directory: ui
-      - uses: argyle-labs/.github/.github/actions/cargo-build@main
-      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+      - name: Build test archive (cargo llvm-cov nextest-archive)
+        uses: argyle-labs/.github/.github/actions/cargo-build@main
+      - name: CI summary
+        uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}
 
   test:
@@ -65,26 +70,32 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Rust (toolchain, sccache)
+        uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           wrap-cc: 'true'
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - uses: argyle-labs/.github/.github/actions/cargo-test@main
+      - name: Test + coverage (cargo nextest)
+        uses: argyle-labs/.github/.github/actions/cargo-test@main
         with:
           artifacts: vite-dist:ui/dist
-      - uses: argyle-labs/.github/.github/actions/vitest@main
+      - name: Vitest
+        uses: argyle-labs/.github/.github/actions/vitest@main
         if: ${{ !cancelled() }}
         with:
           working-directory: ui
-      - uses: argyle-labs/.github/.github/actions/svelte-check@main
+      - name: svelte-check
+        uses: argyle-labs/.github/.github/actions/svelte-check@main
         if: ${{ !cancelled() }}
         with:
           working-directory: ui
           install: 'false'
-      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+      - name: CI summary
+        uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}
 
   lint:
@@ -99,19 +110,25 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: argyle-labs/.github/.github/actions/rust-setup@main
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Rust (toolchain, sccache)
+        uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           wrap-cc: 'true'
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - uses: argyle-labs/.github/.github/actions/cargo-fmt@main
-      - uses: argyle-labs/.github/.github/actions/cargo-clippy@main
+      - name: Format (cargo fmt)
+        uses: argyle-labs/.github/.github/actions/cargo-fmt@main
+      - name: Clippy
+        uses: argyle-labs/.github/.github/actions/cargo-clippy@main
         if: ${{ !cancelled() }}
         with:
           artifacts: vite-dist:ui/dist
-      - uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
+      - name: Lock file check
+        uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
         if: ${{ !cancelled() }}
-      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+      - name: CI summary
+        uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}

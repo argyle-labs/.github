@@ -31,7 +31,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+    - name: Fetch artifacts
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
       with:
         artifacts: ${{ inputs.artifacts }}
 
@@ -57,7 +58,8 @@ runs:
           cargo nextest archive --locked "${args[@]}" --archive-file nextest-archive.tar.zst
         fi
 
-    - uses: actions/upload-artifact@v3
+    - name: Upload test archive
+      uses: actions/upload-artifact@v3
       with:
         name: nextest-archive${{ inputs.name-suffix }}
         path: ${{ inputs.working-directory }}/nextest-archive.tar.zst

@@ -6,7 +6,8 @@ description: >
 runs:
   using: composite
   steps:
-    - shell: bash
+    - name: Write phase timings summary
+      shell: bash
       run: |
         {
           echo "### Phase timings"
