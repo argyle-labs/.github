@@ -16,6 +16,10 @@ inputs:
     required: true
   password:
     required: true
+  setup-buildx:
+    description: "'false' to only log in, reusing a Buildx set up by an earlier login (a second registry)."
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -24,6 +28,7 @@ runs:
     # insecure-registries; see ci-image.yml.
     - name: Buildkit registry config (only for a plain-HTTP endpoint)
       id: buildkit
+      if: ${{ inputs.setup-buildx == 'true' }}
       shell: bash
       env:
         REGISTRY: ${{ inputs.registry }}
@@ -41,6 +46,7 @@ runs:
         fi
 
     - name: Set up Buildx
+      if: ${{ inputs.setup-buildx == 'true' }}
       uses: docker/setup-buildx-action@v3
       with:
         driver-opts: network=host

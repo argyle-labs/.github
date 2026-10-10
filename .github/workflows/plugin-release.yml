@@ -68,6 +68,13 @@ on:
         required: false
         type: string
         default: ""
+      image_public:
+        description: >-
+          Mirror the release tags (version + latest/rc, never tree-*) to
+          ghcr.io/<image_name> after promote. Ignored when image_name is empty.
+        required: false
+        type: boolean
+        default: true
       image_wait_minutes:
         description: "Minutes to wait for :tree-<sha> of the release commit before failing."
         required: false
@@ -510,6 +517,40 @@ jobs:
           registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
           username: ${{ secrets.CI_REGISTRY_USER }}
           password: ${{ secrets.CI_REGISTRY_TOKEN }}
+
+      # Gitea is the source of truth; a failed public mirror warns, never fails the release.
+      - name: Log in to ghcr.io (public image mirror)
+        id: ghcr-login
+        if: ${{ inputs.image_name != '' && inputs.image_public }}
+        continue-on-error: true
+        uses: argyle-labs/.github/.github/actions/registry-login@main
+        with:
+          registry: ghcr.io
+          setup-buildx: "false"
+          username: x-access-token
+          password: ${{ secrets.GH_TOKEN }}
+
+      - name: Mirror image release tags to ghcr.io
+        if: ${{ inputs.image_name != '' && inputs.image_public }}
+        env:
+          REGISTRY: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
+          NAME: ${{ inputs.image_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          CHANNEL_TAG: ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+          LOGIN_OUTCOME: ${{ steps.ghcr-login.outcome }}
+        run: |
+          set -uo pipefail
+          src="$REGISTRY/${NAME,,}:$VERSION"
+          dst="ghcr.io/${NAME,,}"
+          fail() {
+            echo "::warning title=image-mirror::$1; release continues (Gitea is the source of truth)"
+            printf 'Public mirror FAILED: %s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          [ "$LOGIN_OUTCOME" = "success" ] || fail "ghcr.io login failed (check secrets.GH_TOKEN)"
+          docker buildx imagetools create --tag "$dst:$VERSION" --tag "$dst:$CHANNEL_TAG" "$src" \
+            || fail "imagetools create $src → $dst failed"
+          printf 'Mirrored %s → %s:%s %s:%s\n' "$src" "$dst" "$VERSION" "$dst" "$CHANNEL_TAG" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Create Gitea Release (pipeline-tagged)
         # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]]).
