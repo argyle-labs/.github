@@ -212,7 +212,7 @@ Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` t
 
 ### Job setup: `rust-setup`
 
-Composite actions cannot read `secrets`, so credentials come in as inputs set from `secrets.*` by the caller. `rust-setup` runs once per job and owns the job-wide cargo environment: `sccache-endpoint` (`vars.SCCACHE_ENDPOINT`), `sccache-access-key` / `sccache-secret-key` (`secrets.SCCACHE_S3_ACCESS_KEY` / `secrets.SCCACHE_S3_SECRET_KEY`), `wrap-cc: 'true'`, `build-jobs`, `debuginfo` (default `'0'`), `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data), `orca-fetch-token`, and `working-directory`.
+Composite actions cannot read `secrets`, so credentials come in as inputs set from `secrets.*` by the caller. `rust-setup` runs once per job and owns the job-wide cargo environment: `sccache-endpoint` (`vars.SCCACHE_ENDPOINT`), `sccache-access-key` / `sccache-secret-key` (`secrets.SCCACHE_S3_ACCESS_KEY` / `secrets.SCCACHE_S3_SECRET_KEY`), `wrap-cc: 'true'`, `build-jobs`, `debuginfo` (default `'0'`), `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data), `orca-fetch-token`, `working-directory`, and `drop-cargo-config` (default `'true'`: deletes `.cargo/config.toml`, where plugins keep a local-dev path patch; orca passes `'false'` because its committed config carries `LIBSQLITE3_FLAGS`).
 
 ### Action catalogue
 
