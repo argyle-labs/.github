@@ -164,7 +164,7 @@ Each plugin is its own repo: an out-of-process subprocess whose only orca depend
 
 ## CI building blocks
 
-Each repo writes its own `.github/workflows/ci.yml` out of **composite actions only, no reusable workflows**: one action per tool under [`.github/actions/`](.github/actions), used as steps inside the repo's own jobs. A reusable-workflow call posts a status for the caller job and for each inner job, so every check showed twice and the runner queue carried double the jobs; a step posts nothing of its own.
+Each repo writes its own `.github/workflows/ci.yml` out of **composite actions only**: one action per tool under [`.github/actions/`](.github/actions), used as steps inside the repo's own jobs. The reusable workflows still under [`.github/workflows/`](.github/workflows) are deprecated and will be deleted once no repo calls them. A reusable-workflow call posts a status for the caller job and for each inner job, so every check showed twice and the runner queue carried double the jobs; a step posts nothing of its own.
 
 Start from a template:
 
@@ -180,19 +180,19 @@ Every repo has exactly three required checks, which are plain jobs named `build`
 
 - `build`: `cargo-build` (UI repos run `vite-build` first in the same job).
 - `test` (`needs: build`): `cargo-test`, which runs the suite once under cargo-llvm-cov and also reports coverage, plus `vitest` / `svelte-check` where used.
-- `lint` (`needs: build`): `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, plus `eslint` / `prettier` / `tsc` / `shellcheck` / `actionlint` where used.
+- `lint` (independent of `build`; UI repos add `needs: build` for the Vite bundle): `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, plus `eslint` / `prettier` / `tsc` / `shellcheck` / `actionlint` where used.
 
 ### What each job compiles
 
 | Job | Compiles | Reuses |
 |---|---|---|
 | `build` | the Vite bundle (UI repos); every test binary, once, coverage-instrumented, into the nextest archive | |
-| `test` | doctests only (`cargo test --doc`, sccache-backed) | the nextest archive: tests run once from it under `cargo llvm-cov nextest`, giving results plus lcov and summary |
-| `lint` | clippy's check build (`--all-targets`, sccache-backed); fmt and lock-check compile nothing | |
+| `test` | doctests (`cargo test --doc`, uninstrumented, sccache-backed): a second compile of the library crates | the nextest archive: tests run once from it under `cargo llvm-cov nextest`, giving results plus lcov and summary |
+| `lint` | clippy's check build (`--all-targets`, sccache-backed): a second compile; fmt and lock-check compile nothing | |
 
-The only duplicate compile is clippy's check build: check-mode output cannot reuse a plain build's `target/`, so it relies on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. A repo that sets `coverage: 'false'` must set it on both `cargo-build` and `cargo-test`.
+Two compiles duplicate `build`'s work: doctests, which nextest cannot run so they build uninstrumented outside the archive, and clippy's check build, whose check-mode output cannot reuse a plain build's `target/`. Both rely on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. A repo that sets `coverage: 'false'` must set it on both `cargo-build` and `cargo-test`.
 
-Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats).
+Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every tool step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats).
 
 ### Adding a tool step
 

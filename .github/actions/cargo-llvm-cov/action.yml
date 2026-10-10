@@ -39,14 +39,14 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         export t0=$SECONDS; trap 'echo "coverage|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-        if ! cargo llvm-cov report --lcov --output-path lcov.info; then
+        if ! cargo llvm-cov report --nextest-archive-file nextest-archive.tar.zst --lcov --output-path lcov.info; then
           echo "::warning title=coverage::cargo llvm-cov report failed; coverage is report-only"
           exit 0
         fi
         {
           echo "### Coverage"
           echo '```'
-          cargo llvm-cov report --summary-only
+          cargo llvm-cov report --nextest-archive-file nextest-archive.tar.zst --summary-only
           echo '```'
         } | tee -a "$GITHUB_STEP_SUMMARY" || echo "::warning title=coverage::coverage summary failed; coverage is report-only"
 

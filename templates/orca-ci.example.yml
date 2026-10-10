@@ -100,7 +100,7 @@ jobs:
         if: ${{ !cancelled() }}
 
   lint:
-    needs: [changes, build]
+    needs: changes
     runs-on: ci-large
     container:
       image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
