@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Prints a JSON map crate -> sha256 of every input that can change that crate's
 # build or test result. Run from the workspace root. Env: IMAGE (CI image tag),
-# WORKFLOW_FILE (calling workflow path, fallback for GITHUB_WORKFLOW_REF),
+# WORKFLOW_FILE (calling workflow path; GITHUB_WORKFLOW_REF when empty),
 # EXTRA_PATHS (lines of `crate: path [path...]`; `*` applies to every crate).
+# Literal include_str!/include_bytes!/#[folder] targets outside a crate are
+# added to it automatically. Any unresolvable input (workflow file, path, crate,
+# include) fails the run rather than hashing less.
 set -euo pipefail
 
 meta=$(cargo metadata --format-version 1 --no-deps)
@@ -92,26 +95,50 @@ owner() {
   done <<< "$members"
   printf '%s\t%s\n' "$best" "$best_dir"
 }
-while IFS=: read -r file arg; do
-  [ -n "$file" ] || continue
+embed_re='include_(str|bytes)!\("[^"]+"\)|#\[folder *= *"[^"]+"\]|include_(str|bytes)!\( *(concat!\( *)?env!'
+while IFS= read -r hit; do
+  file=${hit%%:*}
+  line=${hit#*:}
+  line=${line#*:}
+  [[ "$line" =~ ^[[:space:]]*// ]] && continue
   IFS=$'\t' read -r crate cdir < <(owner "$file")
   [ -n "$crate" ] || continue
-  path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
-  case "$arg" in
-    '#'*) target=$(realpath -m --relative-to=. "$cdir/$path") ;;
-    *) target=$(realpath -m --relative-to=. "$(dirname "$file")/$(dirname "$path")") ;;
-  esac
-  if [ "$cdir" = . ]; then
-    case "$target" in ..|../*) ;; *) continue ;; esac
-  elif [ "$target" = "$cdir" ] || [[ "$target" == "$cdir"/* ]]; then
-    continue
-  fi
-  if [ -z "$(git ls-files -- "$target")" ]; then
-    echo "::error title=crate-hashes::$file embeds '$path' but '$target' has no tracked files" >&2
-    exit 1
-  fi
-  extra[$crate]="${extra[$crate]:-} $target"
-done < <(git grep -oE 'include_(str|bytes)!\("[^"]+"\)|#\[folder *= *"[^"]+"\]' -- '*.rs' || true)
+  while IFS= read -r arg; do
+    if [[ "$arg" == *'env!' ]]; then
+      echo "::error title=crate-hashes::$file uses env!() in an include path; add an extra-paths entry instead" >&2
+      exit 1
+    fi
+    path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
+    base=$(dirname "$file")
+    [[ "$arg" == '#'* ]] && base=$cdir
+    # shellcheck disable=SC2016 # literal variable names
+    for v in '${CARGO_MANIFEST_DIR}' '$CARGO_MANIFEST_DIR'; do
+      if [[ "$path" == "$v"* ]]; then
+        path=.${path#"$v"}
+        base=$cdir
+      fi
+    done
+    if [[ "$path" == *'$'* ]]; then
+      echo "::error title=crate-hashes::$file embeds '$path' with an unresolvable variable; add an extra-paths entry instead" >&2
+      exit 1
+    fi
+    if [[ "$arg" == '#'* ]]; then
+      target=$(realpath -m --relative-to=. "$base/$path")
+    else
+      target=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
+    fi
+    if [ "$cdir" = . ]; then
+      case "$target" in ..|../*) ;; *) continue ;; esac
+    elif [ "$target" = "$cdir" ] || [[ "$target" == "$cdir"/* ]]; then
+      continue
+    fi
+    if [ -z "$(git ls-files -- "$target")" ]; then
+      echo "::error title=crate-hashes::$file embeds '$path' but '$target' has no tracked files" >&2
+      exit 1
+    fi
+    extra[$crate]="${extra[$crate]:-} $target"
+  done < <(grep -oE "$embed_re" <<< "$line")
+done < <(git grep -nE "$embed_re" -- '*.rs' || true)
 
 common=$(
   {
