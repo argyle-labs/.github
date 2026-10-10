@@ -180,7 +180,7 @@ Every repo has exactly three required checks, which are plain jobs named `build`
 
 - `build`: `cargo-build` (UI repos run `vite-build` first in the same job).
 - `test` (`needs: build`): `cargo-test`, which runs the suite once under cargo-llvm-cov and also reports coverage, plus `vitest` / `svelte-check` where used.
-- `lint` (independent of `build`; UI repos add `needs: build` for the Vite bundle): `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, plus `eslint` / `prettier` / `tsc` / `shellcheck` / `actionlint` where used.
+- `lint` (`needs: build`, in parallel with `test`; order is build, then test + lint): `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, plus `eslint` / `prettier` / `tsc` / `shellcheck` / `actionlint` where used.
 
 ### What each job compiles
 
@@ -188,7 +188,7 @@ Every repo has exactly three required checks, which are plain jobs named `build`
 |---|---|---|
 | `build` | the Vite bundle (UI repos); every test binary, once, coverage-instrumented, into the nextest archive | |
 | `test` | doctests (`cargo test --doc`, uninstrumented, sccache-backed): a second compile of the library crates | the nextest archive: tests run once from it under `cargo llvm-cov nextest`, giving results plus lcov and summary |
-| `lint` | clippy's check build (`--all-targets`, sccache-backed): a second compile; fmt and lock-check compile nothing | |
+| `lint` (after `build`) | clippy's check build (`--all-targets`, sccache-backed): a second compile; fmt and lock-check compile nothing | |
 
 Two compiles duplicate `build`'s work: doctests, which nextest cannot run so they build uninstrumented outside the archive, and clippy's check build, whose check-mode output cannot reuse a plain build's `target/`. Both rely on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. A repo that sets `coverage: 'false'` must set it on both `cargo-build` and `cargo-test`.
 
