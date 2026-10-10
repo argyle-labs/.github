@@ -8,8 +8,9 @@
 # once, coverage-instrumented: `test` also reports coverage (report-only).
 # Each job composes tool actions as steps, so each job IS one
 # check. Later steps run `if: !cancelled()` so every tool reports.
-# `build` and `test` skip their heavy steps when the source hash already
-# passed (see the README's pass cache section); `lint` always runs.
+# `build` and `test` compile and test only the crates whose inputs changed
+# since a recorded pass, intersected with `changes` (see the README's
+# per-crate pass cache section); `lint` and the peacock checks always run.
 name: CI
 
 on:
@@ -57,31 +58,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Source hash
+      - name: Crate hashes
         id: src
-        uses: argyle-labs/.github/.github/actions/source-hash@main
+        uses: argyle-labs/.github/.github/actions/crate-hashes@main
         with:
           image: ci-rust:1.95.0
-          extra-paths: peacock
-      - name: Check pass cache
+      - name: Check pass cache per crate
         id: pass
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
         with:
-          mode: check
+          mode: check-batch
           job: build
           also-require: test
-          hash: ${{ steps.src.outputs.hash }}
+          hashes: ${{ steps.src.outputs.hashes }}
           force: ${{ inputs.force && 'true' || 'false' }}
           endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - name: Reuse unchanged pass
-        if: ${{ steps.pass.outputs.hit == 'true' }}
+      - name: Select crates to build
+        id: sel
         env:
-          PASS_SHA: ${{ steps.pass.outputs.sha }}
-        run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+          MISSING: ${{ steps.pass.outputs.missing }}
+          CHANGED: ${{ needs.changes.outputs.packages }}
+        run: |
+          crates=$(jq -c --arg changed "$CHANGED" '
+            if $changed == "--workspace" then .
+            else ($changed | split(" ") | map(select(. != "" and . != "-p"))) as $w
+              | map(select(. as $c | $w | index($c)))
+            end' <<< "$MISSING")
+          echo "crates=$crates" >> "$GITHUB_OUTPUT"
+          echo "packages=$(jq -r 'map("-p " + .) | join(" ")' <<< "$crates")" >> "$GITHUB_OUTPUT"
+          if [ "$crates" = '[]' ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "All affected crates unchanged — reusing passes" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Set up Rust (toolchain, sccache)
-        if: ${{ steps.pass.outputs.hit != 'true' }}
+        if: ${{ steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           drop-cargo-config: 'false'
@@ -92,17 +104,18 @@ jobs:
           env: |
             ORCA_TEST_FAST_KDF=1
       - name: Build test archive (cargo llvm-cov nextest-archive)
-        if: ${{ steps.pass.outputs.hit != 'true' }}
+        if: ${{ steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/cargo-build@main
         with:
-          args: ${{ needs.changes.outputs.packages }} --all-features
+          args: ${{ steps.sel.outputs.packages }} --all-features
       - name: Record pass
-        if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+        if: ${{ success() && steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
         with:
-          mode: record
+          mode: record-batch
           job: build
-          hash: ${{ steps.src.outputs.hash }}
+          hashes: ${{ steps.src.outputs.hashes }}
+          crates: ${{ steps.sel.outputs.crates }}
           endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
@@ -124,30 +137,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Source hash
+      - name: Crate hashes
         id: src
-        uses: argyle-labs/.github/.github/actions/source-hash@main
+        uses: argyle-labs/.github/.github/actions/crate-hashes@main
         with:
           image: ci-rust:1.95.0
-          extra-paths: peacock
-      - name: Check pass cache
+      - name: Check pass cache per crate
         id: pass
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
         with:
-          mode: check
+          mode: check-batch
           job: test
-          hash: ${{ steps.src.outputs.hash }}
+          hashes: ${{ steps.src.outputs.hashes }}
           force: ${{ inputs.force && 'true' || 'false' }}
           endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - name: Reuse unchanged pass
-        if: ${{ steps.pass.outputs.hit == 'true' }}
+      - name: Select crates to test
+        id: sel
         env:
-          PASS_SHA: ${{ steps.pass.outputs.sha }}
-        run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+          MISSING: ${{ steps.pass.outputs.missing }}
+          CHANGED: ${{ needs.changes.outputs.packages }}
+        run: |
+          crates=$(jq -c --arg changed "$CHANGED" '
+            if $changed == "--workspace" then .
+            else ($changed | split(" ") | map(select(. != "" and . != "-p"))) as $w
+              | map(select(. as $c | $w | index($c)))
+            end' <<< "$MISSING")
+          echo "crates=$crates" >> "$GITHUB_OUTPUT"
+          echo "packages=$(jq -r 'map("-p " + .) | join(" ")' <<< "$crates")" >> "$GITHUB_OUTPUT"
+          if [ "$crates" = '[]' ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "All affected crates unchanged — reusing passes" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Set up Rust (toolchain, sccache)
-        if: ${{ steps.pass.outputs.hit != 'true' }}
+        if: ${{ steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/rust-setup@main
         with:
           drop-cargo-config: 'false'
@@ -158,30 +182,31 @@ jobs:
           env: |
             ORCA_TEST_FAST_KDF=1
       - name: Test + coverage (cargo nextest)
-        if: ${{ steps.pass.outputs.hit != 'true' }}
+        if: ${{ steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/cargo-test@main
         with:
-          args: ${{ needs.changes.outputs.packages }} --all-features
+          args: ${{ steps.sel.outputs.packages }} --all-features
       - name: svelte-check
         uses: argyle-labs/.github/.github/actions/svelte-check@main
-        if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' }}
+        if: ${{ !cancelled() }}
         with:
           working-directory: peacock
           command: npm run check
       - name: Vitest
         uses: argyle-labs/.github/.github/actions/vitest@main
-        if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' }}
+        if: ${{ !cancelled() }}
         with:
           working-directory: peacock
           command: npm run test:run
           install: 'false'
       - name: Record pass
-        if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+        if: ${{ success() && steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
         with:
-          mode: record
+          mode: record-batch
           job: test
-          hash: ${{ steps.src.outputs.hash }}
+          hashes: ${{ steps.src.outputs.hashes }}
+          crates: ${{ steps.sel.outputs.crates }}
           endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}

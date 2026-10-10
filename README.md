@@ -206,6 +206,14 @@ Rule: `test` skips when its own marker exists. `build` skips only when BOTH the 
 
 Force a full run with `workflow_dispatch` and `force: true` (the templates declare the input). Any cache backend failure (no endpoint/keys, network error, non-200/404 reply) is a miss with a warning, so a MinIO outage means a full run, never a false pass; a failed record only warns.
 
+### Per-crate pass cache: multi-crate workspaces
+
+A plugin is one crate, so the whole-repo `source-hash` above is the right granularity for the plugin templates. A multi-crate workspace (orca) instead builds and tests only the crates whose inputs changed since a recorded pass: `build` and `test` run `crate-hashes`, then `ci-pass-cache` in `check-batch` mode, then a `Select crates to build` / `Select crates to test` step that intersects the misses with the `changes` selection (on PRs; `--workspace` keeps every miss) and passes the result to cargo as `-p` args. An empty list prints "All affected crates unchanged — reusing passes" and skips the heavy steps. On success `record-batch` writes a marker for each crate that ran.
+
+A crate's hash is sha256 over: the `git ls-files -s` blob ids of its own directory (minus any member nested inside it), the own-file hashes of every workspace crate in its dependency closure (normal, dev and build deps, from `cargo metadata`), and the workspace-wide inputs: the `Cargo.lock` blob, root `Cargo.toml`, `rust-toolchain*`, `.cargo/config.toml`, the `image` input and `rustc -vV`. Dependency hashes propagate because a crate's build and test result depends on the code of everything it links: change a leaf and that leaf plus every crate that depends on it, directly or transitively, gets a new hash, and nothing else does. The closure (rather than a recursive hash of hashes) keeps dev-dependency cycles finite. Files outside a crate's directory that it reads (an `include_str!` reaching into another tree, frontend assets) are not covered; such crates belong in a whole-repo `source-hash` job.
+
+Markers live at `s3://<sccache bucket>/ci-pass/<repo>/<job>/crate/<name>/<hash>`, body = the commit sha. All lookups run in one pass (parallel `curl --aws-sigv4`). As with the whole-repo cache, `build` skips a crate only when both its `build` and `test` markers exist, so the nextest archive always contains every crate `test` runs. Any backend failure (no endpoint/keys, network error, a reply other than 200/404, a missing result) reports every crate as needing work, never a false hit. Force a full run with `workflow_dispatch` and `force: true`.
+
 ### Adding a tool step
 
 Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` to the job of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
@@ -237,7 +245,7 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 
 `name-suffix` keeps artifact names unique when a repo builds more than once per run; cargo-build and its cargo-test take the same suffix.
 
-Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash` and `ci-pass-cache` (the pass cache above).
+Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash`, `crate-hashes` and `ci-pass-cache` (the pass caches above).
 
 ### Deprecated: reusable-workflow blocks
 
