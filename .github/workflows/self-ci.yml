@@ -1,0 +1,21 @@
+name: Self CI
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: actionlint
+        uses: ./.github/actions/actionlint
+      - name: ShellCheck
+        if: ${{ !cancelled() }}
+        run: |
+          shopt -s globstar nullglob
+          shellcheck .github/actions/**/*.sh

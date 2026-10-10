@@ -182,6 +182,9 @@ jobs:
       - name: Lock file check
         uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
         if: ${{ !cancelled() }}
+      - name: actionlint
+        uses: argyle-labs/.github/.github/actions/actionlint@main
+        if: ${{ !cancelled() }}
       - name: CI summary
         uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}

@@ -1,5 +1,5 @@
 name: actionlint
-description: "actionlint over the repo's workflows."
+description: "actionlint over the repo's workflows; uses .github/actionlint.yaml when present."
 
 inputs:
   working-directory:
@@ -9,18 +9,27 @@ inputs:
   version:
     description: 'actionlint release.'
     required: false
-    default: "1.7.7"
+    default: "1.7.12"
 
 runs:
   using: composite
   steps:
-    - name: actionlint
+    - name: Install actionlint
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
         VERSION: ${{ inputs.version }}
       run: |
-        export t0=$SECONDS; trap 'echo "actionlint|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         v="$VERSION"
         curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz" | tar -xz -C /tmp actionlint
-        /tmp/actionlint
+
+    - name: actionlint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        export t0=$SECONDS; trap 'echo "actionlint|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        config=.github/actionlint.yaml
+        if [ ! -f "$config" ]; then
+          config=/tmp/actionlint-default.yaml
+          printf 'self-hosted-runner:\n  labels:\n    - ci-large\n' > "$config"
+        fi
+        /tmp/actionlint -config-file "$config"

@@ -22,7 +22,7 @@ on:
           actionlint release.
         required: false
         type: string
-        default: '1.7.7'
+        default: '1.7.12'
     secrets:
       CI_REGISTRY_USER:
         required: false
@@ -52,17 +52,15 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: actionlint
-        working-directory: ${{ inputs.working-directory }}
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          export t0=$SECONDS; trap 'echo "actionlint|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          v="$VERSION"
-          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz" | tar -xz -C /tmp actionlint
-          /tmp/actionlint
+        uses: argyle-labs/.github/.github/actions/actionlint@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          version: ${{ inputs.version }}
 
-      - uses: argyle-labs/.github/.github/actions/ci-summary@main
+      - name: CI summary
+        uses: argyle-labs/.github/.github/actions/ci-summary@main
         if: ${{ !cancelled() }}
