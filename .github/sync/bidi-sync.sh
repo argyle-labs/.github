@@ -152,8 +152,8 @@ main() {
   both=$(comm -12 <(printf '%s\n' "$gitea") <(printf '%s\n' "$github"))
   only_gt=$(comm -23 <(printf '%s\n' "$gitea") <(printf '%s\n' "$github"))
   only_gh=$(comm -13 <(printf '%s\n' "$gitea") <(printf '%s\n' "$github"))
-  [ -n "$only_gt" ] && warn "Gitea-only repos (not synced — create on GitHub to include): $(echo $only_gt | tr '\n' ' ')"
-  [ -n "$only_gh" ] && warn "GitHub-only repos (not synced — create on Gitea to include): $(echo $only_gh | tr '\n' ' ')"
+  [ -n "$only_gt" ] && warn "Gitea-only repos (not synced — create on GitHub to include): $(echo "$only_gt" | tr '\n' ' ')"
+  [ -n "$only_gh" ] && warn "GitHub-only repos (not synced — create on Gitea to include): $(echo "$only_gh" | tr '\n' ' ')"
 
   if [ -n "${ONLY_REPO:-}" ]; then sync_repo "$ONLY_REPO"; else
     while IFS= read -r r; do [ -n "$r" ] && sync_repo "$r"; done <<< "$both"
