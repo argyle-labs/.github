@@ -45,7 +45,7 @@ runs:
         artifacts: ${{ inputs.artifacts }}
 
     - name: Download test archive
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: nextest-archive${{ inputs.name-suffix }}
         path: ${{ inputs.working-directory }}
