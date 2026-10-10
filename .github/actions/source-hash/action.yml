@@ -2,7 +2,7 @@ name: Source hash
 description: >
   Hash of every tracked input that can change a Rust build or test result, from
   `git ls-files -s` blob ids (no file contents are read). CI-only and doc-only
-  changes leave it unchanged. Keyed per job by ci-pass-cache, so the hash
+  changes leave it unchanged, except the calling workflow file. Keyed per job by ci-pass-cache, so the hash
   itself is job-independent.
 
 inputs:
@@ -15,6 +15,10 @@ inputs:
       Extra pathspecs, one per line, that feed the build or tests: frontend
       sources, data dirs reached by include_str!/include_bytes! through a
       non-literal path (concat!/env!), or anything else the defaults miss.
+    required: false
+    default: ""
+  workflow-file:
+    description: 'Calling workflow path, used when GITHUB_WORKFLOW_REF is unset or unresolvable.'
     required: false
     default: ""
   working-directory:
@@ -36,8 +40,21 @@ runs:
       env:
         IMAGE: ${{ inputs.image }}
         EXTRA_PATHS: ${{ inputs.extra-paths }}
+        WORKFLOW_FILE: ${{ inputs.workflow-file }}
       run: |
         set -euo pipefail
+        # GITHUB_WORKFLOW_REF is `owner/repo/<path>@<ref>`.
+        workflow=""
+        if [ -n "${GITHUB_WORKFLOW_REF:-}" ]; then
+          workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
+          workflow=${workflow%%@*}
+        fi
+        [ -n "$workflow" ] && [ -f "$workflow" ] || workflow=$WORKFLOW_FILE
+        if [ -n "$workflow" ] && git ls-files --error-unmatch -- "$workflow" >/dev/null 2>&1; then
+          EXTRA_PATHS+=$'\n'"$workflow"
+        else
+          echo "::warning title=source-hash::calling workflow file not found; its changes will not change the hash"
+        fi
         specs=(
           ':(glob)**/*.rs'
           ':(glob)**/Cargo.toml'

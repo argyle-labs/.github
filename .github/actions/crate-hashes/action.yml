@@ -4,11 +4,23 @@ description: >
   (`git ls-files -s` blob ids), the own-file hashes of every workspace crate it
   depends on (normal, dev and build, transitively), and the workspace-wide
   inputs (Cargo.lock, root Cargo.toml, rust-toolchain*, .cargo/config.toml,
-  image tag, `rustc -vV`). Feeds ci-pass-cache's batch modes.
+  the calling workflow file, image tag, `rustc -vV`). The closure is resolved
+  with all features enabled. Feeds ci-pass-cache's batch modes.
 
 inputs:
   image:
     description: 'CI image reference (e.g. `ci-rust:1.95.0`); a toolchain bump changes every hash.'
+    required: false
+    default: ""
+  extra-paths:
+    description: >
+      Out-of-crate inputs, one `crate: path [path...]` per line, hashed as that
+      crate's own files (so its dependents inherit them). `*: path` applies to
+      every crate.
+    required: false
+    default: ""
+  workflow-file:
+    description: 'Calling workflow path, used when GITHUB_WORKFLOW_REF is unset or unresolvable.'
     required: false
     default: ""
   working-directory:
@@ -29,6 +41,8 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         IMAGE: ${{ inputs.image }}
+        EXTRA_PATHS: ${{ inputs.extra-paths }}
+        WORKFLOW_FILE: ${{ inputs.workflow-file }}
       run: |
         set -euo pipefail
         hashes=$("$GITHUB_ACTION_PATH/hashes.sh")
