@@ -668,7 +668,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ needs.version.outputs.draft != 'true' }}
 
-      - name: Commit release version + refresh lock
+      - name: Commit release version, bump internal dep pins + refresh lock
         id: bump
         if: ${{ needs.version.outputs.draft != 'true' }}
         working-directory: repo
@@ -678,8 +678,15 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          old="$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/' || true)"
           # Same first-workspace-version rewrite build-target uses (portable sed).
           sed -i 's/^version = ".*"/version = "'"$REL_VERSION"'"/' Cargo.toml
+          # Internal path deps pin `=<workspace version>`; bump only those, so a
+          # member with its own frozen version (e.g. plugin-abi =0.1.0) is left alone.
+          if [ -n "$old" ]; then
+            old_re="$(printf '%s' "$old" | sed 's/[][\\.*^$/]/\\&/g')"
+            sed -i '/path = "/s/version = "='"$old_re"'"/version = "='"$REL_VERSION"'"/' Cargo.toml
+          fi
           echo "workspace version → $(grep '^version' Cargo.toml | head -1)"
           # Refresh the lock for the new version. MUST be --workspace (members are
           # version.workspace=true); an out-of-sync lock breaks --locked builds
