@@ -11,6 +11,7 @@
 # run `if: !cancelled()` so every linter reports even when an earlier one fails.
 # `build` and `test` skip their heavy steps when the source hash already
 # passed (see the README's pass cache section); `lint` always runs.
+# A new push to a ref cancels that ref's in-flight run.
 name: CI
 
 on:
@@ -22,6 +23,10 @@ on:
         description: 'Ignore the pass cache and run build + test in full'
         type: boolean
         default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
