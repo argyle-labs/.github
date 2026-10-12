@@ -28,6 +28,8 @@ on:
         default: "stable"
 
 env:
+  # orca declares sibling deps with `registry = "gitea"`; cargo needs it defined.
+  CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 

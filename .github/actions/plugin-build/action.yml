@@ -186,6 +186,11 @@ runs:
       shell: bash
       run: rm -f .cargo/config.toml
 
+    - name: Define gitea cargo registry
+      shell: bash
+      # orca declares sibling deps with `registry = "gitea"`; a caller-set index wins.
+      run: '[ -n "${CARGO_REGISTRIES_GITEA_INDEX:-}" ] || echo "CARGO_REGISTRIES_GITEA_INDEX=sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/" >> "$GITHUB_ENV"'
+
     - name: Authenticate private orca git dependency (Gitea)
       shell: bash
       env:
