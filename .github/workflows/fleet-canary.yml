@@ -27,6 +27,10 @@ concurrency:
   group: fleet-canary
   cancel-in-progress: true
 
+# orca declares sibling deps with `registry = "gitea"`; cargo needs it defined.
+env:
+  CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
+
 jobs:
   # ── Discover the plugin roster from the org ───────────────────────────────
   discover:

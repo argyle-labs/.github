@@ -85,6 +85,9 @@ RUN set -eux; \
     cargo install --locked "cargo-hack@${CARGO_HACK_VERSION}"; \
     cargo hack --version
 
+# orca declares sibling deps with `registry = "gitea"`; cargo needs it defined.
+ENV CARGO_REGISTRIES_GITEA_INDEX=sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
+
 # Warm CARGO_HOME: the sparse index entries + .crate files for the union of
 # plugin dependencies, and the orca git db/checkout at ORCA_TAG. A job then
 # downloads only what drifted from this lock, and a plugin pinned to another
