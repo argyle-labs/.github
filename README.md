@@ -222,7 +222,9 @@ Release never builds an image. A caller passing `image_name` to `plugin-release.
 
 PR validation is opt-in. Both `plugin-ci-rust*.yml` templates end with a commented `image-check` job. When enabled, it builds the Dockerfile with `push: false`, reads `:buildcache`, and never writes the cache or pushes.
 
-`registry-login` holds the shared Buildx setup (including the plain-HTTP buildkitd config) and the registry login that both image actions use.
+Registries: Gitea (`gitea.scottkey.me`) is the primary, private registry and holds every tag, including `tree-*`. `ghcr.io/argyle-labs/<repo>` is the public mirror of release tags only. After a successful promote, the `release` job copies `<version>` and `latest`/`rc` from Gitea to ghcr.io with `docker buildx imagetools create`, so the manifest list (every platform) is copied and nothing is rebuilt. It logs in with `secrets.GH_TOKEN`. A failed mirror emits a warning and a step-summary line, and the release still succeeds. Pass `image_public: false` to opt out. Public docs on GitHub reference `ghcr.io` images; internal compose files and hosts pull from Gitea.
+
+`registry-login` holds the shared Buildx setup (including the plain-HTTP buildkitd config) and the registry login that both image actions use. Pass `setup-buildx: 'false'` to log in to a second registry (ghcr.io) on top of an earlier login.
 
 ### Adding a tool step
 
