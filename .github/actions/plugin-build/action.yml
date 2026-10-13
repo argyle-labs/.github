@@ -509,4 +509,4 @@ runs:
       with:
         name: plugin-${{ inputs.target }}
         path: dist/*
-        retention-days: 3
+        retention-days: 7

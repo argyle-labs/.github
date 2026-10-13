@@ -355,6 +355,7 @@ jobs:
           path: |
             dist/
             dist-release/
+          retention-days: 7
 
   # ── orca full profile: native Linux packages from the staged binaries. ──
   package-native:
@@ -406,6 +407,7 @@ jobs:
         with:
           name: native-packages
           path: dist-release/
+          retention-days: 7
 
   # ── orca full profile: the macOS BUILD leg — the SOLE source of the darwin
   #   binary. Mirrors the Linux build→package split: this job only BUILDS (and
@@ -499,6 +501,7 @@ jobs:
           path: |
             dist-release/orca-aarch64-apple-darwin
             dist-release/orca-aarch64-apple-darwin.sha256
+          retention-days: 7
 
   # ── orca full profile: the macOS PACKAGE leg — builds the .pkg from the binary
   #   produced by build-macos (which stages it in dist-release/). pkgbuild is
@@ -543,6 +546,7 @@ jobs:
           name: macos-pkg
           if-no-files-found: warn
           path: dist-release/*.pkg
+          retention-days: 7
 
   # ── Publish: Gitea canonical, then GitHub mirror (skipped for the draft). ──
   publish:
