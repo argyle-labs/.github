@@ -16,6 +16,14 @@ inputs:
     description: 'Frontend directory; hashed with the Rust sources.'
     required: false
     default: ui
+  test-command:
+    description: 'Unit-test command, run in working-directory (e.g. `npm run test:run`).'
+    required: false
+    default: "npx vitest run"
+  check-command:
+    description: 'Type-check command, run in working-directory (e.g. `npm run check`).'
+    required: false
+    default: "npx svelte-check"
   sccache-endpoint:
     description: 'MinIO host:port for the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
     required: false
@@ -64,6 +72,7 @@ runs:
       uses: argyle-labs/.github/.github/actions/vitest@main
       with:
         working-directory: ${{ inputs.working-directory }}
+        command: ${{ inputs.test-command }}
     - name: svelte-check
       # Reuses the vitest step's `npm ci` (install: 'false').
       if: ${{ !cancelled() && steps.vitest.outcome == 'success' }}
@@ -71,6 +80,7 @@ runs:
       with:
         working-directory: ${{ inputs.working-directory }}
         install: 'false'
+        command: ${{ inputs.check-command }}
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main

@@ -8,6 +8,10 @@ inputs:
     description: 'Frontend directory.'
     required: false
     default: ui
+  command:
+    description: 'Build command, run in working-directory (e.g. `npm run build` for an npm-workspaces root).'
+    required: false
+    default: "npx vite build"
 
 runs:
   using: composite
@@ -18,6 +22,7 @@ runs:
       uses: argyle-labs/.github/.github/actions/vite-build@main
       with:
         working-directory: ${{ inputs.working-directory }}
+        command: ${{ inputs.command }}
     - name: CI summary
       if: ${{ !cancelled() }}
       uses: argyle-labs/.github/.github/actions/ci-summary@main
