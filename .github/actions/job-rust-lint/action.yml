@@ -1,0 +1,80 @@
+name: CI job — rust lint
+description: >
+  The whole `lint` job: fmt, clippy, Cargo.lock drift and actionlint. Runs
+  beside `build` (clippy's check build cannot reuse the archive) and always
+  runs: no pass cache.
+
+inputs:
+  ui:
+    description: 'The crate embeds ui/dist: place the `vite-dist` artifact before clippy (the job `needs:` build-ui).'
+    required: false
+    default: "false"
+  packages:
+    description: 'Cargo package selection, split on whitespace; `--all-features` is appended.'
+    required: false
+    default: "--workspace"
+  build-jobs:
+    description: 'CARGO_BUILD_JOBS. Empty keeps cargo''s default parallelism.'
+    required: false
+    default: ""
+  debuginfo:
+    description: 'CARGO_PROFILE_{DEV,TEST}_DEBUG. Empty keeps the profile default.'
+    required: false
+    default: "0"
+  sccache-endpoint:
+    description: 'MinIO host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
+    required: false
+    default: ""
+  sccache-access-key:
+    description: 'MinIO access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`); composites cannot read secrets.'
+    required: false
+    default: ""
+  sccache-secret-key:
+    description: 'MinIO secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
+    required: false
+    default: ""
+  lock-check:
+    description: 'Cargo.lock drift gate: `enforce` fails the job, `warn` annotates only.'
+    required: false
+    default: enforce
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Set up Rust (toolchain, sccache)
+      id: setup
+      uses: argyle-labs/.github/.github/actions/rust-setup@main
+      with:
+        wrap-cc: 'true'
+        build-jobs: ${{ inputs.build-jobs }}
+        debuginfo: ${{ inputs.debuginfo }}
+        sccache-endpoint: ${{ inputs.sccache-endpoint }}
+        sccache-access-key: ${{ inputs.sccache-access-key }}
+        sccache-secret-key: ${{ inputs.sccache-secret-key }}
+        # CI-only: link the image's system OpenSSL instead of compiling
+        # openssl-src; release builds keep vendoring it.
+        env: |
+          CARGO_TERM_COLOR=always
+          CARGO_NET_GIT_FETCH_WITH_CLI=true
+          OPENSSL_NO_VENDOR=1
+    - name: Format (cargo fmt)
+      uses: argyle-labs/.github/.github/actions/cargo-fmt@main
+    - name: Clippy
+      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      uses: argyle-labs/.github/.github/actions/cargo-clippy@main
+      with:
+        artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
+        args: ${{ inputs.packages }} --all-targets --all-features
+    - name: Lock file check
+      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
+      with:
+        mode: ${{ inputs.lock-check }}
+    - name: actionlint
+      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      uses: argyle-labs/.github/.github/actions/actionlint@main
+    - name: CI summary
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/ci-summary@main

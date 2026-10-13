@@ -1,11 +1,12 @@
 name: CI
 
-# PR gate for orca subprocess plugins: fmt, clippy and tests only. Binaries are
-# built by plugin-release.yml, which a caller reaches only through a manual
-# workflow_dispatch; Gitea ignores `jobs.<id>.environment` (no reviewer
+# Deprecated PR gate for orca subprocess plugins; existing callers migrate to
+# the job actions (templates/plugin-ci-rust*.yml) and no new callers are added.
+# Checks fmt, clippy and tests only. Binaries are built by plugin-release.yml,
+# which a caller reaches only through a manual workflow_dispatch; Gitea ignores `jobs.<id>.environment` (no reviewer
 # protection), so that dispatch is the approval gate.
 #
-# Caller. The caller's job and this workflow's job both report the status
+# Existing callers' shape. The caller's job and this workflow's job both report the status
 # context `CI / ci (pull_request)`, or `CI / ci (push)` on a push:
 #
 #   name: CI
