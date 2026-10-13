@@ -1,0 +1,86 @@
+name: CI job — vite test
+description: >
+  The whole `test-ui` job: vitest and svelte-check. Skipped when this source
+  hash already passed `test-ui`.
+
+inputs:
+  image-tag:
+    description: 'ci-rust image tag the job runs in; hashed into the source hash.'
+    required: false
+    default: "1.95.0"
+  workflow-file:
+    description: 'Calling workflow file (repo-root relative); hashed into the source hash.'
+    required: false
+    default: .github/workflows/ci.yml
+  working-directory:
+    description: 'Frontend directory; hashed with the Rust sources.'
+    required: false
+    default: ui
+  sccache-endpoint:
+    description: 'MinIO host:port for the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
+    required: false
+    default: ""
+  sccache-access-key:
+    description: 'MinIO access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`); composites cannot read secrets.'
+    required: false
+    default: ""
+  sccache-secret-key:
+    description: 'MinIO secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Source hash
+      id: src
+      uses: argyle-labs/.github/.github/actions/source-hash@main
+      with:
+        image: ci-rust:${{ inputs.image-tag }}
+        workflow-file: ${{ inputs.workflow-file }}
+        extra-paths: ${{ inputs.working-directory }}
+    - name: Check pass cache
+      id: pass
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: check
+        job: test-ui
+        hash: ${{ steps.src.outputs.hash }}
+        force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        access-key: ${{ inputs.sccache-access-key }}
+        secret-key: ${{ inputs.sccache-secret-key }}
+    - name: Reuse unchanged pass
+      if: ${{ steps.pass.outputs.hit == 'true' }}
+      shell: bash
+      env:
+        PASS_SHA: ${{ steps.pass.outputs.sha }}
+      run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+    - name: Vitest
+      id: vitest
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/vitest@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
+    - name: svelte-check
+      # Reuses the vitest step's `npm ci` (install: 'false').
+      if: ${{ !cancelled() && steps.vitest.outcome == 'success' }}
+      uses: argyle-labs/.github/.github/actions/svelte-check@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
+        install: 'false'
+    - name: Record pass
+      if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: record
+        job: test-ui
+        hash: ${{ steps.src.outputs.hash }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        access-key: ${{ inputs.sccache-access-key }}
+        secret-key: ${{ inputs.sccache-secret-key }}
+    - name: CI summary
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/ci-summary@main

@@ -166,7 +166,7 @@ Release binaries are signed with minisign (`<asset>.minisig`, trusted comment `p
 
 ## CI building blocks
 
-Each repo writes its own `.github/workflows/ci.yml` out of **composite actions only**: one action per tool under [`.github/actions/`](.github/actions), used as steps inside the repo's own jobs. The reusable workflows still under [`.github/workflows/`](.github/workflows) are deprecated and will be deleted once no repo calls them. A reusable-workflow call posts a status for the caller job and for each inner job, so every check showed twice and the runner queue carried double the jobs; a step posts nothing of its own.
+Plugin repos compose their `.github/workflows/ci.yml` from **job actions**: one composite action per CI job under [`.github/actions/`](.github/actions) (`job-*`), each holding the whole job's steps from checkout to `ci-summary`, built from the tool actions beside it. A repo's `ci.yml` lists its jobs in order (build, test, lint), each with `runs-on`, the `ci-rust` `container:` and a single `uses:` step with `with:` inputs; it carries no step logic, so a fix to a job action reaches every repo. Something a repo needs that no job action does becomes a new one. They are composite actions rather than reusable workflows because Gitea runs a reusable workflow's inner job as a separate job: every check posted twice (`CI / build` and `rust build / build`) and the runner queue carried double the jobs. orca, whose scoped workspace does not fit the job actions, composes the tool actions directly in its own jobs.
 
 Start from a template:
 
@@ -176,31 +176,41 @@ Start from a template:
 | Plugin crate embedding a Vite frontend (`ui/`) | [`templates/plugin-ci-rust-ui.yml`](templates/plugin-ci-rust-ui.yml) |
 | Scoped workspace plus an npm workspace (orca) | [`templates/orca-ci.example.yml`](templates/orca-ci.example.yml) |
 
-### Required checks: `build`, `test`, `lint`
+### Job actions
 
-Every repo has exactly three required checks, which are plain jobs named `build`, `test` and `lint`. There are no aggregate jobs, no needs-check job and no separate coverage job: the jobs ARE the checks. Jobs run in parallel: a job needs another only when it consumes its artifact.
+| Action | Job | Runs | Inputs |
+|---|---|---|---|
+| `job-vite-build` | `build-ui` | `vite-build`, uploading `vite-dist` | `working-directory` (default `ui`) |
+| `job-rust-build` | `build` | `cargo-build`: every test binary, once, coverage-instrumented, into the nextest archive | `ui`, `packages`, `build-jobs`, `debuginfo`, `sccache-*` |
+| `job-rust-test` | `test` (`needs: build`) | `cargo-test` on the archive under cargo-llvm-cov: results plus lcov and summary; compiles nothing | as `job-rust-build` |
+| `job-vite-test` | `test-ui` | `vitest`, `svelte-check` | `working-directory`, `sccache-*` |
+| `job-rust-lint` | `lint` | `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, `actionlint` | as `job-rust-build`, plus `lock-check` (`enforce` \| `warn`) |
+| `job-rust-doctest` | `lint-doctest` | `cargo test --doc` | as `job-rust-build` |
 
-- `build`: `cargo-build` (UI repos run `vite-build` first in the same job).
-- `test` (`needs: build`): `cargo-test`, which runs the suite once under cargo-llvm-cov and also reports coverage, plus `vitest` / `svelte-check` where used.
-- `lint` (in parallel with `build`; UI repos add `needs: build` because clippy consumes the `vite-dist` artifact): `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, plus `eslint` / `prettier` / `tsc` / `shellcheck` / `actionlint` where used.
+`image-tag` (default `1.95.0`) and `workflow-file` (default `.github/workflows/ci.yml`) feed the source hash; set them when a repo's `container:` tag or workflow path differs. `ui: 'true'` hashes `ui/` and places the `vite-dist` artifact, so that job `needs: build-ui`. `packages` (default `--workspace`) selects cargo packages; the actions add `--all-features`. Composites cannot read `secrets` or `vars`, so each job passes `sccache-endpoint` / `sccache-access-key` / `sccache-secret-key` from `vars.SCCACHE_ENDPOINT` and `secrets.SCCACHE_S3_*`. A `workflow_dispatch` input named `force` bypasses the pass cache. Nested actions are pulled `@main`, so a job action pinned to a branch still runs `main`'s tool actions.
+
+### Required checks: `CI / build*`, `CI / test*`, `CI / lint*`
+
+Branch protection requires the globs `CI / build*`, `CI / test*` and `CI / lint*`, so every job id starts with one of those words. There are no aggregate jobs and no separate coverage job: the jobs ARE the checks. Jobs run in parallel; one needs another only when it consumes its artifact. `lint` and `lint-doctest` never wait on `build`: in UI repos they need only `build-ui`.
 
 ### What each job compiles
 
 | Job | Compiles | Reuses |
 |---|---|---|
-| `build` | the Vite bundle (UI repos); every test binary, once, coverage-instrumented, into the nextest archive | |
-| `test` | doctests (`cargo test --doc`, uninstrumented, sccache-backed): a second compile of the library crates | the nextest archive: tests run once from it under `cargo llvm-cov nextest`, giving results plus lcov and summary |
-| `lint` (parallel with `build`; after it in UI repos) | clippy's check build (`--all-targets`, sccache-backed): a second compile; fmt and lock-check compile nothing | |
+| `build` | every test binary, once, coverage-instrumented, into the nextest archive | |
+| `test` | nothing | the nextest archive: tests run once from it under `cargo llvm-cov nextest` |
+| `lint` | clippy's check build (`--all-targets`, sccache-backed); fmt and lock-check compile nothing | |
+| `lint-doctest` | doctests (`cargo test --doc`, uninstrumented, sccache-backed) | |
 
-Two compiles duplicate `build`'s work: doctests, which nextest cannot run so they build uninstrumented outside the archive, and clippy's check build, whose check-mode output cannot reuse a plain build's `target/`. Both rely on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. A repo that sets `coverage: 'false'` must set it on both `cargo-build` and `cargo-test`.
+Two compiles duplicate `build`'s work, both off the `build` -> `test` path: doctests, which nextest cannot run so rustdoc builds them uninstrumented, and clippy's check build, whose check-mode output cannot reuse a plain build's `target/`. Both rely on the shared sccache. Test failures fail `test`; a coverage-reporting failure only warns. `cargo-test` runs doctests too unless `doctests: 'false'`; the job actions and orca pass `'false'` and run them in `lint-doctest` / `lint`.
 
-Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`, its `runs-on` (`ci-large` for heavy crates), and starts with `actions/checkout` and `rust-setup`. Every tool step after the first in a job runs `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. End each job with `ci-summary` (phase timings, sccache stats). Every step has a `name:` naming the tool and what it does (e.g. `Clippy`, `Test + coverage (cargo nextest)`), so the run log does not show raw `uses:` paths; this holds for steps inside each composite `action.yml` too.
+Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.CI_REGISTRY_USER` / `secrets.CI_REGISTRY_TOKEN`; each job action starts with `actions/checkout`. Tool steps after the first in a job run `if: ${{ !cancelled() }}` so each tool reports even when an earlier one fails; the job still fails. A step that depends on an earlier one is gated on it instead: `job-rust-lint`'s clippy, lock check and actionlint run only when `rust-setup` succeeded, and `job-vite-test`'s svelte-check (which reuses vitest's `npm ci`) only when vitest succeeded. Each job ends with `ci-summary` (phase timings, sccache stats). Every step has a `name:` naming the tool, inside each composite `action.yml` too.
 
 ### Pass cache: skipping unchanged source
 
-CI-only and doc-only changes do not rebuild or retest. `build` and `test` each run `source-hash` after checkout, then `ci-pass-cache` in `check` mode; on a hit, a `Reuse unchanged pass` step writes "Unchanged source — reusing pass from <sha>" to the log and step summary, and every heavy step is skipped (`if: steps.pass.outputs.hit != 'true'`). On success a `Record pass` step writes the marker. `lint` is unaffected and always runs.
+CI-only and doc-only changes do not rebuild or retest. `build`, `test`, `test-ui` and `lint-doctest` each run `source-hash` after checkout, then `ci-pass-cache` in `check` mode; on a hit, a `Reuse unchanged pass` step writes "Unchanged source — reusing pass from <sha>" to the log and step summary, and every heavy step is skipped (`if: steps.pass.outputs.hit != 'true'`). On success a `Record pass` step writes the marker. `lint` is unaffected and always runs.
 
-The hash covers `git ls-files -s` blob ids (no file contents are read) of: tracked `*.rs`, every `Cargo.toml` and `Cargo.lock`, `build.rs`, `rust-toolchain*`, `.cargo/config.toml`, everything under any `tests/` directory, the directory of each literal `include_str!`/`include_bytes!` target (resolved against the including file) and each rust-embed `#[folder = "..."]` (resolved against the crate dir), with a leading `$CARGO_MANIFEST_DIR` taken as the crate dir and `//` comment lines skipped, plus the `image` input (the ci-rust tag) and `rustc -vV`. Paths the scan cannot see (non-literal include paths, frontend sources, fixtures elsewhere) go in `extra-paths`: the UI template passes `ui`. The calling workflow file's blob is hashed too (the `workflow-file` input, repo-root relative; the templates pass `.github/workflows/ci.yml`; else the path from `GITHUB_WORKFLOW_REF`), so changing build flags or steps invalidates every pass. The content of `.github/actions/` and `.github/workflows/` in the checkout of this repo that the action runs from is hashed as well. Nested actions are pulled `@main`, so that content matches what runs only when the caller pins every `argyle-labs/.github` action to the same ref (the templates use `@main` throughout). An unresolvable workflow file, an `extra-paths` entry matching no tracked file, a literal include or folder target outside `working-directory` or with no tracked files, or an include path using any other `$VAR` or `env!()` (use `extra-paths`) fails the step.
+The hash covers `git ls-files -s` blob ids (no file contents are read) of: tracked `*.rs`, every `Cargo.toml` and `Cargo.lock`, `build.rs`, `rust-toolchain*`, `.cargo/config.toml`, everything under any `tests/` directory, the directory of each literal `include_str!`/`include_bytes!` target (resolved against the including file) and each rust-embed `#[folder = "..."]` (resolved against the crate dir), with a leading `$CARGO_MANIFEST_DIR` taken as the crate dir and `//` comment lines skipped, plus the `image` input (the ci-rust tag) and `rustc -vV`. Paths the scan cannot see (non-literal include paths, frontend sources, fixtures elsewhere) go in `extra-paths`: the UI template passes `ui`. The calling workflow file's blob is hashed too (the `workflow-file` input, repo-root relative; the templates pass `.github/workflows/ci.yml`; else the path from `GITHUB_WORKFLOW_REF`), so changing build flags or steps invalidates every pass. The content of `.github/actions/` and `.github/workflows/` in the checkout of this repo that the action runs from is hashed as well. Nested actions are pulled `@main`, so that content matches what runs only when the caller pins every `argyle-labs/.github` action to the same ref (the templates use `@main` throughout). A pilot that pins a job action to a branch must run with `force: true`: the hashed action content comes from `@main`, so a branch run would record a pass against `main`'s hash for unmerged action changes. An unresolvable workflow file, an `extra-paths` entry matching no tracked file, a literal include or folder target outside `working-directory` or with no tracked files, or an include path using any other `$VAR` or `env!()` (use `extra-paths`) fails the step.
 
 Markers live at `s3://<sccache bucket>/ci-pass/<repo>/<job>/<hash>` on the sccache MinIO (same endpoint and keys as `rust-setup`), written with `curl --aws-sigv4`; the body is the commit sha that passed.
 
@@ -230,7 +240,7 @@ Registries: Gitea (`gitea.scottkey.me`) is the primary, private registry and hol
 
 ### Adding a tool step
 
-Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` to the job of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
+Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` to the job action (or orca job) of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
 
 ### Job setup: `rust-setup`
 
@@ -243,7 +253,7 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 | Action | Runs | Extra inputs | Outputs |
 |---|---|---|---|
 | `cargo-build` | `cargo llvm-cov nextest-archive` (the build: test binaries, compiled once, coverage-instrumented; plain `cargo nextest archive` when `coverage: 'false'`) | `args`, `coverage` (default `'true'`), `name-suffix` | artifact `nextest-archive<name-suffix>` |
-| `cargo-test` | the archive, once, via `cargo-llvm-cov` (plain `cargo nextest run` when `coverage: 'false'`), then doctests | `args`, `coverage` (default `'true'`), `nextest-args`, `doctests` (`'true'`/`'false'`), `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
+| `cargo-test` | the archive, once, via `cargo-llvm-cov` (plain `cargo nextest run` when `coverage: 'false'`); then `cargo test --doc` unless `doctests: 'false'` | `args`, `coverage` (default `'true'`), `nextest-args`, `doctests` (default `'true'`), `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
 | `cargo-clippy` | `cargo clippy -- -D warnings` (also compiles bins/examples) | `args` | |
 | `cargo-fmt` | `cargo fmt --all --check` | | |
 | `cargo-lock-check` | Cargo.lock drift (path-patch entries, out of sync) | `mode`: `enforce` \| `warn` | |
@@ -261,6 +271,6 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 
 Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash`, `crate-hashes` and `ci-pass-cache` (the pass caches above), `registry-login`, `image-build` and `image-promote` (container images, above).
 
-### Deprecated: reusable-workflow blocks
+### Deprecated: `plugin-ci.yml`
 
-The reusable workflows `.github/workflows/{cargo-build,cargo-test,cargo-clippy,cargo-fmt,cargo-lock-check,cargo-llvm-cov,vite-build,svelte-check,tsc,vitest,eslint,prettier,shellcheck,actionlint,ci-needs-check}.yml` are deprecated and stay only while callers migrate to the actions above; do not add new callers. The old monolithic [`plugin-ci.yml`](.github/workflows/plugin-ci.yml) also stays untouched until every repo has migrated, then is deleted.
+The monolithic [`plugin-ci.yml`](.github/workflows/plugin-ci.yml) (one `CI / ci` check) stays only while its callers migrate to the job actions; do not add new callers. Delete it once none remain.

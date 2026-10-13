@@ -193,6 +193,7 @@ jobs:
         uses: argyle-labs/.github/.github/actions/cargo-test@main
         with:
           args: ${{ steps.sel.outputs.packages }} --all-features
+          doctests: 'false'
       - name: Record pass
         if: ${{ success() && steps.sel.outputs.skip != 'true' }}
         uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
@@ -239,6 +240,14 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           args: ${{ needs.changes.outputs.packages }} --all-targets --all-features
+      - name: Doctests (cargo test --doc)
+        if: ${{ !cancelled() }}
+        env:
+          ARGS: ${{ needs.changes.outputs.packages }} --all-features
+        run: |
+          export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+          read -ra args <<< "$ARGS"
+          cargo test --locked "${args[@]}" --doc
       - name: Lock file check
         uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
         if: ${{ !cancelled() }}

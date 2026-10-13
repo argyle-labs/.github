@@ -1,0 +1,23 @@
+name: CI job — vite build
+description: >
+  The whole `build-ui` job: `vite build`, uploaded as `vite-dist` for the Rust
+  jobs run with `ui: 'true'`.
+
+inputs:
+  working-directory:
+    description: 'Frontend directory.'
+    required: false
+    default: ui
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Vite build
+      uses: argyle-labs/.github/.github/actions/vite-build@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
+    - name: CI summary
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/ci-summary@main
