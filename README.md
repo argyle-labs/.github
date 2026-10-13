@@ -162,6 +162,8 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 Each plugin is its own repo: an out-of-process subprocess whose only orca dependency is `plugin-toolkit`, declaring its index metadata in `Cargo.toml` (`description` + `[package.metadata.orca].category`). See the [orca plugin authoring guide](https://github.com/argyle-labs/orca/blob/main/docs/plugin-authoring.md), and [docker](https://github.com/argyle-labs/docker) or [unraid](https://github.com/argyle-labs/unraid) as worked references.
 
+Release binaries are signed with minisign (`<asset>.minisig`, trusted comment `plugin=<name> version=<version> sha256=<hex>`); the public key is [`keys/plugin-release.pub`](keys/plugin-release.pub). To rotate: add the new key, sign with both during the overlap, then remove the old one.
+
 ## CI building blocks
 
 Each repo writes its own `.github/workflows/ci.yml` out of **composite actions only**: one action per tool under [`.github/actions/`](.github/actions), used as steps inside the repo's own jobs. The reusable workflows still under [`.github/workflows/`](.github/workflows) are deprecated and will be deleted once no repo calls them. A reusable-workflow call posts a status for the caller job and for each inner job, so every check showed twice and the runner queue carried double the jobs; a step posts nothing of its own.
