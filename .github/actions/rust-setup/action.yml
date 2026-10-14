@@ -213,6 +213,13 @@ runs:
           fi
           # sccache and cargo incremental are mutually exclusive.
           echo "CARGO_INCREMENTAL=0"
+          # The runner's egress to static.crates.io drops HTTP/2 streams
+          # ("HTTP2 framing layer", then "[55] Broken pipe"); HTTP/1.1 plus
+          # more retries rides that out. Git CLI fetch handles the orca git dep.
+          echo "CARGO_NET_RETRY=10"
+          echo "CARGO_HTTP_MULTIPLEXING=false"
+          echo "CARGO_HTTP_TIMEOUT=60"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true"
           # ── compile-memory controls ──
           # The proxmox build.rs generates 1261 JsonSchema types; clippy's
           # `lib test` variant at default debuginfo=2 OOM-killed the memory-capped
