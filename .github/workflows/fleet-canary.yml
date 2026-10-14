@@ -45,6 +45,8 @@ jobs:
           set -euo pipefail
           # Every non-archived argyle-labs repo that declares the orca plugin
           # marker in its root Cargo.toml.
+          # Listing failure must fail the job, not silently yield zero repos.
+          names="$(gh repo list argyle-labs --no-archived --limit 200 --json name --jq '.[].name')"
           repos=()
           while read -r name; do
             [ -z "$name" ] && continue
@@ -53,9 +55,11 @@ jobs:
                  | grep -q '\[package.metadata.orca\]'; then
               repos+=("$name")
             fi
-          done < <(gh repo list argyle-labs --no-archived --limit 200 --json name --jq '.[].name')
+          done <<< "$names"
           printf 'Discovered %s plugin repos\n' "${#repos[@]}"
-          json=$(printf '%s\n' "${repos[@]}" | jq -R . | jq -cs .)
+          # printf on an empty array still emits one blank line; drop it so the
+          # result is `[]`, never `[""]`.
+          json=$(printf '%s\n' "${repos[@]}" | jq -R . | jq -cs 'map(select(length > 0))')
           echo "repos=$json" >> "$GITHUB_OUTPUT"
 
   # ── Build+test each plugin against orca main (parallel matrix) ────────────
@@ -67,6 +71,8 @@ jobs:
       fail-fast: false
       matrix:
         repo: ${{ fromJSON(needs.discover.outputs.repos) }}
+        exclude:
+          - repo: ""
     env:
       CARGO_TERM_COLOR: always
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -127,10 +133,16 @@ jobs:
     steps:
       # @v3 (Gitea-compatible; @v4's Twirl API is unimplemented on Gitea). No
       # pattern/merge-multiple on @v3 — download all, then flatten into status/.
+      - name: Nothing to canary
+        if: ${{ needs.canary.result == 'skipped' }}
+        run: echo "::notice::Discovery found no plugin repos; nothing to canary."
+
       - uses: actions/download-artifact@v4
+        if: ${{ needs.canary.result != 'skipped' }}
         with:
           path: status
       - name: Flatten downloaded artifacts
+        if: ${{ needs.canary.result != 'skipped' }}
         run: |
           set -euo pipefail
           find status -mindepth 2 -type f | while IFS= read -r f; do mv -f "$f" status/; done
@@ -138,6 +150,7 @@ jobs:
 
       - name: Compute failing plugins
         id: fail
+        if: ${{ needs.canary.result != 'skipped' }}
         run: |
           set -euo pipefail
           failed=()
