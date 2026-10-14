@@ -66,15 +66,25 @@ runs:
       env:
         PASS_SHA: ${{ steps.pass.outputs.sha }}
       run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+    - name: Install npm deps (npm ci)
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/node-install@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
+    - name: svelte-kit sync
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: /bin/bash "$GITHUB_ACTION_PATH/svelte-kit-sync.sh"
     - name: Vitest
       id: vitest
       if: ${{ steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/vitest@main
       with:
         working-directory: ${{ inputs.working-directory }}
+        install: 'false'
         command: ${{ inputs.test-command }}
     - name: svelte-check
-      # Reuses the vitest step's `npm ci` (install: 'false').
       if: ${{ !cancelled() && steps.vitest.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/svelte-check@main
       with:

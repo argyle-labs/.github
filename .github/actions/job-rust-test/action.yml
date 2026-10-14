@@ -95,6 +95,7 @@ runs:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ inputs.packages }} --all-features
         doctests: 'false'
+        nextest-args: --no-fail-fast
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
