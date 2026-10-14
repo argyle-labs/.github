@@ -8,7 +8,7 @@ set -euo pipefail
 ws_json=$(NODE_NO_WARNINGS=1 npm query .workspace 2>/dev/null || echo null)
 
 # shellcheck disable=SC2016 # single-quoted JS source
-mapfile -t dirs < <(WS_JSON="$ws_json" node -e '
+out=$(WS_JSON="$ws_json" node -e '
   const fs = require("fs"), path = require("path");
   const read = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, "package.json"), "utf8")); } catch { return null; } };
   const dirs = ["."];
@@ -17,6 +17,7 @@ mapfile -t dirs < <(WS_JSON="$ws_json" node -e '
   if (Array.isArray(queried)) {
     for (const w of queried) dirs.push(w.location || path.relative(".", w.path));
   } else {
+    console.error("::warning::svelte-kit-sync: npm query unavailable; resolving workspaces from package.json");
     let ws = (read(".") || {}).workspaces || [];
     if (!Array.isArray(ws)) ws = ws.packages || [];
     for (const pat of ws) {
@@ -35,6 +36,8 @@ mapfile -t dirs < <(WS_JSON="$ws_json" node -e '
     if (deps["@sveltejs/kit"] && cfg) console.log(d);
   }
 ')
+dirs=()
+[[ -n $out ]] && mapfile -t dirs <<< "$out"
 
 for d in "${dirs[@]}"; do
   echo "svelte-kit sync in $d"
