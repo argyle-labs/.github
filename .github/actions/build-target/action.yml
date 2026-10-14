@@ -36,9 +36,16 @@ runs:
         REL_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
+        old="$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/' || true)"
         # Replace the first workspace `version = "..."` — don't match the old
         # value (avoids escaping pre-release strings). Portable sed (Linux CI).
         sed -i 's/^version = ".*"/version = "'"$REL_VERSION"'"/' Cargo.toml
+        # Internal path deps pin `=<workspace version>`; bump only those, so a
+        # member with its own frozen version (e.g. plugin-abi =0.1.0) is left alone.
+        if [ -n "$old" ]; then
+          old_re="$(printf '%s' "$old" | sed 's/[][\\.*^$/]/\\&/g')"
+          sed -i '/path = "/s/version = "='"$old_re"'"/version = "='"$REL_VERSION"'"/' Cargo.toml
+        fi
         echo "workspace version → $(grep '^version' Cargo.toml | head -1)"
         # Refresh the lock for the new version. MUST be --workspace (members are
         # version.workspace=true).
