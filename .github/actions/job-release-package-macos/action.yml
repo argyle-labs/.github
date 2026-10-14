@@ -1,0 +1,53 @@
+name: Release job — macOS .pkg
+description: >
+  The `package-macos` job (orca) on a macOS runner: builds the .pkg from the
+  `build-<target>` darwin binary (pkgbuild is macOS-only) and uploads
+  `macos-pkg`. Callers set `continue-on-error: true` so a packaging failure
+  does not block the release; the binary still ships.
+
+inputs:
+  target:
+    description: Darwin target triple whose binary is packaged.
+    required: false
+    default: aarch64-apple-darwin
+  version:
+    description: Release version (needs.version.outputs.version).
+    required: true
+
+outputs:
+  artifact:
+    description: Name of the uploaded artifact.
+    value: macos-pkg
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Fetch the darwin binary
+      uses: actions/download-artifact@v4
+      with:
+        name: build-${{ inputs.target }}
+        path: dist-release
+    - name: Build .pkg (build_native_packages)
+      shell: bash
+      env:
+        REL_VERSION: ${{ inputs.version }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        source scripts/release-lib.sh
+        write_cargo_version "$REL_VERSION"
+        # build_native_packages runs the host binary; artifacts drop +x.
+        chmod +x "dist-release/orca-${TARGET}"
+        build_native_packages
+        echo "── dist-release (.pkg) ──"; ls -la dist-release/*.pkg || true
+    - name: Upload macos-pkg
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-pkg
+        if-no-files-found: warn
+        path: dist-release/*.pkg
+        retention-days: 7

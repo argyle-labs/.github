@@ -1,0 +1,79 @@
+name: Release job — version
+description: >
+  The whole `version` job: computes vX.Y.Z-rc.N / vX.Y.Z from the latest tags
+  and picks the per-stage version, tag, title and publish flags. Checks out the
+  repo itself (full history, for tags).
+
+inputs:
+  stage:
+    description: rc-draft | rc-publish | promote-stable
+    required: true
+  bump:
+    description: patch | minor | major
+    required: false
+    default: patch
+
+outputs:
+  version:
+    description: Release version, no v prefix.
+    value: ${{ steps.pick.outputs.version }}
+  tag:
+    description: Release tag ("next" for the rolling draft).
+    value: ${{ steps.pick.outputs.tag }}
+  rel-name:
+    description: Release title.
+    value: ${{ steps.pick.outputs.rel-name }}
+  prerelease:
+    description: '"true" for rc-draft / rc-publish.'
+    value: ${{ steps.pick.outputs.prerelease }}
+  draft:
+    description: '"true" for rc-draft (no git tag, not mirrored).'
+    value: ${{ steps.pick.outputs.draft }}
+  mirror:
+    description: '"true" when the release is mirrored to GitHub.'
+    value: ${{ steps.pick.outputs.mirror }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Compute version
+      id: cv
+      uses: argyle-labs/.github/.github/actions/compute-version@main
+      with:
+        bump: ${{ inputs.bump }}
+    - name: Pick per-stage version/flags
+      id: pick
+      shell: bash
+      env:
+        STAGE: ${{ inputs.stage }}
+        RC_VERSION: ${{ steps.cv.outputs.rc-version }}
+        RC_TAG: ${{ steps.cv.outputs.rc-tag }}
+        STABLE_VERSION: ${{ steps.cv.outputs.stable-version }}
+        STABLE_TAG: ${{ steps.cv.outputs.stable-tag }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        case "$STAGE" in
+          rc-draft)
+            version="$RC_VERSION"; tag="next"
+            name="${REPO##*/} — rolling draft (${RC_VERSION})"
+            prerelease=true; draft=true; mirror=false ;;
+          rc-publish)
+            version="$RC_VERSION"; tag="$RC_TAG"
+            name="${REPO##*/} ${RC_TAG}"
+            prerelease=true; draft=false; mirror=true ;;
+          promote-stable)
+            version="$STABLE_VERSION"; tag="$STABLE_TAG"
+            name="${REPO##*/} ${STABLE_TAG}"
+            prerelease=false; draft=false; mirror=true ;;
+          *) echo "::error::unknown stage '$STAGE'"; exit 1 ;;
+        esac
+        {
+          echo "version=$version"; echo "tag=$tag"; echo "rel-name=$name"
+          echo "prerelease=$prerelease"; echo "draft=$draft"; echo "mirror=$mirror"
+        } >> "$GITHUB_OUTPUT"
+        echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
