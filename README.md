@@ -189,6 +189,22 @@ Start from a template:
 
 `image-tag` (default `1.95.0`) and `workflow-file` (default `.github/workflows/ci.yml`) feed the source hash; set them when a repo's `container:` tag or workflow path differs. `ui: 'true'` hashes `ui/` and places the `vite-dist` artifact, so that job `needs: build-ui`. `packages` (default `--workspace`) selects cargo packages; the actions add `--all-features`. Composites cannot read `secrets` or `vars`, so each job passes `sccache-endpoint` / `sccache-access-key` / `sccache-secret-key` from `vars.SCCACHE_ENDPOINT` and `secrets.SCCACHE_S3_*`. A `workflow_dispatch` input named `force` bypasses the pass cache. Nested actions are pulled `@main`, so a job action pinned to a branch still runs `main`'s tool actions.
 
+### Release job actions
+
+[`templates/release.yml`](templates/release.yml) composes a release as an ordered job list; `workflows/release.yml` stays for callers not yet migrated. Composites cannot read `secrets`, so tokens are inputs.
+
+| Action | Job | Runs | Inputs | Outputs |
+|---|---|---|---|---|
+| `job-release-version` | `version` | `compute-version`, per-stage pick | `stage`, `bump` | `version`, `tag`, `rel-name`, `prerelease`, `draft`, `mirror` |
+| `job-release-build` | `build-<target>` (`ci-rust` container) | `rust-setup`, `build-target`, stage + `.sha256`, smoke test on runner-arch targets, upload `build-<target>` | `target`, `version`, `tag`, `asset-profile`, `bins`, `disable-lto-for-rc`, `orca-fetch-token`, `sccache-*` | `artifact` |
+| `job-release-build-macos` | `build-<darwin target>` (macOS runner) | native build in `mint-cargo-slot`, version smoke test, upload `build-<target>` | `target`, `version`, `bin`, `disable-lto-for-rc`, `slot-scope`, `cap-gb` | `artifact` |
+| `job-release-package` | `package` | `package-native` (deb/rpm/PKGBUILD/homebrew/plg), `checksums.sha256`, `install.sh` | | `artifact` |
+| `job-release-package-macos` | `package-macos` (macOS, `continue-on-error`) | `.pkg` | `target`, `version` | `artifact` |
+| `job-release-publish` | `publish` | asset allow-list + per-target check, `write-release-version` + commit, `publish-gitea`, `mirror-github` | `version`…`mirror` from `version`, `targets`, `asset-profile`, `notes`, `release-token`, `github-token` | |
+| `job-release-crates` | `crates` (`ci-rust` container) | `scripts/publish-crates.sh` from the release tag | `registry-token` | |
+
+`write-release-version` is the one place the workspace version and its internal `=<version>` path-dep pins are bumped; `build-target` and `job-release-publish` both call it.
+
 ### Required checks: `CI / build*`, `CI / test*`, `CI / lint*`
 
 Branch protection requires the globs `CI / build*`, `CI / test*` and `CI / lint*`, so every job id starts with one of those words. There are no aggregate jobs and no separate coverage job: the jobs ARE the checks. Jobs run in parallel; one needs another only when it consumes its artifact. `lint` and `lint-doctest` never wait on `build`: in UI repos they need only `build-ui`.

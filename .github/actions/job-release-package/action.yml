@@ -1,0 +1,46 @@
+name: Release job — native Linux packages
+description: >
+  The `package` job (orca): gathers every `build-*` artifact into dist-release,
+  builds deb/rpm/PKGBUILD/homebrew/plg via package-native (formats whose binary
+  is absent are skipped), assembles checksums.sha256 and install.sh, and uploads
+  `native-packages`. Checks out the repo itself; needs sudo apt (ubuntu-latest).
+
+outputs:
+  artifact:
+    description: Name of the uploaded artifact.
+    value: native-packages
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Collect built binaries
+      uses: actions/download-artifact@v4
+      with:
+        path: staged
+    - name: Stage binaries into dist-release
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p dist-release
+        find staged -type f \( -name 'orca-*' -o -name '*.sha256' \) -exec cp {} dist-release/ \;
+        # Artifact round-trips drop +x; build_native_packages requires it.
+        find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
+        echo "── dist-release ──"; ls -la dist-release
+    - name: Build native packages (package-native)
+      uses: argyle-labs/.github/.github/actions/package-native@main
+    - name: Assemble checksums + install.sh
+      shell: bash
+      run: |
+        set -euo pipefail
+        ( cd dist-release && cat ./*.sha256 > checksums.sha256 2>/dev/null || true )
+        [ -f scripts/install.sh ] && cp scripts/install.sh dist-release/ || true
+    - name: Upload native-packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-packages
+        path: dist-release/
+        retention-days: 7

@@ -1,0 +1,103 @@
+name: Release job — build a darwin target natively
+description: >
+  The `build-<darwin target>` job on a macOS runner: builds the darwin binary
+  natively (Apple ld64 dedupes the libiconv load command; zigbuild does not, and
+  dyld refuses that Mach-O) in a persistent mint-cargo-slot, then stages it with
+  a .sha256, execs it to check the reported version, and uploads
+  `build-<target>`. Uses orca's scripts/release-lib.sh. Checks out the repo
+  itself. Not best-effort: darwin has no other binary source.
+
+inputs:
+  target:
+    description: Darwin target triple.
+    required: false
+    default: aarch64-apple-darwin
+  version:
+    description: Release version to bake into Cargo.toml (needs.version.outputs.version).
+    required: true
+  bin:
+    description: Bin to build and stage.
+    required: false
+    default: orca
+  disable-lto-for-rc:
+    description: '"true" sets CARGO_PROFILE_RELEASE_LTO=off when the version is an -rc.'
+    required: false
+    default: "false"
+  slot-scope:
+    description: 'mint-cargo-slot scope; "-rc" is appended for RC versions (LTO mode changes every dep hash).'
+    required: false
+    default: orca
+  cap-gb:
+    description: mint-cargo-slot per-slot size cap.
+    required: false
+    default: "6"
+
+outputs:
+  artifact:
+    description: Name of the uploaded artifact.
+    value: build-${{ inputs.target }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Write release version
+      shell: bash
+      env:
+        REL_VERSION: ${{ inputs.version }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        source scripts/release-lib.sh
+        write_cargo_version "$REL_VERSION"
+        # write_cargo_version exports this only to its own shell; build.rs
+        # needs it to bake the exact release version.
+        echo "ORCA_RELEASE_VERSION=$REL_VERSION" >> "$GITHUB_ENV"
+        rustup target add "$TARGET" || true
+    - name: Disable LTO for release candidates
+      if: ${{ inputs.disable-lto-for-rc == 'true' && contains(inputs.version, '-rc.') }}
+      shell: bash
+      run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+    - name: Build darwin binary natively (mint-cargo-slot)
+      uses: argyle-labs/.github/.github/actions/mint-cargo-slot@main
+      with:
+        scope: ${{ contains(inputs.version, '-rc.') && format('{0}-rc', inputs.slot-scope) || inputs.slot-scope }}
+        target: ${{ inputs.target }}
+        bins: ${{ inputs.bin }}
+        cap-gb: ${{ inputs.cap-gb }}
+        sccache: "false"
+        run: |
+          source scripts/release-lib.sh
+          cargo_build_target "$TARGET" "$(release_cargo_jobs 1)"
+    - name: Stage, checksum and smoke-test
+      shell: bash
+      env:
+        REL_VERSION: ${{ inputs.version }}
+        TARGET: ${{ inputs.target }}
+        BIN: ${{ inputs.bin }}
+      run: |
+        set -euo pipefail
+        source scripts/release-lib.sh
+        mkdir -p dist-release
+        stage_target_asset "$TARGET"
+        f="dist-release/${BIN}-${TARGET}"
+        [ -f "$f" ] || { echo "::error::native darwin build produced no $f"; exit 1; }
+        chmod +x "$f"
+        ( cd dist-release && shasum -a 256 "${BIN}-${TARGET}" > "${BIN}-${TARGET}.sha256" )
+        echo "── smoke: $f --version ──"
+        out=$("./$f" --version)
+        echo "$out"
+        # Guards against staging a binary left over from an earlier release.
+        [ "$out" = "${BIN} $REL_VERSION" ] || { echo "::error::darwin binary reports '$out', expected '${BIN} $REL_VERSION'"; exit 1; }
+    - name: Upload build-${{ inputs.target }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ inputs.target }}
+        if-no-files-found: error
+        path: |
+          dist-release/${{ inputs.bin }}-${{ inputs.target }}
+          dist-release/${{ inputs.bin }}-${{ inputs.target }}.sha256
+        retention-days: 7

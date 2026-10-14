@@ -1,0 +1,177 @@
+name: Release job — publish
+description: >
+  The `publish` job: gathers every artifact, allow-lists and dedupes the release
+  files, checks one binary (+ .sha256) per requested target (and, for the `full`
+  profile, the package set and checksums.sha256), commits the release version
+  and tags that commit, publishes to Gitea (canonical), then mirrors to GitHub.
+  The draft stage skips the version commit and the mirror.
+
+inputs:
+  version:
+    description: needs.version.outputs.version
+    required: true
+  tag:
+    description: needs.version.outputs.tag
+    required: true
+  rel-name:
+    description: needs.version.outputs.rel-name
+    required: true
+  prerelease:
+    description: needs.version.outputs.prerelease
+    required: true
+  draft:
+    description: needs.version.outputs.draft
+    required: true
+  mirror:
+    description: needs.version.outputs.mirror
+    required: true
+  targets:
+    description: 'JSON array of every target triple that must have a binary, darwin included.'
+    required: true
+  asset-profile:
+    description: 'full (orca: binaries + packages) | binaries (plugins).'
+    required: false
+    default: binaries
+  notes:
+    description: Release-notes body.
+    required: false
+    default: ""
+  release-token:
+    description: 'Gitea token with contents:write (pass `secrets.ORCA_RELEASE_TOKEN`); pushes the version commit and publishes.'
+    required: true
+  github-token:
+    description: 'GitHub token for the mirror (pass `secrets.GH_RELEASE_TOKEN`).'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Gather all release assets
+      uses: actions/download-artifact@v4
+      with:
+        path: incoming
+    # Allow-list by basename; any other file fails the release. orca-apk-staging
+    # is build_native_packages scratch; any other orca-*-staging dir means a
+    # packager fell back to emitting sources. The same binary arrives in several
+    # artifacts, so identical copies dedupe and differing ones fail.
+    - name: Collect release assets
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.asset-profile }}
+        TAG: ${{ inputs.tag }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        mkdir -p release-assets
+        bad=0
+        mapfile -t files < <(find incoming -type f); wait $!
+        for f in "${files[@]}"; do
+          case "$f" in
+            */orca-apk-staging/*) continue ;;
+            */orca-*-staging/*) echo "::error::packager fallback output $f"; bad=1; continue ;;
+          esac
+          name=$(basename "$f")
+          case "$name" in
+            *.sha256|install.sh|*.deb|*.rpm|*.pkg|*.rb|*.plg|PKGBUILD) ;;
+            *-x86_64-unknown-linux-gnu|*-x86_64-unknown-linux-musl) ;;
+            *-aarch64-unknown-linux-gnu|*-aarch64-unknown-linux-musl) ;;
+            *-aarch64-apple-darwin|*-x86_64-apple-darwin) ;;
+            *) echo "::error::unexpected release file $f"; bad=1; continue ;;
+          esac
+          if [ -e "release-assets/$name" ]; then
+            cmp -s "$f" "release-assets/$name" || { echo "::error::conflicting copies of $name"; bad=1; }
+          else
+            cp "$f" release-assets/
+          fi
+        done
+        [ "$bad" = 0 ] || exit 1
+        assets=(release-assets/*)
+        [ ${#assets[@]} -gt 0 ] || { echo "::error::no release assets collected"; exit 1; }
+        for f in "${assets[@]}"; do
+          case "$f" in
+            */checksums.sha256) ;;
+            *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; bad=1; } ;;
+            *-linux-gnu|*-linux-musl|*-apple-darwin)
+              [ -f "$f.sha256" ] || { echo "::error::missing checksum for $f"; bad=1; } ;;
+          esac
+        done
+        IFS=, read -ra targets <<< "${TARGETS//[][\"[:space:]]/}"
+        for t in "${targets[@]}"; do
+          if [ "$PROFILE" = full ]; then bins=(release-assets/orca-"$t"); else bins=(release-assets/*-"${TAG}-${t}"); fi
+          [ -f "${bins[0]:-}" ] || { echo "::error::no binary for requested target $t"; bad=1; }
+        done
+        if [ "$PROFILE" = full ]; then
+          for want in '*.deb' '*.rpm' '*.plg' '*.rb' PKGBUILD install.sh checksums.sha256; do
+            compgen -G "release-assets/$want" >/dev/null || { echo "::error::required asset $want missing"; bad=1; }
+          done
+          compgen -G 'release-assets/*.pkg' >/dev/null || echo "::warning::no macOS .pkg (best-effort leg)"
+        fi
+        [ "$bad" = 0 ] || exit 1
+        find release-assets -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
+        echo "── release-assets ──"; ls -la release-assets
+    # build-target writes the version into Cargo.toml only for the build; commit
+    # it so the tag points at source whose workspace version == the tag (git-dep
+    # consumers pinning ?tag= resolve the right version).
+    - name: Check out repo for version-bump commit
+      if: ${{ inputs.draft != 'true' }}
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref_name }}
+        fetch-depth: 1
+        token: ${{ inputs.release-token }}
+        path: repo
+    - name: Set up Rust (dtolnay/rust-toolchain)
+      if: ${{ inputs.draft != 'true' }}
+      uses: dtolnay/rust-toolchain@stable
+    - name: Write release version (write-release-version)
+      if: ${{ inputs.draft != 'true' }}
+      uses: argyle-labs/.github/.github/actions/write-release-version@main
+      with:
+        version: ${{ inputs.version }}
+        working-directory: repo
+    - name: Commit release version
+      id: bump
+      if: ${{ inputs.draft != 'true' }}
+      shell: bash
+      working-directory: repo
+      env:
+        REL_VERSION: ${{ inputs.version }}
+        TAG: ${{ inputs.tag }}
+        REF_NAME: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+        git config user.name  "orca-release-bot"
+        git config user.email "release-bot@argyle-labs.local"
+        git add Cargo.toml Cargo.lock
+        if git diff --cached --quiet; then
+          echo "committed version already ${REL_VERSION} — nothing to commit"
+        else
+          git commit -m "chore: release ${TAG}"
+          git push origin "HEAD:${REF_NAME}"
+        fi
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "→ tag ${TAG} will point at $(git rev-parse HEAD)"
+    - name: Publish to Gitea (publish-gitea)
+      uses: argyle-labs/.github/.github/actions/publish-gitea@main
+      with:
+        gitea-token: ${{ inputs.release-token }}
+        tag: ${{ inputs.tag }}
+        target-commitish: ${{ steps.bump.outputs.sha }}
+        name: ${{ inputs.rel-name }}
+        body: ${{ inputs.notes }}
+        prerelease: ${{ inputs.prerelease }}
+        draft: ${{ inputs.draft }}
+        assets-dir: release-assets
+    - name: Mirror to GitHub (mirror-github)
+      if: ${{ inputs.mirror == 'true' }}
+      uses: argyle-labs/.github/.github/actions/mirror-github@main
+      with:
+        github-token: ${{ inputs.github-token }}
+        gitea-token: ${{ inputs.release-token }}
+        tag: ${{ inputs.tag }}
+        name: ${{ inputs.rel-name }}
+        body: ${{ inputs.notes }}
+        prerelease: ${{ inputs.prerelease }}
+        assets-dir: release-assets

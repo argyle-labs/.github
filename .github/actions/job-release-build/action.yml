@@ -1,0 +1,194 @@
+name: Release job — build one Linux target
+description: >
+  One `build-<target>` job: builds the release binaries for a single Linux
+  target triple at the release version (cargo for x86_64-unknown-linux-gnu,
+  cargo-zigbuild otherwise), stages each binary with a .sha256 sidecar, smoke-
+  tests it when the runner can exec it, and uploads `build-<target>`. Run in
+  the `ci-rust` container; checks out the repo itself. Darwin targets use
+  job-release-build-macos.
+
+inputs:
+  target:
+    description: Linux target triple, e.g. aarch64-unknown-linux-gnu.
+    required: true
+  version:
+    description: Release version to bake into Cargo.toml (needs.version.outputs.version).
+    required: true
+  tag:
+    description: Release tag; part of the asset name in the `binaries` profile.
+    required: true
+  asset-profile:
+    description: 'full = dist-release/<bin>-<target> (orca); binaries = dist/<bin>-<tag>-<target> (plugins).'
+    required: false
+    default: binaries
+  bins:
+    description: 'JSON array of bin names. Empty ([]) = every bin target in cargo metadata.'
+    required: false
+    default: "[]"
+  disable-lto-for-rc:
+    description: '"true" sets CARGO_PROFILE_RELEASE_LTO=off when the version is an -rc.'
+    required: false
+    default: "false"
+  orca-fetch-token:
+    description: 'Token for private git deps (pass `secrets.ORCA_FETCH_TOKEN`).'
+    required: false
+    default: ""
+  sccache-endpoint:
+    description: 'MinIO host:port for sccache (pass `vars.SCCACHE_ENDPOINT`).'
+    required: false
+    default: ""
+  sccache-access-key:
+    description: 'MinIO access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`).'
+    required: false
+    default: ""
+  sccache-secret-key:
+    description: 'MinIO secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
+    required: false
+    default: ""
+
+outputs:
+  artifact:
+    description: Name of the uploaded artifact.
+    value: build-${{ inputs.target }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check target
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        case "$TARGET" in
+          *-apple-darwin) echo "::error::$TARGET must use job-release-build-macos (zigbuild darwin binaries fail to load)"; exit 1 ;;
+        esac
+    # build.rs runs `git describe` on a checkout owned by another uid; older
+    # ci-rust images lack jq. Linux only: on a host runner --global is the
+    # operator's real ~/.gitconfig.
+    - name: Prepare container
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        git config --global --add safe.directory '*'
+        if ! command -v jq >/dev/null; then
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends jq >/dev/null
+        fi
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    # Set before rust-setup so rust-cache, which keys on CARGO_* env, keeps RC
+    # and stable target dirs apart.
+    - name: Disable LTO for release candidates
+      if: ${{ inputs.disable-lto-for-rc == 'true' && contains(inputs.version, '-rc.') }}
+      shell: bash
+      run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+    - name: Set up Rust (toolchain, sccache)
+      uses: argyle-labs/.github/.github/actions/rust-setup@main
+      with:
+        cache-key: release-${{ inputs.target }}
+        orca-fetch-token: ${{ inputs.orca-fetch-token }}
+        sccache-endpoint: ${{ inputs.sccache-endpoint }}
+        sccache-access-key: ${{ inputs.sccache-access-key }}
+        sccache-secret-key: ${{ inputs.sccache-secret-key }}
+    - name: Resolve bin list
+      id: bins
+      shell: bash
+      env:
+        REQUESTED_BINS: ${{ inputs.bins }}
+      run: |
+        set -euo pipefail
+        if [ "$(echo "$REQUESTED_BINS" | tr -d '[:space:]')" != "[]" ]; then
+          bins=$(echo "$REQUESTED_BINS" | jq -r '.[]')
+        else
+          bins=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[].targets[] | select(.kind[] == "bin") | .name')
+        fi
+        [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
+        { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+    - name: Fetch dependencies (cargo fetch)
+      shell: bash
+      run: |
+        export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
+        cargo fetch --locked
+    - name: Build at release version (build-target)
+      uses: argyle-labs/.github/.github/actions/build-target@main
+      with:
+        target: ${{ inputs.target }}
+        bins: ${{ steps.bins.outputs.list }}
+        version: ${{ inputs.version }}
+    - name: Stage assets
+      id: stage
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.asset-profile }}
+        TARGET: ${{ inputs.target }}
+        TAG: ${{ inputs.tag }}
+        BINS: ${{ steps.bins.outputs.list }}
+      run: |
+        set -euo pipefail
+        if [ "$PROFILE" = full ]; then outdir=dist-release; else outdir=dist; fi
+        mkdir -p "$outdir"
+        while IFS= read -r bin; do
+          [ -z "$bin" ] && continue
+          if [ "$PROFILE" = full ]; then name="${bin}-${TARGET}"; else name="${bin}-${TAG}-${TARGET}"; fi
+          cp "target/${TARGET}/release/${bin}" "${outdir}/${name}"
+          chmod +x "${outdir}/${name}"
+          ( cd "$outdir" && shasum -a 256 "$name" > "${name}.sha256" )
+        done <<< "$BINS"
+        echo "dir=$outdir" >> "$GITHUB_OUTPUT"
+        echo "── staged ($outdir) ──"; ls -la "$outdir"
+    - name: Smoke-test binary (runner-arch targets only)
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        OUTDIR: ${{ steps.stage.outputs.dir }}
+      run: |
+        set -euo pipefail
+        host="$(uname -m)"
+        case "$TARGET" in
+          "${host}"-unknown-linux-gnu|"${host}"-unknown-linux-musl) ;;
+          *) echo "skip: $TARGET not exec'able on this ${host} runner"; exit 0 ;;
+        esac
+        for f in "$OUTDIR"/*-"$TARGET"; do
+          echo "── smoke: $f --version ──"
+          "./$f" --version
+        done
+    - name: Timings + sccache summary
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        phases="${RUNNER_TEMP:-/tmp}/release-phases"
+        {
+          echo "### ${TARGET} — phase timings"
+          echo "| phase | seconds | exit |"
+          echo "|---|---:|---:|"
+          if [ -f "$phases" ]; then
+            while IFS='|' read -r p t e; do echo "| $p | $t | $e |"; done < "$phases"
+          fi
+          echo
+          echo "### ${TARGET} — sccache"
+          stats=$(sccache --show-stats 2>&1) || stats="(sccache not in use)"
+          echo '```'
+          echo "$stats"
+          echo '```'
+          # ReadOnly mode fails every write without ever completing one.
+          werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
+          wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
+          if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
+            echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
+          fi
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+        if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
+          echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
+        fi
+    - name: Upload build-${{ inputs.target }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ inputs.target }}
+        if-no-files-found: error
+        path: ${{ steps.stage.outputs.dir }}/
+        retention-days: 7
