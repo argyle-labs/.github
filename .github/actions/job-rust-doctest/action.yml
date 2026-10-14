@@ -101,20 +101,8 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
-        # rustdoc needs a library target; a binary-only selection has no doctests.
-        pkgs=()
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          case "${args[i]}" in
-            -p|--package) pkgs+=("${args[i+1]}") ;;
-            --package=*) pkgs+=("${args[i]#--package=}") ;;
-          esac
-        done
-        if ! cargo metadata --locked --format-version 1 --no-deps \
-          | jq -e --args '(if $ARGS.positional == [] then null else $ARGS.positional end) as $sel
-              | [.workspace_members as $m | .packages[]
-                 | select(.id as $id | $m | index($id))
-                 | select($sel == null or (.name as $n | $sel | index($n)))]
-              | length == 0 or any(.[].targets[].kind[]; . == "lib" or . == "rlib" or . == "dylib" or . == "proc-macro")' "${pkgs[@]}" >/dev/null; then
+        has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" "${args[@]}")
+        if [ "$has" != true ]; then
           echo "::notice::No library target in the selected packages; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
