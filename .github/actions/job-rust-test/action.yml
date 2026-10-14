@@ -22,10 +22,6 @@ inputs:
     description: 'Cargo package selection, split on whitespace; `--all-features` is appended.'
     required: false
     default: "--workspace"
-  no-tests:
-    description: "nextest `--no-tests`: `fail`, `warn` or `pass` when the selection holds no tests. Keep `fail` unless the repo has no Rust tests."
-    required: false
-    default: "fail"
   build-jobs:
     description: 'CARGO_BUILD_JOBS. Empty keeps cargo''s default parallelism.'
     required: false
@@ -99,7 +95,7 @@ runs:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ inputs.packages }} --all-features
         doctests: 'false'
-        nextest-args: --no-fail-fast --no-tests=${{ inputs.no-tests }}
+        nextest-args: --no-fail-fast
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
