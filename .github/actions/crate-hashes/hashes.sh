@@ -3,8 +3,8 @@
 # build or test result. Run from the workspace root. Env: IMAGE (CI image tag),
 # WORKFLOW_FILE (calling workflow path; GITHUB_WORKFLOW_REF when empty),
 # EXTRA_PATHS (lines of `crate: path [path...]`; `*` applies to every crate).
-# Literal include_str!/include_bytes!/#[folder] targets outside a crate are
-# added to it automatically. Any unresolvable input (workflow file, path, crate,
+# Literal include!/include_str!/include_bytes!/include_dir!/sqlx::migrate!/
+# #[folder] targets outside a crate are added to it automatically. Any unresolvable input (workflow file, path, crate,
 # include) fails the run rather than hashing less.
 set -euo pipefail
 
@@ -81,9 +81,11 @@ while IFS= read -r line; do
   fi
 done <<< "${EXTRA_PATHS:-}"
 
-# Literal include_str!/include_bytes! and rust-embed #[folder] targets outside
-# their crate's directory count as that crate's extra paths. include_* resolves
-# against the including file's dir, #[folder] against the crate root.
+# Literal include!/include_str!/include_bytes!, include_dir!, sqlx::migrate! and
+# rust-embed #[folder] targets outside their crate's directory count as that
+# crate's extra paths. include!/include_str!/include_bytes! resolve against the
+# including file's dir; include_dir!, migrate! and #[folder] name a directory
+# relative to the crate root. env!("OUT_DIR") paths are build outputs and skipped.
 owner() {
   local best="" best_dir="" name dir
   while IFS=$'\t' read -r name dir; do
@@ -95,7 +97,7 @@ owner() {
   done <<< "$members"
   printf '%s\t%s\n' "$best" "$best_dir"
 }
-embed_re='include_(str|bytes)!\("[^"]+"\)|#\[folder *= *"[^"]+"\]|include_(str|bytes)!\( *(concat!\( *)?env!'
+embed_re='\b(include|include_str|include_bytes|include_dir|migrate)!\( *"[^"]+" *\)|#\[folder *= *"[^"]+"\]|\b(include|include_str|include_bytes|include_dir)!\( *(concat!\( *)?env!\( *"[^"]+"'
 while IFS= read -r hit; do
   file=${hit%%:*}
   line=${hit#*:}
@@ -104,13 +106,18 @@ while IFS= read -r hit; do
   IFS=$'\t' read -r crate cdir < <(owner "$file")
   [ -n "$crate" ] || continue
   while IFS= read -r arg; do
-    if [[ "$arg" == *'env!' ]]; then
+    if [[ "$arg" == *'env!('* ]]; then
+      [[ "$arg" =~ env!\(\ *\"OUT_DIR\"$ ]] && continue
       echo "::error title=crate-hashes::$file uses env!() in an include path; add an extra-paths entry instead" >&2
       exit 1
     fi
     path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
     base=$(dirname "$file")
-    [[ "$arg" == '#'* ]] && base=$cdir
+    dir_arg=false
+    if [[ "$arg" =~ ^(#|include_dir!|migrate!) ]]; then
+      dir_arg=true
+      base=$cdir
+    fi
     # shellcheck disable=SC2016 # literal variable names
     for v in '${CARGO_MANIFEST_DIR}' '$CARGO_MANIFEST_DIR'; do
       if [[ "$path" == "$v"* ]]; then
@@ -122,7 +129,7 @@ while IFS= read -r hit; do
       echo "::error title=crate-hashes::$file embeds '$path' with an unresolvable variable; add an extra-paths entry instead" >&2
       exit 1
     fi
-    if [[ "$arg" == '#'* ]]; then
+    if $dir_arg; then
       target=$(realpath -m --relative-to=. "$base/$path")
     else
       target=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
@@ -134,6 +141,10 @@ while IFS= read -r hit; do
     fi
     if [ -z "$(git ls-files -- "$target")" ]; then
       echo "::error title=crate-hashes::$file embeds '$path' but '$target' has no tracked files" >&2
+      exit 1
+    fi
+    if ! $dir_arg && [ -z "$(git ls-files -- "$base/$path")" ]; then
+      echo "::error title=crate-hashes::$file embeds '$path' but it is not a tracked file" >&2
       exit 1
     fi
     extra[$crate]="${extra[$crate]:-} $target"
