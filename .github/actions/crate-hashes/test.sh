@@ -23,6 +23,7 @@ echo 'pub const X: u8 = 1;' > shared/x.rs
 echo 'one' > shared/assets/one.txt
 echo '-- m' > migrations/0001.sql
 echo 'include!("../../shared/x.rs");' > a/src/lib.rs
+# shellcheck disable=SC2016 # literal variable names
 echo 'static D: Dir = include_dir!("$CARGO_MANIFEST_DIR/../shared/assets");' > b/src/lib.rs
 echo 'static M: Migrator = sqlx::migrate!("../migrations");' > c/src/lib.rs
 echo 'include!(concat!(env!("OUT_DIR"), "/gen.rs"));' > d/src/lib.rs
