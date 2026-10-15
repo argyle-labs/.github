@@ -11,8 +11,9 @@
 #
 #   docker build -t ci-rust:1.95.0 --build-arg RUST_VERSION=1.95.0 ci-image/
 #
-# One image serves every Linux target: native x86_64-gnu plus cross
-# (aarch64-gnu, x86_64/aarch64-musl) via cargo-zigbuild. macOS is not a
+# Published for linux/amd64 and linux/arm64; each serves every Linux target:
+# the host's native gnu target plus cross (other-arch gnu, x86_64/aarch64-musl)
+# via cargo-zigbuild. macOS is not a
 # container target — the mint-macos runner is prebaked separately.
 
 ARG RUST_VERSION=1.95.0
