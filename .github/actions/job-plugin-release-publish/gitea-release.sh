@@ -6,8 +6,8 @@ api="$API_URL"
 server="$SERVER_URL"
 hdr_auth="Authorization: token ${GITEA_TOKEN}"
 accept="Accept: application/json"
-# ORCA_SOURCE is the lock source, e.g.
-# git+https://github.com/argyle-labs/orca?tag=v0.2.1-rc.10#<sha>.
+resp_file=$(mktemp "${RUNNER_TEMP:-/tmp}/upload_resp.XXXXXX")
+trap 'rm -f "$resp_file"' EXIT
 orca_ref="an unrecorded orca revision"
 if [ -n "$ORCA_SOURCE" ]; then
   base=${ORCA_SOURCE%%#*}; rev=${ORCA_SOURCE##*#}; pin=${base#*\?}
@@ -43,10 +43,10 @@ for f in dist/*; do
   echo "→ uploading $name"
   code=$(curl -sS -X POST -H "$hdr_auth" \
     -F "attachment=@${f};filename=${name}" \
-    -o /tmp/upload_resp.json -w '%{http_code}' \
+    -o "$resp_file" -w '%{http_code}' \
     "$api/repos/$repo/releases/$rid/assets?name=$name")
   if [ "$code" -ge 300 ]; then
-    echo "::error::asset upload failed for $name (HTTP $code)"; cat /tmp/upload_resp.json || true; exit 1
+    echo "::error::asset upload failed for $name (HTTP $code)"; cat "$resp_file" || true; exit 1
   fi
 done
 set -- dist/*

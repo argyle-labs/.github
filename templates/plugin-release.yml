@@ -20,7 +20,10 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  TARGETS: '["x86_64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-apple-darwin"]'
 
 jobs:
   version:
@@ -128,8 +131,10 @@ jobs:
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
   publish:
-    needs: [version, build-x86_64-linux-gnu, build-x86_64-linux-musl, build-aarch64-darwin]
+    needs: [version, ui-build, build-x86_64-linux-gnu, build-x86_64-linux-musl, build-aarch64-darwin]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     concurrency:
       group: release-${{ github.repository }}-${{ inputs.channel }}-${{ inputs.bump }}
       cancel-in-progress: false
@@ -141,12 +146,17 @@ jobs:
           tag: ${{ needs.version.outputs.tag }}
           prerelease: ${{ needs.version.outputs.prerelease }}
           channel: ${{ inputs.channel }}
-          targets: '["x86_64-unknown-linux-gnu","x86_64-unknown-linux-musl","aarch64-apple-darwin"]'
+          targets: ${{ env.TARGETS }}
           notes: ${{ inputs.notes }}
           orca-source: >-
             ${{ needs.build-x86_64-linux-musl.outputs.orca-source
             || needs.build-x86_64-linux-gnu.outputs.orca-source
             || needs.build-aarch64-darwin.outputs.orca-source }}
+          build-results: |
+            ui-build:${{ needs.ui-build.result }}
+            gnu-x86:${{ needs.build-x86_64-linux-gnu.result }}
+            musl-x86:${{ needs.build-x86_64-linux-musl.result }}
+            darwin-arm:${{ needs.build-aarch64-darwin.result }}
           signing-key: ${{ secrets.PLUGIN_SIGNING_KEY }}
           release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
           registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
