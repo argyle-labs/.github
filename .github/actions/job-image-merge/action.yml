@@ -1,0 +1,88 @@
+name: Image job — merge platform digests
+description: >
+  The `merge` job of a multi-arch image: downloads every digest uploaded by
+  job-image-build-platform for the image, creates one manifest list carrying
+  all requested tags, and inspects it. Needs a host docker daemon.
+
+inputs:
+  image:
+    description: 'Image name without registry, e.g. `argyle-labs/<repo>`; lowercased.'
+    required: true
+  tags:
+    description: 'Newline-separated tags (without the repo), e.g. `latest`.'
+    required: true
+  registry:
+    description: 'Registry host (callers pass `vars.CI_REGISTRY || gitea.scottkey.me`).'
+    required: false
+    default: gitea.scottkey.me
+  registry-http:
+    description: "'true' when the registry is a plain-HTTP endpoint (vars.CI_REGISTRY_HTTP)."
+    required: false
+    default: "false"
+  username:
+    required: true
+  password:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve names
+      id: names
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        echo "repo=$REGISTRY/${IMAGE,,}" >> "$GITHUB_OUTPUT"
+        echo "pattern=digests-${IMAGE//\//-}-*" >> "$GITHUB_OUTPUT"
+
+    - name: Download digests
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ${{ steps.names.outputs.pattern }}
+        path: ${{ runner.temp }}/digests
+        merge-multiple: true
+
+    - name: Registry login
+      uses: argyle-labs/.github/.github/actions/registry-login@main
+      with:
+        registry: ${{ inputs.registry }}
+        registry-http: ${{ inputs.registry-http }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Create manifest list
+      shell: bash
+      env:
+        REPO: ${{ steps.names.outputs.repo }}
+        TAGS: ${{ inputs.tags }}
+      run: |
+        set -euo pipefail
+        args=()
+        while IFS= read -r t; do
+          [ -z "$t" ] && continue
+          args+=(-t "$REPO:$t")
+        done <<< "$TAGS"
+        [ "${#args[@]}" -gt 0 ] || { echo "::error::no tags given"; exit 1; }
+        refs=()
+        for d in "${RUNNER_TEMP}/digests"/*; do
+          refs+=("$REPO@sha256:$(basename "$d")")
+        done
+        [ "${#refs[@]}" -gt 0 ] || { echo "::error::no digests downloaded"; exit 1; }
+        docker buildx imagetools create "${args[@]}" "${refs[@]}"
+
+    - name: Inspect
+      shell: bash
+      env:
+        REPO: ${{ steps.names.outputs.repo }}
+        TAGS: ${{ inputs.tags }}
+      run: |
+        set -euo pipefail
+        first=$(grep -m1 -v '^$' <<< "$TAGS")
+        docker buildx imagetools inspect "$REPO:$first"
+        {
+          echo "### Published $REPO"
+          while IFS= read -r t; do [ -n "$t" ] && echo "- \`$REPO:$t\`"; done <<< "$TAGS"
+        } >> "$GITHUB_STEP_SUMMARY"
