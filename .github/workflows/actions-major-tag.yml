@@ -1,0 +1,43 @@
+name: Actions major tag
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release tag to point its major tag at (vX.Y.Z)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: actions-major-tag
+  cancel-in-progress: false
+
+jobs:
+  move-major:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move vX to the release tag
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not vX.Y.Z"
+            exit 1
+          fi
+          major="v${BASH_REMATCH[1]}"
+          sha="$(git rev-parse "refs/tags/${VERSION}^{commit}")"
+          git config user.name  "actions-major-tag"
+          git config user.email "actions-major-tag@argyle-labs.local"
+          git tag -f "$major" "$sha"
+          git push -f origin "refs/tags/${major}"
+          echo "${major} -> ${VERSION} (${sha})" >> "$GITHUB_STEP_SUMMARY"
