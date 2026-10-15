@@ -1,0 +1,31 @@
+name: CI actions checkout
+description: >
+  Checks out argyle-labs/.github at a chosen ref from a chosen git server so a
+  workflow can run the shared actions as `./<path>/.github/actions/<name>`.
+  Composites cannot read `vars`, so callers pass `ref` from
+  `vars.CI_ACTIONS_REF` and `server-url` from `vars.GIT_SERVER_URL`; blank
+  falls back to `v1` and the current server.
+
+inputs:
+  ref:
+    description: Ref of argyle-labs/.github to check out (blank = v1).
+    required: false
+    default: ""
+  server-url:
+    description: Git server base URL (blank = the server running the workflow).
+    required: false
+    default: ""
+  path:
+    description: Checkout path under the workspace.
+    required: false
+    default: .ci
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: argyle-labs/.github
+        ref: ${{ inputs.ref || 'v1' }}
+        github-server-url: ${{ inputs.server-url || github.server_url }}
+        path: ${{ inputs.path }}
