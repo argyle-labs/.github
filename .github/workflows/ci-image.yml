@@ -37,6 +37,8 @@ on:
     paths:
       - ci-image/**
       - .github/workflows/ci-image.yml
+      - .github/actions/job-image-build-platform/**
+      - .github/actions/job-image-merge/**
   schedule:
     # Weekly base-image + security refresh (Mondays 08:00 UTC).
     - cron: "0 8 * * 1"
