@@ -17,3 +17,17 @@ jobs:
       - name: ShellCheck
         if: ${{ !cancelled() }}
         uses: ./.github/actions/shellcheck
+
+  crate-hashes:
+    runs-on: ubuntu-latest
+    container: rust:1.95-slim-bookworm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Tools
+        run: apt-get -qq update && apt-get -qq install -y git jq nodejs >/dev/null
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/crate-hashes/test.sh
