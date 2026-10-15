@@ -1,0 +1,109 @@
+name: Image job — build one platform natively
+description: >
+  One `build` matrix leg of a multi-arch image: builds a single platform with
+  Buildx on a runner of that arch (no QEMU), pushes it by digest only, and
+  uploads the digest as `digests-<image>-<platform>`. Pair with job-image-merge,
+  which assembles the tagged manifest list. Needs a host docker daemon and a
+  checkout.
+
+inputs:
+  image:
+    description: 'Image name without registry, e.g. `argyle-labs/<repo>`; lowercased.'
+    required: true
+  platform:
+    description: 'Single buildx platform, e.g. linux/arm64. Must match the runner arch.'
+    required: true
+  context:
+    description: 'Build context.'
+    required: false
+    default: "."
+  file:
+    description: 'Dockerfile path.'
+    required: false
+    default: Dockerfile
+  build-args:
+    description: 'Newline-separated KEY=VALUE build args.'
+    required: false
+    default: ""
+  registry:
+    description: 'Registry host (callers pass `vars.CI_REGISTRY || gitea.scottkey.me`).'
+    required: false
+    default: gitea.scottkey.me
+  registry-http:
+    description: "'true' when the registry is a plain-HTTP endpoint (vars.CI_REGISTRY_HTTP)."
+    required: false
+    default: "false"
+  username:
+    required: true
+  password:
+    required: true
+
+outputs:
+  digest:
+    description: 'Pushed image digest.'
+    value: ${{ steps.build.outputs.digest }}
+  artifact:
+    description: Name of the uploaded digest artifact.
+    value: ${{ steps.names.outputs.artifact }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve names
+      id: names
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE: ${{ inputs.image }}
+        PLATFORM: ${{ inputs.platform }}
+      run: |
+        set -euo pipefail
+        repo="$REGISTRY/${IMAGE,,}"
+        echo "repo=$repo" >> "$GITHUB_OUTPUT"
+        echo "artifact=digests-${IMAGE//\//-}-${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+        echo "cache=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+
+    - name: Registry login
+      uses: argyle-labs/.github/.github/actions/registry-login@main
+      with:
+        registry: ${{ inputs.registry }}
+        registry-http: ${{ inputs.registry-http }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Build and push by digest
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.file }}
+        platforms: ${{ inputs.platform }}
+        build-args: ${{ inputs.build-args }}
+        outputs: type=image,name=${{ steps.names.outputs.repo }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=registry,ref=${{ steps.names.outputs.repo }}:buildcache-${{ steps.names.outputs.cache }}
+        cache-to: type=registry,ref=${{ steps.names.outputs.repo }}:buildcache-${{ steps.names.outputs.cache }},mode=max
+
+    - name: Export digest
+      shell: bash
+      env:
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/digests"
+        touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+    - name: Upload ${{ steps.names.outputs.artifact }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.names.outputs.artifact }}
+        path: ${{ runner.temp }}/digests/*
+        if-no-files-found: error
+        retention-days: 1
+
+    - name: Summary
+      shell: bash
+      env:
+        REPO: ${{ steps.names.outputs.repo }}
+        PLATFORM: ${{ inputs.platform }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: echo "Pushed ${PLATFORM} ${REPO}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
