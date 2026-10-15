@@ -18,6 +18,17 @@ jobs:
         if: ${{ !cancelled() }}
         uses: ./.github/actions/shellcheck
 
+  job-release-version:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/job-release-version/test.sh
+
   crate-hashes:
     runs-on: ubuntu-latest
     container: rust:1.95-slim-bookworm

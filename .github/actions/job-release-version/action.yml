@@ -12,6 +12,10 @@ inputs:
     description: patch | minor | major
     required: false
     default: patch
+  expected-version:
+    description: When non-empty, fail unless it equals the computed version (leading v optional).
+    required: false
+    default: ""
 
 outputs:
   version:
@@ -77,3 +81,9 @@ runs:
           echo "prerelease=$prerelease"; echo "draft=$draft"; echo "mirror=$mirror"
         } >> "$GITHUB_OUTPUT"
         echo "→ stage=$STAGE version=$version tag=$tag prerelease=$prerelease draft=$draft mirror=$mirror"
+    - name: Check expected version
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.expected-version }}
+        COMPUTED: ${{ steps.pick.outputs.version }}
+      run: "$GITHUB_ACTION_PATH/check.sh"
