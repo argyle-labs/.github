@@ -105,11 +105,18 @@ idx() {
   if [ "$pre" = "$1" ]; then echo 0; else echo $((${#pre} + 1)); fi
 }
 code_only() {
-  local in=$1 out="" i=0 n=${#1} c prev j hashes body
+  local in=$1 out="" i=0 n=${#1} c prev j hashes body pfx
   while [ "$i" -lt "$n" ]; do
     c=${in:i:1}
-    if [ "${in:i:2}" = '//' ]; then
-      break
+    if [ "$c" = $'\n' ]; then
+      out+=' '
+      i=$((i + 1))
+      continue
+    elif [ "${in:i:2}" = '//' ]; then
+      j=$(idx "${in:i+2}" $'\n')
+      [ "$j" -gt 0 ] || break
+      i=$((i + 2 + j - 1))
+      continue
     elif [ "${in:i:2}" = '/*' ]; then
       j=$(idx "${in:i+2}" '*/')
       [ "$j" -gt 0 ] || break
@@ -124,13 +131,14 @@ code_only() {
       i=$((i + 2 + j))
       continue
     fi
-    body="" hashes=""
-    if [ "$c" = r ] && [[ ! "${in:i-1:1}" =~ [A-Za-z0-9_] || "$i" -eq 0 ]] && [[ "${in:i+1}" =~ ^(#*)\" ]]; then
+    body="" hashes="" pfx=0
+    [[ "$c" == [bc] && "${in:i+1:1}" = r ]] && pfx=1
+    if [[ "$c" = r || "$pfx" -eq 1 ]] && [[ "$i" -eq 0 || ! "${in:i-1:1}" =~ [A-Za-z0-9_] ]] && [[ "${in:i+1+pfx}" =~ ^(#*)\" ]]; then
       hashes=${BASH_REMATCH[1]}
-      j=$(idx "${in:i+2+${#hashes}}" "\"$hashes")
+      j=$(idx "${in:i+pfx+2+${#hashes}}" "\"$hashes")
       [ "$j" -gt 0 ] || break
-      body=${in:i+2+${#hashes}:j-1}
-      i=$((i + 2 + ${#hashes} + j + ${#hashes}))
+      body=${in:i+pfx+2+${#hashes}:j-1}
+      i=$((i + pfx + 2 + ${#hashes} + j + ${#hashes}))
     elif [ "$c" = '"' ]; then
       j=$((i + 1))
       while [ "$j" -lt "$n" ] && [ "${in:j:1}" != '"' ]; do
@@ -155,64 +163,87 @@ code_only() {
   done
   printf '%s\n' "$out"
 }
-while IFS= read -r hit; do
-  file=${hit%%:*}
-  line=${hit#*:}
-  line=$(code_only "${line#*:}")
-  macros=$(grep -oE "$embed_macro_re" <<< "$line" | grep -c . || true)
-  literals=$(grep -oE "$embed_re" <<< "$line" | grep -cv '^#' || true)
-  bare=$(grep -oE "\bmigrate!\( *\)" <<< "$line" | grep -c . || true)
-  if [ "$macros" -gt $((literals + bare)) ]; then
-    echo "::error title=crate-hashes::$file has a multi-line or non-literal embed; add an extra-paths entry instead" >&2
-    exit 1
-  fi
-  IFS=$'\t' read -r crate cdir < <(owner "$file")
-  [ -n "$crate" ] || continue
-  while IFS= read -r arg; do
-    if [[ "$arg" == *'env!('* ]]; then
-      [[ "$arg" =~ env!\(\ *\"OUT_DIR\"$ ]] && continue
-      echo "::error title=crate-hashes::$file uses env!() in an include path; add an extra-paths entry instead" >&2
-      exit 1
+unliteral() {
+  local macros literals bare
+  macros=$(grep -oE "$embed_macro_re" <<< "$1" | grep -c . || true)
+  literals=$(grep -oE "$embed_re" <<< "$1" | grep -cv '^#' || true)
+  bare=$(grep -oE "\bmigrate!\( *\)" <<< "$1" | grep -c . || true)
+  [ "$macros" -gt $((literals + bare)) ]
+}
+unbalanced() {
+  local opens=${1//[^(]/} closes=${1//[^)]/}
+  [ "${#opens}" -gt "${#closes}" ]
+}
+while IFS= read -r file; do
+  stripped=$(perl -0pe 's{/\*.*?\*/}{$& =~ s/[^\n]//gr}gse' "$file")
+  mapfile -t src <<< "$stripped"
+  while IFS= read -r hit; do
+    ln=${hit%%:*}
+    raw=${hit#*:}
+    line=$(code_only "$raw")
+    if unliteral "$line"; then
+      while unbalanced "$line"; do
+        if [ "$ln" -ge "${#src[@]}" ]; then
+          echo "::error title=crate-hashes::$file has an embed whose parentheses never close" >&2
+          exit 1
+        fi
+        raw+=$'\n'${src[ln]}
+        ln=$((ln + 1))
+        line=$(code_only "$raw")
+      done
+      if unliteral "$line"; then
+        echo "::error title=crate-hashes::$file has a non-literal embed; add an extra-paths entry instead" >&2
+        exit 1
+      fi
     fi
-    path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
-    base=$(dirname "$file")
-    dir_arg=false
-    if [[ "$arg" =~ ^(#|include_dir!|migrate!) ]]; then
-      dir_arg=true
-      base=$cdir
-    fi
-    # shellcheck disable=SC2016 # literal variable names
-    for v in '${CARGO_MANIFEST_DIR}' '$CARGO_MANIFEST_DIR'; do
-      if [[ "$path" == "$v"* ]]; then
-        path=.${path#"$v"}
+    IFS=$'\t' read -r crate cdir < <(owner "$file")
+    [ -n "$crate" ] || continue
+    while IFS= read -r arg; do
+      if [[ "$arg" == *'env!('* ]]; then
+        [[ "$arg" =~ env!\(\ *\"OUT_DIR\"$ ]] && continue
+        echo "::error title=crate-hashes::$file uses env!() in an include path; add an extra-paths entry instead" >&2
+        exit 1
+      fi
+      path=$(sed -E 's/^[^"]*"([^"]+)".*$/\1/' <<< "$arg")
+      base=$(dirname "$file")
+      dir_arg=false
+      if [[ "$arg" =~ ^(#|include_dir!|migrate!) ]]; then
+        dir_arg=true
         base=$cdir
       fi
-    done
-    if [[ "$path" == *'$'* ]]; then
-      echo "::error title=crate-hashes::$file embeds '$path' with an unresolvable variable; add an extra-paths entry instead" >&2
-      exit 1
-    fi
-    if $dir_arg; then
-      target=$(realpath -m --relative-to=. "$base/$path")
-    else
-      target=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
-    fi
-    if [ "$cdir" = . ]; then
-      case "$target" in ..|../*) ;; *) continue ;; esac
-    elif [ "$target" = "$cdir" ] || [[ "$target" == "$cdir"/* ]]; then
-      continue
-    fi
-    if [ -z "$(git ls-files -- "$target")" ]; then
-      echo "::error title=crate-hashes::$file embeds '$path' but '$target' has no tracked files" >&2
-      exit 1
-    fi
-    if ! $dir_arg && [ -z "$(git ls-files -- "$base/$path")" ]; then
-      echo "::error title=crate-hashes::$file embeds '$path' but it is not a tracked file" >&2
-      exit 1
-    fi
-    extra[$crate]="${extra[$crate]:-} $target"
-  done < <(grep -oE "$embed_re" <<< "$line")
-done < <(git grep -nE "$embed_macro_re|#\\[folder" -- '*.rs' || true)
+      # shellcheck disable=SC2016 # literal variable names
+      for v in '${CARGO_MANIFEST_DIR}' '$CARGO_MANIFEST_DIR'; do
+        if [[ "$path" == "$v"* ]]; then
+          path=.${path#"$v"}
+          base=$cdir
+        fi
+      done
+      if [[ "$path" == *'$'* ]]; then
+        echo "::error title=crate-hashes::$file embeds '$path' with an unresolvable variable; add an extra-paths entry instead" >&2
+        exit 1
+      fi
+      if $dir_arg; then
+        target=$(realpath -m --relative-to=. "$base/$path")
+      else
+        target=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
+      fi
+      if [ "$cdir" = . ]; then
+        case "$target" in ..|../*) ;; *) continue ;; esac
+      elif [ "$target" = "$cdir" ] || [[ "$target" == "$cdir"/* ]]; then
+        continue
+      fi
+      if [ -z "$(git ls-files -- "$target")" ]; then
+        echo "::error title=crate-hashes::$file embeds '$path' but '$target' has no tracked files" >&2
+        exit 1
+      fi
+      if ! $dir_arg && [ -z "$(git ls-files -- "$base/$path")" ]; then
+        echo "::error title=crate-hashes::$file embeds '$path' but it is not a tracked file" >&2
+        exit 1
+      fi
+      extra[$crate]="${extra[$crate]:-} $target"
+    done < <(grep -oE "$embed_re" <<< "$line")
+  done < <(grep -nE "$embed_macro_re|#\\[folder" <<< "$stripped" || true)
+done < <(git grep -lE "$embed_macro_re|#\\[folder" -- '*.rs' || true)
 
 common=$(
   {

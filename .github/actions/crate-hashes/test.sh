@@ -51,19 +51,23 @@ check b shared/assets/one.txt
 check c migrations/0001.sql
 
 expect() {
-  local want=$1 name=$2 got=pass
+  local want=$1 name=$2 got=pass err="" errs
   shift 2
+  if [ "$want" = fail ]; then
+    err=$1
+    shift
+  fi
   printf '%s\n' "$@" > d/src/lib.rs
   git add -A
-  run >/dev/null 2>&1 || got=fail
-  if [ "$got" = "$want" ]; then
+  errs=$(run 2>&1 >/dev/null) || got=fail
+  if [ "$got" = "$want" ] && [[ "$errs" == *"$err"* ]]; then
     echo "ok: $name ($want)"
   else
-    echo "FAIL: $name should $want" >&2
+    echo "FAIL: $name should $want [$err], got $got: $errs" >&2
     fail=1
   fi
 }
-expect fail 'unresolvable include!' 'include!("../../shared/missing.rs");'
+expect fail 'unresolvable include!' "embeds '../../shared/missing.rs' but it is not a tracked file" 'include!("../../shared/missing.rs");'
 expect pass 'commented-out embed' \
   'let s = 1; // include_str!("../../nope/x")' \
   '/* include_str!("../../nope/x") */' \
@@ -72,14 +76,23 @@ echo generated > d/src/gen.txt
 expect pass 'in-crate untracked include' 'const G: &str = include_str!("gen.txt");'
 rm d/src/gen.txt
 # shellcheck disable=SC2016 # literal variable names
-expect fail 'env!("CARGO_MANIFEST_DIR") include' 'include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../shared/x.rs"));'
-expect fail 'multi-line embed' 'const X: &str = include_str!(' '  "../../shared/x.rs");'
+expect fail 'env!("CARGO_MANIFEST_DIR") include' 'uses env!() in an include path' 'include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../shared/x.rs"));'
+expect fail 'unclosed multi-line embed' 'parentheses never close' 'const X: &str = include_str!(' '  "../../shared/x.rs"'
+expect fail 'multi-line non-literal embed' 'has a non-literal embed' 'const X: &str = include_str!(' '  PATH);'
+expect pass 'multi-line OUT_DIR include' 'include!(concat!(' '    env!("OUT_DIR"),' '    "/gen.rs"' '));'
+expect pass 'multi-line block comment embed' '/*' '  include_str!("../../nope/x")' '*/' 'const Y: u8 = 1;'
 
 echo raw > shared/raw.txt
 echo hashed > shared/hashed.txt
+echo multi > shared/multi.txt
+echo bytes > shared/bytes.txt
 printf '%s\n' 'const A: &str = include_str!(r"../../shared/raw.txt");' \
-  'const B: &str = include_str!(r#"../../shared/hashed.txt"#);' > d/src/lib.rs
+  'const B: &str = include_str!(r#"../../shared/hashed.txt"#);' \
+  'const C: &str = include_str!(' '  "../../shared/multi.txt"' ');' \
+  'const D: (&[u8], &str) = (br"x\", include_str!("../../shared/bytes.txt"));' > d/src/lib.rs
 git add -A
 check d shared/raw.txt
 check d shared/hashed.txt
+check d shared/multi.txt
+check d shared/bytes.txt
 exit "$fail"
