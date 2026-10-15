@@ -17,6 +17,8 @@ expect pass '' 0.2.1-rc.18
 expect pass 0.2.1-rc.18 0.2.1-rc.18
 expect pass v0.2.1-rc.18 0.2.1-rc.18
 expect pass v0.2.1 v0.2.1
+expect pass ' v0.2.1-rc.18 ' 0.2.1-rc.18
+expect pass V0.2.1 0.2.1
 expect fail v0.2.1-rc.17 0.2.1-rc.18
 expect fail 0.2.2 0.2.1
 exit "$fail"
