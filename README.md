@@ -176,6 +176,37 @@ Start from a template:
 | Plugin crate embedding a Vite frontend (`ui/`) | [`templates/plugin-ci-rust-ui.yml`](templates/plugin-ci-rust-ui.yml) |
 | Scoped workspace plus an npm workspace (orca) | [`templates/orca-ci.example.yml`](templates/orca-ci.example.yml) |
 
+### Selecting the actions version and server
+
+`uses:` cannot take expressions, so workflows check out this repo and call the actions by path. Two Actions variables choose what is checked out:
+
+| Variable | Effect | Unset |
+|---|---|---|
+| `CI_ACTIONS_REF` | Ref of `argyle-labs/.github` to run (`v1`, `v1.2.0`, a branch) | `v1` |
+| `GIT_SERVER_URL` | Git server to check it out from | the server running the workflow |
+
+GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL and `CI_ACTIONS_REF` to the chosen version. A `vX.Y.Z` tag push moves `vX` to it ([`actions-major-tag.yml`](.github/workflows/actions-major-tag.yml)).
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    repository: argyle-labs/.github
+    ref: ${{ vars.CI_ACTIONS_REF || 'v1' }}
+    github-server-url: ${{ vars.GIT_SERVER_URL || github.server_url }}
+    path: .ci
+- uses: ./.ci/.github/actions/job-release-version
+```
+
+[`ci-actions-checkout`](.github/actions/ci-actions-checkout) wraps that checkout. It must itself be pulled by remote ref, since a local action cannot run before its repo is on disk; only the wrapper comes from that ref, everything under `.ci` follows the variables. Composites cannot read `vars`, so pass them:
+
+```yaml
+- uses: argyle-labs/.github/.github/actions/ci-actions-checkout@v1
+  with:
+    ref: ${{ vars.CI_ACTIONS_REF }}
+    server-url: ${{ vars.GIT_SERVER_URL }}
+- uses: ./.ci/.github/actions/job-release-version
+```
+
 ### Job actions
 
 | Action | Job | Runs | Inputs |
