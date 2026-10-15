@@ -50,12 +50,36 @@ check a shared/x.rs
 check b shared/assets/one.txt
 check c migrations/0001.sql
 
-echo 'include!("../../shared/missing.rs");' > d/src/lib.rs
+expect() {
+  local want=$1 name=$2 got=pass
+  shift 2
+  printf '%s\n' "$@" > d/src/lib.rs
+  git add -A
+  run >/dev/null 2>&1 || got=fail
+  if [ "$got" = "$want" ]; then
+    echo "ok: $name ($want)"
+  else
+    echo "FAIL: $name should $want" >&2
+    fail=1
+  fi
+}
+expect fail 'unresolvable include!' 'include!("../../shared/missing.rs");'
+expect pass 'commented-out embed' \
+  'let s = 1; // include_str!("../../nope/x")' \
+  '/* include_str!("../../nope/x") */' \
+  'const R: &str = r#"include_str!("../../nope/x")"#;'
+echo generated > d/src/gen.txt
+expect pass 'in-crate untracked include' 'const G: &str = include_str!("gen.txt");'
+rm d/src/gen.txt
+# shellcheck disable=SC2016 # literal variable names
+expect fail 'env!("CARGO_MANIFEST_DIR") include' 'include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../shared/x.rs"));'
+expect fail 'multi-line embed' 'const X: &str = include_str!(' '  "../../shared/x.rs");'
+
+echo raw > shared/raw.txt
+echo hashed > shared/hashed.txt
+printf '%s\n' 'const A: &str = include_str!(r"../../shared/raw.txt");' \
+  'const B: &str = include_str!(r#"../../shared/hashed.txt"#);' > d/src/lib.rs
 git add -A
-if run >/dev/null 2>&1; then
-  echo "FAIL: unresolvable include! did not fail" >&2
-  fail=1
-else
-  echo "ok: unresolvable include! fails"
-fi
+check d shared/raw.txt
+check d shared/hashed.txt
 exit "$fail"

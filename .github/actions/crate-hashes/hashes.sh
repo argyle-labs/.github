@@ -4,8 +4,9 @@
 # WORKFLOW_FILE (calling workflow path; GITHUB_WORKFLOW_REF when empty),
 # EXTRA_PATHS (lines of `crate: path [path...]`; `*` applies to every crate).
 # Literal include!/include_str!/include_bytes!/include_dir!/sqlx::migrate!/
-# #[folder] targets outside a crate are added to it automatically. Any unresolvable input (workflow file, path, crate,
-# include) fails the run rather than hashing less.
+# #[folder] targets outside a crate are added to it automatically. Any
+# unresolvable input (workflow file, path, crate, include) fails the run rather
+# than hashing less.
 set -euo pipefail
 
 meta=$(cargo metadata --format-version 1 --no-deps)
@@ -97,12 +98,74 @@ owner() {
   done <<< "$members"
   printf '%s\t%s\n' "$best" "$best_dir"
 }
+embed_macro_re='\b(include|include_str|include_bytes|include_dir|migrate)!\('
 embed_re='\b(include|include_str|include_bytes|include_dir|migrate)!\( *"[^"]+" *\)|#\[folder *= *"[^"]+"\]|\b(include|include_str|include_bytes|include_dir)!\( *(concat!\( *)?env!\( *"[^"]+"'
+idx() {
+  local pre=${1%%"$2"*}
+  if [ "$pre" = "$1" ]; then echo 0; else echo $((${#pre} + 1)); fi
+}
+code_only() {
+  local in=$1 out="" i=0 n=${#1} c prev j hashes body
+  while [ "$i" -lt "$n" ]; do
+    c=${in:i:1}
+    if [ "${in:i:2}" = '//' ]; then
+      break
+    elif [ "${in:i:2}" = '/*' ]; then
+      j=$(idx "${in:i+2}" '*/')
+      [ "$j" -gt 0 ] || break
+      i=$((i + 2 + j + 1))
+      continue
+    elif [ "$c" = "'" ] && [ "${in:i+2:1}" = "'" ]; then
+      i=$((i + 3))
+      continue
+    elif [ "$c" = "'" ] && [ "${in:i+1:1}" = "\\" ]; then
+      j=$(idx "${in:i+2}" "'")
+      [ "$j" -gt 0 ] || break
+      i=$((i + 2 + j))
+      continue
+    fi
+    body="" hashes=""
+    if [ "$c" = r ] && [[ ! "${in:i-1:1}" =~ [A-Za-z0-9_] || "$i" -eq 0 ]] && [[ "${in:i+1}" =~ ^(#*)\" ]]; then
+      hashes=${BASH_REMATCH[1]}
+      j=$(idx "${in:i+2+${#hashes}}" "\"$hashes")
+      [ "$j" -gt 0 ] || break
+      body=${in:i+2+${#hashes}:j-1}
+      i=$((i + 2 + ${#hashes} + j + ${#hashes}))
+    elif [ "$c" = '"' ]; then
+      j=$((i + 1))
+      while [ "$j" -lt "$n" ] && [ "${in:j:1}" != '"' ]; do
+        [ "${in:j:1}" = "\\" ] && j=$((j + 1))
+        j=$((j + 1))
+      done
+      [ "$j" -lt "$n" ] || break
+      body=${in:i+1:j-i-1}
+      i=$((j + 1))
+    else
+      out+=$c
+      i=$((i + 1))
+      continue
+    fi
+    prev=$(sed -E 's/[[:space:]]+$//' <<< "$out")
+    prev=${prev: -1}
+    if [[ "$prev" == [\(=,] && "$body" != *'"'* ]]; then
+      out+="\"$body\""
+    else
+      out+='""'
+    fi
+  done
+  printf '%s\n' "$out"
+}
 while IFS= read -r hit; do
   file=${hit%%:*}
   line=${hit#*:}
-  line=${line#*:}
-  [[ "$line" =~ ^[[:space:]]*// ]] && continue
+  line=$(code_only "${line#*:}")
+  macros=$(grep -oE "$embed_macro_re" <<< "$line" | grep -c . || true)
+  literals=$(grep -oE "$embed_re" <<< "$line" | grep -cv '^#' || true)
+  bare=$(grep -oE "\bmigrate!\( *\)" <<< "$line" | grep -c . || true)
+  if [ "$macros" -gt $((literals + bare)) ]; then
+    echo "::error title=crate-hashes::$file has a multi-line or non-literal embed; add an extra-paths entry instead" >&2
+    exit 1
+  fi
   IFS=$'\t' read -r crate cdir < <(owner "$file")
   [ -n "$crate" ] || continue
   while IFS= read -r arg; do
@@ -149,7 +212,7 @@ while IFS= read -r hit; do
     fi
     extra[$crate]="${extra[$crate]:-} $target"
   done < <(grep -oE "$embed_re" <<< "$line")
-done < <(git grep -nE "$embed_re" -- '*.rs' || true)
+done < <(git grep -nE "$embed_macro_re|#\\[folder" -- '*.rs' || true)
 
 common=$(
   {
