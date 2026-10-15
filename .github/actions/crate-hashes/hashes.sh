@@ -170,27 +170,32 @@ unliteral() {
   bare=$(grep -oE "\bmigrate!\( *\)" <<< "$1" | grep -c . || true)
   [ "$macros" -gt $((literals + bare)) ]
 }
-unbalanced() {
-  local opens=${1//[^(]/} closes=${1//[^)]/}
-  [ "${#opens}" -gt "${#closes}" ]
+balance() {
+  local bare opens closes
+  bare=$(sed -E 's/"[^"]*"//g' <<< "$1")
+  opens=${bare//[^(]/} closes=${bare//[^)]/}
+  echo $((${#opens} - ${#closes}))
 }
 while IFS= read -r file; do
-  stripped=$(perl -0pe 's{/\*.*?\*/}{$& =~ s/[^\n]//gr}gse' "$file")
+  stripped=$(perl -0pe 's{((?<![A-Za-z0-9_])[bc]?r(#*)".*?"\2|(?:(?<![A-Za-z0-9_])[bc])?"(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\\n])\x27|//[^\n]*)|/\*.*?\*/}{defined $1 ? $1 : $& =~ s/[^\n]//gr}gse' "$file")
   mapfile -t src <<< "$stripped"
   while IFS= read -r hit; do
     ln=${hit%%:*}
     raw=${hit#*:}
     line=$(code_only "$raw")
     if unliteral "$line"; then
-      while unbalanced "$line"; do
-        if [ "$ln" -ge "${#src[@]}" ]; then
+      start=$ln
+      depth=$(balance "$line")
+      while [ "$depth" -gt 0 ]; do
+        if [ "$ln" -ge "${#src[@]}" ] || [ $((ln - start)) -ge 50 ]; then
           echo "::error title=crate-hashes::$file has an embed whose parentheses never close" >&2
           exit 1
         fi
         raw+=$'\n'${src[ln]}
+        depth=$((depth + $(balance "$(code_only "${src[ln]}")")))
         ln=$((ln + 1))
-        line=$(code_only "$raw")
       done
+      line=$(code_only "$raw")
       if unliteral "$line"; then
         echo "::error title=crate-hashes::$file has a non-literal embed; add an extra-paths entry instead" >&2
         exit 1
