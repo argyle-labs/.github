@@ -80,6 +80,9 @@ jobs:
             echo "Default TLS registry handling for $REGISTRY."
           fi
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -100,6 +103,7 @@ jobs:
         with:
           context: ci-image
           file: ci-image/Dockerfile
+          platforms: linux/amd64,linux/arm64
           build-args: |
             RUST_VERSION=${{ env.RUST_VERSION }}
           push: true

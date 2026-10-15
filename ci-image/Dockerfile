@@ -17,6 +17,7 @@
 
 ARG RUST_VERSION=1.95.0
 FROM docker.io/library/rust:${RUST_VERSION}-bookworm
+ARG TARGETARCH
 
 # Cross linkers/toolchains come from zig (via cargo-zigbuild), so the OS layer
 # only needs the basics + musl headers for anything that probes them.
@@ -40,10 +41,11 @@ RUN set -eux; \
 # JavaScript actions (actions/checkout@v4, upload-artifact, etc.) by exec'ing
 # `node` INSIDE the job container; without it every container job dies at the
 # first `uses:` step ("job not started" / checkout failure). Official static
-# build, pinned; x86_64 host (CI runners are x86_64).
+# build, pinned; matches the image arch.
 ARG NODE_VERSION=24.21.0
 RUN set -eux; \
-    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    case "${TARGETARCH}" in arm64) arch=arm64 ;; *) arch=x64 ;; esac; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz" \
         | tar -xJ -C /usr/local --strip-components=1 \
             --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE'; \
     node --version; npm --version
@@ -58,13 +60,13 @@ RUN set -eux; \
         x86_64-unknown-linux-musl \
         aarch64-unknown-linux-musl
 
-# zig: the cross linker/sysroot cargo-zigbuild drives. Pinned; x86_64 host only
-# (CI runners are x86_64 and cross-compile the arm targets).
+# zig: the cross linker/sysroot cargo-zigbuild drives. Pinned; matches the image arch.
 ARG ZIG_VERSION=0.13.0
 RUN set -eux; \
-    curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" \
+    case "${TARGETARCH}" in arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac; \
+    curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${arch}-${ZIG_VERSION}.tar.xz" \
         | tar -xJ -C /opt; \
-    ln -s "/opt/zig-linux-x86_64-${ZIG_VERSION}/zig" /usr/local/bin/zig; \
+    ln -s "/opt/zig-linux-${arch}-${ZIG_VERSION}/zig" /usr/local/bin/zig; \
     zig version
 
 # sccache (shared MinIO compile cache) + cargo-zigbuild + the coverage/test
@@ -72,12 +74,14 @@ RUN set -eux; \
 # to keep the image build cheap.
 ARG SCCACHE_VERSION=v0.8.2
 RUN set -eux; \
-    curl -fsSL "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+    case "${TARGETARCH}" in arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac; \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-${arch}-unknown-linux-musl.tar.gz" \
         | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/sccache'; \
     chmod +x /usr/local/bin/sccache; \
     sccache --version
 RUN set -eux; \
-    curl -fsSL "https://get.nexte.st/latest/linux" | tar -xz -C /usr/local/cargo/bin; \
+    case "${TARGETARCH}" in arm64) plat=linux-arm ;; *) plat=linux ;; esac; \
+    curl -fsSL "https://get.nexte.st/latest/${plat}" | tar -xz -C /usr/local/cargo/bin; \
     cargo-nextest --version
 ARG CARGO_HACK_VERSION=0.6.45
 RUN set -eux; \
