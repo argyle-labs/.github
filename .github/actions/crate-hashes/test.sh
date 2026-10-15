@@ -95,4 +95,25 @@ check d shared/raw.txt
 check d shared/hashed.txt
 check d shared/multi.txt
 check d shared/bytes.txt
+
+echo star > shared/star.txt
+printf '%s\n' 'const P: &str = "assets/*";' 'const S: &str = include_str!("../../shared/star.txt");' '/* c */' > d/src/lib.rs
+git add -A
+check d shared/star.txt
+echo slash > shared/slash.txt
+printf '%s\n' '// see dir/*' 'const S: &str = include_str!("../../shared/slash.txt");' '/* c */' > d/src/lib.rs
+git add -A
+check d shared/slash.txt
+echo paren > shared/paren.txt
+printf '%s\n' 'const S: (&str, &str) = (include_str!(' '  "../../shared/paren.txt"), "(");' 'const T: u8 = 0;' > d/src/lib.rs
+git add -A
+check d shared/paren.txt
+filler=()
+for _ in $(seq 1500); do filler+=('const Z: u8 = 0;'); done
+t0=$(date +%s)
+expect fail 'unclosed embed before 1500 lines' 'parentheses never close' 'const X: &str = include_str!(' "${filler[@]}"
+if [ $(($(date +%s) - t0)) -ge 5 ]; then
+  echo "FAIL: unclosed embed took $(($(date +%s) - t0))s" >&2
+  fail=1
+fi
 exit "$fail"
