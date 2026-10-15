@@ -1,0 +1,49 @@
+name: Plugin release job — version
+description: >
+  The whole plugin `version` job: computes the next vX.Y.Z (stable) or
+  vX.Y.Z-rc.N (rc) from the latest tags via compute-version. Checks out the
+  repo itself (full history, for tags).
+
+inputs:
+  channel:
+    description: rc | stable
+    required: true
+  bump:
+    description: patch | minor | major
+    required: true
+
+outputs:
+  version:
+    description: Release version, no v prefix.
+    value: ${{ steps.pick.outputs.version }}
+  tag:
+    description: Release tag.
+    value: ${{ steps.pick.outputs.tag }}
+  prerelease:
+    description: '"true" for the rc channel.'
+    value: ${{ steps.pick.outputs.prerelease }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Compute next version from tags
+      id: cv
+      uses: argyle-labs/.github/.github/actions/compute-version@main
+      with:
+        bump: ${{ inputs.bump }}
+    - name: Pick channel version
+      id: pick
+      shell: bash
+      env:
+        BUMP: ${{ inputs.bump }}
+        CHANNEL: ${{ inputs.channel }}
+        RC_VERSION: ${{ steps.cv.outputs.rc-version }}
+        RC_TAG: ${{ steps.cv.outputs.rc-tag }}
+        STABLE_VERSION: ${{ steps.cv.outputs.stable-version }}
+        STABLE_TAG: ${{ steps.cv.outputs.stable-tag }}
+        PREVIOUS_STABLE: ${{ steps.cv.outputs.previous-stable }}
+      run: "$GITHUB_ACTION_PATH/pick.sh"

@@ -82,69 +82,20 @@ on:
         default: 15
 
 jobs:
-  # ── Compute the version/tag once, shared by every build job + the release. ──
   version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.ver.outputs.version }}
-      tag: ${{ steps.ver.outputs.tag }}
-      prerelease: ${{ steps.ver.outputs.prerelease }}
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Version
+        id: v
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-version@main
         with:
-          fetch-depth: 0
+          channel: ${{ inputs.channel }}
+          bump: ${{ inputs.bump }}
 
-      - name: Compute next version from tags
-        id: ver
-        # Same rule as the publish step: caller inputs reach the shell through the
-        # environment. These are `choice` in each repo's thin caller, but this is a
-        # reusable workflow — a caller may pass any string via `with:`, and the
-        # `case` validation below runs AFTER interpolation would already have
-        # executed it.
-        env:
-          BUMP: ${{ inputs.bump }}
-          CHANNEL: ${{ inputs.channel }}
-        run: |
-          set -euo pipefail
-          git fetch --tags --quiet || true
-          latest_stable=$(git tag -l 'v[0-9]*' \
-            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
-            | sort -V | tail -1)
-          latest_stable=${latest_stable:-v0.0.0}
-          IFS='.' read -r major minor patch <<< "${latest_stable#v}"
-          case "$BUMP" in
-            major) major=$((major+1)); minor=0; patch=0 ;;
-            minor) minor=$((minor+1)); patch=0 ;;
-            patch) patch=$((patch+1)) ;;
-            *) echo "::error::bump must be patch|minor|major (got '$BUMP')"; exit 1 ;;
-          esac
-          base="${major}.${minor}.${patch}"
-          case "$CHANNEL" in
-            stable)
-              version="$base"; tag="v$base"; prerelease=false ;;
-            rc)
-              latest_rc=$(git tag -l "v${base}-rc.*" | sort -V | tail -1)
-              if [ -z "$latest_rc" ]; then n=1; else n=${latest_rc##*rc.}; n=$((n+1)); fi
-              version="${base}-rc.${n}"; tag="v${version}"; prerelease=true ;;
-            *)
-              echo "::error::channel must be rc|stable (got '$CHANNEL')"; exit 1 ;;
-          esac
-          {
-            echo "version=$version"
-            echo "tag=$tag"
-            echo "prerelease=$prerelease"
-          } >> "$GITHUB_OUTPUT"
-          echo "→ $CHANNEL ($BUMP) from ${latest_stable}: $tag"
-
-  # ── Build the frontend ONCE for UI plugins (e.g. peacock: a SvelteKit app in
-  #    ui/). ui/dist is what rust-embed bakes into the binary, but it is
-  #    gitignored (only a placeholder index.html is tracked) — so without this a
-  #    released binary embeds the placeholder, not the app. Build it once in the
-  #    ci-rust container (has Node/npm) and publish ui/dist as an artifact; every
-  #    target build job below downloads it before cargo build, so a single UI
-  #    build serves all targets (incl. macOS, which then needs no Node). Gated on
-  #    ui/package.json via the has_ui output; Rust-only plugins produce nothing. ──
   ui-build:
     runs-on: ubuntu-latest
     container:
@@ -156,36 +107,12 @@ jobs:
       run:
         shell: bash
     outputs:
-      has_ui: ${{ steps.detect.outputs.present }}
+      has_ui: ${{ steps.ui.outputs.has-ui }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Detect UI
-        id: detect
-        run: |
-          if [ -f ui/package.json ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "no ui/package.json — no frontend to build"
-          fi
-      - name: Build frontend (npm ci → vite build → ui/dist)
-        if: steps.detect.outputs.present == 'true'
-        working-directory: ui
-        run: |
-          npm ci
-          npm run build
-      - name: Publish ui/dist artifact
-        if: steps.detect.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-          retention-days: 1
+      - name: UI build
+        id: ui
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-ui-build@main
 
-  # ── One build job per supported triple (guard-skipped unless requested). Each
-  #    builds via the shared plugin-build action (write version → native/cross
-  #    build → stage binary+sha256 → upload artifact) for the release to gather. ──
   build-x86_64-linux-gnu:
     needs: [version, ui-build]
     if: contains(fromJSON(inputs.targets), 'x86_64-unknown-linux-gnu')
@@ -201,22 +128,14 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-        if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-      - id: build
-        uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - name: Build x86_64-unknown-linux-gnu
+        id: build
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: x86_64-unknown-linux-gnu
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}
+          has-ui: ${{ needs.ui-build.outputs.has_ui }}
           bins: ${{ inputs.bins }}
           size-budget-mib: ${{ inputs.size_budget_mib }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -239,22 +158,14 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-        if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-      - id: build
-        uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - name: Build aarch64-unknown-linux-gnu
+        id: build
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: aarch64-unknown-linux-gnu
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}
+          has-ui: ${{ needs.ui-build.outputs.has_ui }}
           bins: ${{ inputs.bins }}
           size-budget-mib: ${{ inputs.size_budget_mib }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -277,22 +188,14 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-        if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-      - id: build
-        uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - name: Build x86_64-unknown-linux-musl
+        id: build
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: x86_64-unknown-linux-musl
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}
+          has-ui: ${{ needs.ui-build.outputs.has_ui }}
           bins: ${{ inputs.bins }}
           size-budget-mib: ${{ inputs.size_budget_mib }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -315,22 +218,14 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-        if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-      - id: build
-        uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - name: Build aarch64-unknown-linux-musl
+        id: build
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: aarch64-unknown-linux-musl
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}
+          has-ui: ${{ needs.ui-build.outputs.has_ui }}
           bins: ${{ inputs.bins }}
           size-budget-mib: ${{ inputs.size_budget_mib }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -345,22 +240,14 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-        if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-      - id: build
-        uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - name: Build aarch64-apple-darwin
+        id: build
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: aarch64-apple-darwin
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}
+          has-ui: ${{ needs.ui-build.outputs.has_ui }}
           bins: ${{ inputs.bins }}
           size-budget-mib: ${{ inputs.size_budget_mib }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -375,22 +262,14 @@ jobs:
     outputs:
       orca-source: ${{ steps.build.outputs.orca-source }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-        if: needs.ui-build.outputs.has_ui == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui/dist
-      - id: build
-        uses: argyle-labs/.github/.github/actions/plugin-build@main
+      - name: Build x86_64-apple-darwin
+        id: build
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: x86_64-apple-darwin
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}
+          has-ui: ${{ needs.ui-build.outputs.has_ui }}
           bins: ${{ inputs.bins }}
           size-budget-mib: ${{ inputs.size_budget_mib }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -398,7 +277,6 @@ jobs:
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
 
-  # ── Gather every requested target's artifacts and publish one (pre)release. ──
   release:
     needs:
       - version
@@ -417,263 +295,37 @@ jobs:
       group: release-${{ github.repository }}-${{ inputs.channel }}-${{ inputs.bump }}
       cancel-in-progress: false
     steps:
-      - name: Verify no requested build failed
-        env:
-          R_UI_BUILD: ${{ needs.ui-build.result }}
-          R_GNU_X86: ${{ needs.build-x86_64-linux-gnu.result }}
-          R_GNU_ARM: ${{ needs.build-aarch64-linux-gnu.result }}
-          R_MUSL_X86: ${{ needs.build-x86_64-linux-musl.result }}
-          R_MUSL_ARM: ${{ needs.build-aarch64-linux-musl.result }}
-          R_DARWIN_ARM: ${{ needs.build-aarch64-darwin.result }}
-          R_DARWIN_X86: ${{ needs.build-x86_64-darwin.result }}
-        run: |
-          set -euo pipefail
-          fail=0
-          for r in \
-            "ui-build:${R_UI_BUILD}" \
-            "gnu-x86:${R_GNU_X86}" \
-            "gnu-arm:${R_GNU_ARM}" \
-            "musl-x86:${R_MUSL_X86}" \
-            "musl-arm:${R_MUSL_ARM}" \
-            "darwin-arm:${R_DARWIN_ARM}" \
-            "darwin-x86:${R_DARWIN_X86}"; do
-            name=${r%%:*}; res=${r#*:}
-            echo "  $name = $res"
-            case "$res" in success|skipped) ;; *) echo "::error::$name = $res"; fail=1 ;; esac
-          done
-          exit $fail
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download all target artifacts
-        uses: actions/download-artifact@v4
+      - name: Publish
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-publish@main
         with:
-          path: artifacts
-      - name: Collect release assets
-        # Publishes only <bin>-<tag>-<triple> and its .sha256 from each
-        # plugin-<triple> artifact; any other file or artifact fails the release.
-        # ui-dist only feeds the build jobs' rust-embed. Every requested target
-        # must yield a binary: a skipped build job passes the gate above.
-        env:
-          TAG: ${{ needs.version.outputs.tag }}
-          TARGETS: ${{ inputs.targets }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          mkdir -p dist
-          bad=0
-          for d in artifacts/*/; do
-            d=${d%/}; art=${d#artifacts/}
-            case "$art" in
-              ui-dist) continue ;;
-              plugin-*) triple=${art#plugin-} ;;
-              *) echo "::error::unexpected artifact $art"; bad=1; continue ;;
-            esac
-            mapfile -t files < <(find "$d" -type f); wait $!
-            for f in "${files[@]}"; do
-              rel=${f#"$d"/}
-              case "$rel" in
-                */*) echo "::error::$art: unexpected nested file $rel"; bad=1 ;;
-                ?*"-${TAG}-${triple}"|?*"-${TAG}-${triple}.sha256")
-                  if [ -e "dist/$rel" ]; then
-                    echo "::error::duplicate asset $rel"; bad=1
-                  else
-                    mv "$f" dist/
-                  fi ;;
-                *) echo "::error::$art: unexpected file $rel"; bad=1 ;;
-              esac
-            done
-          done
-          [ "$bad" = 0 ] || exit 1
-          assets=(dist/*)
-          [ ${#assets[@]} -gt 0 ] || { echo "::error::no release assets collected"; exit 1; }
-          for f in "${assets[@]}"; do
-            case "$f" in
-              *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; bad=1; } ;;
-              *) [ -f "$f.sha256" ] || { echo "::error::missing checksum for $f"; bad=1; } ;;
-            esac
-          done
-          IFS=, read -ra requested <<< "${TARGETS//[][\"[:space:]]/}"
-          [ ${#requested[@]} -gt 0 ] || { echo "::error::no targets requested"; bad=1; }
-          for t in "${requested[@]}"; do
-            bins=(dist/*-"${TAG}-${t}")
-            [ ${#bins[@]} -gt 0 ] || { echo "::error::no binary for requested target $t"; bad=1; }
-          done
-          [ "$bad" = 0 ] || exit 1
-
-      # Every binary gets <asset>.minisig; the trusted comment binds plugin name,
-      # version, and sha256 under the global signature. Missing key = no release.
-      # Verify with keys/plugin-release.pub.
-      - name: Sign release assets (minisign)
-        env:
-          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
-          TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.version }}
-          MINISIGN_VERSION: "0.12"
-          MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
-          # Same key as keys/plugin-release.pub; catches a secret that doesn't match it.
-          PLUGIN_SIGNING_PUBKEY: RWTVrqFS7EuVqssBkmxckIHagYOZcLz4beDvFcAxtiDSqqVvl3fjobl4
-        run: |
-          set -euo pipefail
-          set +x
-          [ -n "$PLUGIN_SIGNING_KEY" ] || { echo "::error::secrets.PLUGIN_SIGNING_KEY missing; refusing unsigned plugin release"; exit 1; }
-          tool=$(mktemp -d -p "$RUNNER_TEMP")
-          tarball="$tool/minisign.tar.gz"
-          curl -fsSL --retry 5 --retry-connrefused -o "$tarball" \
-            "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
-          echo "${MINISIGN_SHA256}  $tarball" | sha256sum -c -
-          tar -xzf "$tarball" -C "$tool"
-          minisign="$tool/minisign-linux/$(uname -m)/minisign"
-          key=$(mktemp -p "$RUNNER_TEMP")
-          trap 'rm -f "$key"' EXIT
-          chmod 600 "$key"
-          printf '%s\n' "$PLUGIN_SIGNING_KEY" > "$key"
-          shopt -s nullglob
-          for f in dist/*; do
-            case "$f" in *.sha256|*.minisig) continue ;; esac
-            name=$(basename "$f")
-            plugin=${name%-"${TAG}"-*}
-            sha=$(sha256sum "$f" | cut -d' ' -f1)
-            "$minisign" -S -s "$key" -m "$f" -x "$f.minisig" \
-              -t "plugin=${plugin} version=${VERSION} sha256=${sha}" </dev/null
-            "$minisign" -V -q -P "$PLUGIN_SIGNING_PUBKEY" -m "$f" -x "$f.minisig" \
-              || { echo "::error::$name signature does not verify against the published key"; exit 1; }
-            echo "signed $name"
-          done
-          for f in dist/*; do
-            case "$f" in *.sha256|*.minisig) ;; *) [ -f "$f.minisig" ] || { echo "::error::missing signature for $f"; exit 1; } ;; esac
-          done
-
-      # Runs after every build passed, before publishing: retags the Image
-      # workflow's :tree-<sha> to <version> and the channel tag. Never builds.
-      - name: Promote image
-        if: ${{ inputs.image_name != '' }}
-        uses: argyle-labs/.github/.github/actions/image-promote@main
-        with:
-          name: ${{ inputs.image_name }}
-          tags: |
-            ${{ needs.version.outputs.version }}
-            ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
-          wait-minutes: ${{ inputs.image_wait_minutes }}
-          registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
-          registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
-          username: ${{ secrets.CI_REGISTRY_USER }}
-          password: ${{ secrets.CI_REGISTRY_TOKEN }}
-
-      - name: Create Gitea Release (pipeline-tagged)
-        # Publish to GITEA — the canonical forge ([[gitea-canonical-github-mirror-only]]).
-        # GitHub is an OUTBOUND-ONLY mirror; nothing here writes to api.github.com.
-        env:
-          GITEA_TOKEN: ${{ secrets.ORCA_RELEASE_TOKEN || github.token }}
-          # Operator-supplied free text. It MUST arrive through the environment,
-          # never via `${{ }}` inside the script: expression interpolation happens
-          # before the shell parses, so backticks or $(…) in release notes would be
-          # executed — with contents:write and inherited secrets in scope. Release
-          # notes for a *software* project contain backticks routinely, and when
-          # they did, publish died with `missing: command not found` (exit 127)
-          # AFTER every build went green, producing no release at all.
-          # Double-quoting alone does NOT fix this: `…` still substitutes inside "…".
-          NOTES: ${{ inputs.notes }}
-          # Legs resolve independently; musl (the asset Linux hosts fetch first) wins.
-          ORCA_SOURCE: >-
+          version: ${{ needs.version.outputs.version }}
+          tag: ${{ needs.version.outputs.tag }}
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          channel: ${{ inputs.channel }}
+          targets: ${{ inputs.targets }}
+          notes: ${{ inputs.notes }}
+          orca-source: >-
             ${{ needs.build-x86_64-linux-musl.outputs.orca-source
             || needs.build-x86_64-linux-gnu.outputs.orca-source
             || needs.build-aarch64-darwin.outputs.orca-source
             || needs.build-aarch64-linux-musl.outputs.orca-source
             || needs.build-aarch64-linux-gnu.outputs.orca-source
             || needs.build-x86_64-darwin.outputs.orca-source }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.version.outputs.tag }}
-          API_URL: ${{ github.api_url }}
-          SERVER_URL: ${{ github.server_url }}
-          CHANNEL: ${{ inputs.channel }}
-          SHA: ${{ github.sha }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
-        run: |
-          set -euo pipefail
-          repo="$REPO"
-          tag="$TAG"
-          api="$API_URL"
-          server="$SERVER_URL"
-          hdr_auth="Authorization: token ${GITEA_TOKEN}"
-          accept="Accept: application/json"
-          # ORCA_SOURCE is the lock source, e.g.
-          # git+https://github.com/argyle-labs/orca?tag=v0.2.1-rc.10#<sha>.
-          orca_ref="an unrecorded orca revision"
-          if [ -n "$ORCA_SOURCE" ]; then
-            base=${ORCA_SOURCE%%#*}; rev=${ORCA_SOURCE##*#}; pin=${base#*\?}
-            [ "$pin" = "$base" ] && pin="default branch"
-            orca_ref="orca \`${pin/=/ }\` @ \`${rev:0:12}\`"
-          fi
-          notes="$NOTES"
-          [ -z "$notes" ] && notes="Automated ${CHANNEL} release of \`${repo}\`, built against plugin-toolkit from ${orca_ref}. Plugin binary + sha256 + minisign signature per host target."
-          ls -la dist
-
-          payload=$(jq -n \
-            --arg tag "$tag" \
-            --arg sha "$SHA" \
-            --arg name "$tag" \
-            --arg body "$notes" \
-            --argjson pre "$PRERELEASE" \
-            '{tag_name:$tag, target_commitish:$sha, name:$name, body:$body, prerelease:$pre, draft:false}')
-          resp=$(curl -fsSL -X POST -H "$hdr_auth" -H "$accept" -H "Content-Type: application/json" \
-            "$api/repos/$repo/releases" -d "$payload" 2>/dev/null || true)
-          rid=$(printf '%s' "$resp" | jq -r '.id // empty')
-          if [ -z "$rid" ]; then
-            echo "→ create did not return an id; looking up existing release for $tag"
-            rid=$(curl -fsSL -H "$hdr_auth" -H "$accept" \
-              "$api/repos/$repo/releases/tags/$tag" | jq -r '.id // empty')
-          fi
-          if [ -z "$rid" ]; then
-            echo "::error::could not create or find release $tag"; echo "$resp"; exit 1
-          fi
-          echo "release id: $rid"
-
-          for f in dist/*; do
-            name=$(basename "$f")
-            echo "→ uploading $name"
-            code=$(curl -sS -X POST -H "$hdr_auth" \
-              -F "attachment=@${f};filename=${name}" \
-              -o /tmp/upload_resp.json -w '%{http_code}' \
-              "$api/repos/$repo/releases/$rid/assets?name=$name")
-            if [ "$code" -ge 300 ]; then
-              echo "::error::asset upload failed for $name (HTTP $code)"; cat /tmp/upload_resp.json || true; exit 1
-            fi
-          done
-          set -- dist/*
-          echo "published $tag with $# files → ${server}/$repo/releases/tag/$tag"
-
-      # Gitea is the source of truth; a failed public mirror warns, never fails the release.
-      - name: Log in to ghcr.io (public image mirror)
-        id: ghcr-login
-        if: ${{ inputs.image_name != '' && inputs.image_public }}
-        continue-on-error: true
-        uses: argyle-labs/.github/.github/actions/registry-login@main
-        with:
-          registry: ghcr.io
-          setup-buildx: "false"
-          username: x-access-token
-          password: ${{ secrets.GH_TOKEN }}
-
-      - name: Mirror image release tags to ghcr.io
-        if: ${{ inputs.image_name != '' && inputs.image_public }}
-        env:
-          REGISTRY: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
-          NAME: ${{ inputs.image_name }}
-          VERSION: ${{ needs.version.outputs.version }}
-          CHANNEL_TAG: ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
-          LOGIN_OUTCOME: ${{ steps.ghcr-login.outcome }}
-        run: |
-          set -uo pipefail
-          src="$REGISTRY/${NAME,,}:$VERSION"
-          dst="ghcr.io/${NAME,,}"
-          fail() {
-            echo "::warning title=image-mirror::$1; release continues (Gitea is the source of truth)"
-            printf 'Public mirror FAILED: %s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          }
-          [ "$LOGIN_OUTCOME" = "success" ] || fail "ghcr.io login failed (check secrets.GH_TOKEN)"
-          docker buildx imagetools create --tag "$dst:$VERSION" --tag "$dst:$CHANNEL_TAG" "$src" \
-            || fail "imagetools create $src → $dst failed"
-          printf 'Mirrored %s → %s:%s %s:%s\n' "$src" "$dst" "$VERSION" "$dst" "$CHANNEL_TAG" | tee -a "$GITHUB_STEP_SUMMARY"
+          build-results: |
+            ui-build:${{ needs.ui-build.result }}
+            gnu-x86:${{ needs.build-x86_64-linux-gnu.result }}
+            gnu-arm:${{ needs.build-aarch64-linux-gnu.result }}
+            musl-x86:${{ needs.build-x86_64-linux-musl.result }}
+            musl-arm:${{ needs.build-aarch64-linux-musl.result }}
+            darwin-arm:${{ needs.build-aarch64-darwin.result }}
+            darwin-x86:${{ needs.build-x86_64-darwin.result }}
+          signing-key: ${{ secrets.PLUGIN_SIGNING_KEY }}
+          release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
+          image-name: ${{ inputs.image_name }}
+          image-public: ${{ inputs.image_public && 'true' || 'false' }}
+          image-wait-minutes: ${{ inputs.image_wait_minutes }}
+          registry: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}
+          registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
+          registry-user: ${{ secrets.CI_REGISTRY_USER }}
+          registry-token: ${{ secrets.CI_REGISTRY_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}

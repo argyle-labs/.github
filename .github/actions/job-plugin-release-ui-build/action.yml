@@ -1,0 +1,41 @@
+name: Plugin release job — UI build
+description: >
+  The whole plugin `ui-build` job: when ui/package.json exists, builds the
+  frontend once (npm ci → npm run build) and uploads ui/dist as the `ui-dist`
+  artifact that every build job embeds. Rust-only plugins produce nothing.
+  Run in the ci-rust container (has Node/npm); checks out the repo itself.
+
+outputs:
+  has-ui:
+    description: '"true" when ui/package.json exists and ui-dist was uploaded.'
+    value: ${{ steps.detect.outputs.present }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Detect UI
+      id: detect
+      shell: bash
+      run: |
+        if [ -f ui/package.json ]; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          echo "no ui/package.json — no frontend to build"
+        fi
+    - name: Build frontend (npm ci → vite build → ui/dist)
+      if: steps.detect.outputs.present == 'true'
+      shell: bash
+      working-directory: ui
+      run: |
+        npm ci
+        npm run build
+    - name: Publish ui/dist artifact
+      if: steps.detect.outputs.present == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ui-dist
+        path: ui/dist
+        retention-days: 1
