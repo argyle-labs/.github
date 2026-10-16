@@ -63,6 +63,9 @@ env:
   CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_TIMEOUT: "60"
   # sccache backed by the fleet MinIO. The endpoint comes from an org variable
   # because this repo mirrors to public GitHub. sccache and incremental
   # compilation are mutually exclusive; CARGO_INCREMENTAL=1 silently disables

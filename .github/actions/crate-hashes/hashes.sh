@@ -10,8 +10,6 @@
 set -euo pipefail
 
 meta=$(cargo metadata --format-version 1 --no-deps)
-# --all-features so optional workspace deps are in the closure.
-full=$(cargo metadata --format-version 1 --all-features)
 root=$(jq -r '.workspace_root' <<< "$meta")
 
 # name<TAB>relative dir, one line per workspace member.
@@ -24,18 +22,20 @@ members=$(jq -r --arg root "$root/" '
 # Transitive closure of workspace-internal deps (normal, dev and build) per
 # crate. A closure rather than a recursive hash-of-hashes so dev-dependency
 # cycles (A dev-depends on B, B depends on A) still terminate.
+# Declared path deps (optional, dev, build and every target included) so no
+# registry resolution or download is needed.
 closure=$(jq -c '
   (.workspace_members) as $ids
-  | (.packages | map({key: .id, value: .name}) | from_entries) as $name
-  | (.resolve.nodes
-     | map(select(.id as $id | $ids | index($id)))
-     | map({key: $name[.id],
-            value: [.deps[] | select(.pkg as $p | $ids | index($p)) | $name[.pkg]]})
+  | [.packages[] | select(.id as $id | $ids | index($id))] as $ws
+  | ($ws | map(.name)) as $names
+  | ($ws
+     | map({key: .name,
+            value: [.dependencies[] | select(.path != null and (.name as $n | $names | index($n))) | .name] | unique})
      | from_entries) as $g
   | def reach($seen):
       ($seen + [$seen[] | $g[.][]?] | unique) as $next
       | if $next == $seen then $seen else reach($next) end;
-    $g | with_entries(.value = (reach(.value) - [.key]))' <<< "$full")
+    $g | with_entries(.value = (reach(.value) - [.key]))' <<< "$meta")
 
 
 workflow=${WORKFLOW_FILE:-}
