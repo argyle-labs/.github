@@ -80,7 +80,7 @@ runs:
         read -ra args <<< "$ARGS"
         has=$(/bin/bash "$GITHUB_ACTION_PATH/has-doctests.sh" "${args[@]}")
         if [ "$has" != true ]; then
-          echo "::notice::No library target in the selected packages; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::notice::No doc-comment code blocks in the selected library targets; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
         cargo test --locked "${args[@]}" --doc
