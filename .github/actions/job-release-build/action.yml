@@ -117,10 +117,9 @@ runs:
         [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
         { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
     - name: Fetch dependencies (cargo fetch)
-      shell: bash
-      run: |
-        export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
-        cargo fetch --locked
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
+      with:
+        phases-file: ${{ runner.temp }}/release-phases
     - name: Build at release version (build-target)
       uses: argyle-labs/.github/.github/actions/build-target@main
       with:

@@ -382,12 +382,12 @@ runs:
           fi
         } >> "$GITHUB_ENV"
 
-    - name: Fetch dependencies
+    - name: Check lockfile
       shell: bash
       env:
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       run: |
-        export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
+        export t0=$SECONDS; trap 'echo "lockcheck|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
         # The version write changed the member versions. Snapshot every sourced
         # (non-member) lock entry, refresh only the member versions, and fail if
         # any sourced entry moved: `cargo update --workspace` silently re-resolves
@@ -397,7 +397,11 @@ runs:
         cargo update --workspace
         after=$(snap)
         [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with no .cargo/config.toml and commit"; diff <(echo "$before") <(echo "$after"); exit 1; }
-        cargo fetch --locked
+
+    - name: Fetch dependencies
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
+      with:
+        phases-file: ${{ runner.temp }}/plugin-build-phases
 
     - name: Build release binaries
       if: ${{ steps.host.outputs.slot != 'true' }}

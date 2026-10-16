@@ -37,11 +37,9 @@ runs:
         artifacts: ${{ inputs.artifacts }}
 
     - name: Fetch dependencies
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-        cargo fetch --locked
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
+      with:
+        working-directory: ${{ inputs.working-directory }}
 
     - name: Build (nextest archive)
       shell: bash

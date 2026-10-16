@@ -1,0 +1,36 @@
+name: cargo fetch
+description: >
+  `cargo fetch --locked` with an outer retry (3 attempts, backoff) on top of
+  rust-setup's CARGO_NET_RETRY, so a flaky crates.io download is retried and
+  reported as a dependency download failure, not a compile failure.
+  Expects rust-setup earlier in the job.
+
+inputs:
+  working-directory:
+    description: 'Cargo workspace root.'
+    required: false
+    default: "."
+  phases-file:
+    description: 'File the `fetch|seconds|status` timing line is appended to.'
+    required: false
+    default: /tmp/ci-phases
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch dependencies (cargo fetch, retried)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PHASES_FILE: ${{ inputs.phases-file }}
+      run: |
+        export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> "$PHASES_FILE"' EXIT
+        attempts=3
+        for n in $(seq 1 "$attempts"); do
+          cargo fetch --locked && exit 0
+          [ "$n" -lt "$attempts" ] || break
+          echo "::warning title=cargo fetch retry::attempt $n/$attempts failed; retrying in $((n * 30))s"
+          sleep $((n * 30))
+        done
+        echo "::error title=Dependency download failed::cargo fetch --locked failed after $attempts attempts (network/registry), not a compile failure"
+        exit 1
