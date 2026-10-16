@@ -1,0 +1,38 @@
+name: Release draft (shared)
+description: >
+  Deletes every unpublished draft release of the same kind (prerelease or
+  stable), then creates a fresh draft `<repo> <tag>` at `target-commitish`. Drafts
+  create no git tag and fire no `release: published`.
+
+inputs:
+  release-token:
+    description: Gitea token with write on the repo.
+    required: true
+  tag:
+    description: Release tag, e.g. v0.2.1-rc.3.
+    required: true
+  target-commitish:
+    description: Commit the tag points at once published.
+    required: true
+  prerelease:
+    description: '"true" = draft RC; "false" = draft stable.'
+    required: true
+  body:
+    description: Release notes (markdown).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Replace draft release
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.release-token }}
+        API_URL: ${{ github.api_url }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ inputs.tag }}
+        REL_BODY: ${{ inputs.body }}
+        TARGET: ${{ inputs.target-commitish }}
+        PRERELEASE: ${{ inputs.prerelease }}
+      run: "$GITHUB_ACTION_PATH/draft.sh"

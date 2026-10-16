@@ -29,6 +29,17 @@ jobs:
       - name: Self-test
         run: bash .github/actions/job-release-version/test.sh
 
+  job-release-from-tag:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/job-release-from-tag/test.sh
+
   plugin-size-check:
     runs-on: ubuntu-latest
     defaults:

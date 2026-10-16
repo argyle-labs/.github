@@ -1,22 +1,24 @@
-# Example: a release as an ordered job list of job-release-* actions (orca's
-# shape). version → one build job per target, in parallel → package →
-# publish → crates. Plugins drop the package/crates jobs and use
-# `asset-profile: binaries`.
+# Example: on-merge release promotion from job-release-* actions (orca's shape),
+# paired with release-draft.yml. Publishing the draft RC runs this workflow:
+# version → one build job per target → package → publish → stable-draft →
+# crates. Publishing the draft stable runs it again for vX.Y.Z. Plugins drop
+# the package/crates jobs and use `asset-profile: binaries`.
 name: Release
+run-name: Release ${{ github.event.release.tag_name || inputs.version }}
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-      stage:
-        description: 'Release gate'
-        type: choice
-        options: [rc-publish, promote-stable]
-        default: rc-publish
-      bump:
-        description: 'Version bump from latest stable tag'
-        type: choice
-        options: [patch, minor, major]
-        default: patch
+      version:
+        description: 'Already-published tag to rebuild: vX.Y.Z-rc.N or vX.Y.Z'
+        type: string
+        required: true
+
+concurrency:
+  group: ${{ github.repository }}-release-${{ github.event.release.tag_name || inputs.version }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,10 +38,10 @@ jobs:
     steps:
       - name: Version
         id: v
-        uses: argyle-labs/.github/.github/actions/job-release-version@main
+        uses: argyle-labs/.github/.github/actions/job-release-from-tag@main
         with:
-          stage: ${{ inputs.stage }}
-          bump: ${{ inputs.bump }}
+          tag: ${{ github.event.release.tag_name || inputs.version }}
+          prerelease: ${{ github.event.release.prerelease }}
 
   build-x86_64-linux-gnu:
     needs: version
@@ -111,10 +113,25 @@ jobs:
           prerelease: ${{ needs.version.outputs.prerelease }}
           draft: ${{ needs.version.outputs.draft }}
           mirror: ${{ needs.version.outputs.mirror }}
+          version-commit: "false"
           targets: '["x86_64-unknown-linux-gnu","aarch64-apple-darwin"]'
           asset-profile: full
           release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
           github-token: ${{ secrets.GH_RELEASE_TOKEN }}
+
+  stable-draft:
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.repository }}-stable
+      cancel-in-progress: true
+    steps:
+      - name: Draft stable
+        uses: argyle-labs/.github/.github/actions/job-release-stable-draft@main
+        with:
+          version: ${{ needs.version.outputs.version }}
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
 
   crates:
     needs: publish

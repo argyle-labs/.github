@@ -25,6 +25,10 @@ inputs:
   mirror:
     description: needs.version.outputs.mirror
     required: true
+  version-commit:
+    description: '"false" when the tag already exists (published release): skip the version commit and publish on the tagged commit.'
+    required: false
+    default: "true"
   targets:
     description: 'JSON array of every target triple that must have a binary, darwin included.'
     required: true
@@ -115,7 +119,7 @@ runs:
     # it so the tag points at source whose workspace version == the tag (git-dep
     # consumers pinning ?tag= resolve the right version).
     - name: Check out repo for version-bump commit
-      if: ${{ inputs.draft != 'true' }}
+      if: ${{ inputs.draft != 'true' && inputs.version-commit != 'false' }}
       uses: actions/checkout@v4
       with:
         ref: ${{ github.ref_name }}
@@ -123,17 +127,17 @@ runs:
         token: ${{ inputs.release-token }}
         path: repo
     - name: Set up Rust (dtolnay/rust-toolchain)
-      if: ${{ inputs.draft != 'true' }}
+      if: ${{ inputs.draft != 'true' && inputs.version-commit != 'false' }}
       uses: dtolnay/rust-toolchain@stable
     - name: Write release version (write-release-version)
-      if: ${{ inputs.draft != 'true' }}
+      if: ${{ inputs.draft != 'true' && inputs.version-commit != 'false' }}
       uses: argyle-labs/.github/.github/actions/write-release-version@main
       with:
         version: ${{ inputs.version }}
         working-directory: repo
     - name: Commit release version
       id: bump
-      if: ${{ inputs.draft != 'true' }}
+      if: ${{ inputs.draft != 'true' && inputs.version-commit != 'false' }}
       shell: bash
       working-directory: repo
       env:
@@ -158,7 +162,7 @@ runs:
       with:
         gitea-token: ${{ inputs.release-token }}
         tag: ${{ inputs.tag }}
-        target-commitish: ${{ steps.bump.outputs.sha }}
+        target-commitish: ${{ steps.bump.outputs.sha || github.sha }}
         name: ${{ inputs.rel-name }}
         body: ${{ inputs.notes }}
         prerelease: ${{ inputs.prerelease }}

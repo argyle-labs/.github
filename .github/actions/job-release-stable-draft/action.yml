@@ -1,0 +1,35 @@
+name: Release job — draft stable
+description: >
+  After an RC is published: replaces any unpublished draft stable with a draft
+  `<repo> v<base version>` at the RC's commit. Publishing it promotes to
+  stable. No-op unless `prerelease` is "true".
+
+inputs:
+  version:
+    description: needs.version.outputs.version (vX.Y.Z-rc.N, no v prefix)
+    required: true
+  prerelease:
+    description: needs.version.outputs.prerelease
+    required: true
+  release-token:
+    description: 'Pass `secrets.ORCA_RELEASE_TOKEN`.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Base version
+      id: base
+      if: ${{ inputs.prerelease == 'true' }}
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: echo "tag=v${VERSION%-rc.*}" >> "$GITHUB_OUTPUT"
+    - name: Replace draft stable
+      if: ${{ inputs.prerelease == 'true' }}
+      uses: argyle-labs/.github/.github/actions/release-draft@main
+      with:
+        release-token: ${{ inputs.release-token }}
+        tag: ${{ steps.base.outputs.tag }}
+        target-commitish: ${{ github.sha }}
+        prerelease: "false"
