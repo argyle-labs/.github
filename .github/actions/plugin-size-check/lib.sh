@@ -42,11 +42,11 @@ fmt_bytes() {
 evaluate() {
   local size=$1 base_size=$2 crates=$3 base_crates=$4
   local size_pct=$5 warn_pct=$6 crate_max=$7 max_bytes=$8 max_crates=$9
-  local status=ok reasons=() t
+  local relative=${10:-fail} status=ok reasons=() t
   if [ -n "$size" ] && [ -n "$base_size" ] && [ "$base_size" -gt 0 ]; then
     t=$(pct_tenths "$size" "$base_size")
     if [ $(( (size - base_size) * 100 )) -gt $(( size_pct * base_size )) ]; then
-      status=fail; reasons+=("size $(fmt_tenths "$t") > +${size_pct}%")
+      status=$relative; reasons+=("size $(fmt_tenths "$t") > +${size_pct}%")
     elif [ $(( (size - base_size) * 100 )) -gt $(( warn_pct * base_size )) ]; then
       reasons+=("size $(fmt_tenths "$t") > +${warn_pct}%")
       status=warn
@@ -56,7 +56,7 @@ evaluate() {
     status=fail; reasons+=("size over budget $(fmt_bytes "$max_bytes")")
   fi
   if [ -n "$crates" ] && [ -n "$base_crates" ] && [ $(( crates - base_crates )) -gt "$crate_max" ]; then
-    status=fail; reasons+=("+$(( crates - base_crates )) crates > +${crate_max}")
+    [ "$status" = fail ] || status=$relative; reasons+=("+$(( crates - base_crates )) crates > +${crate_max}")
   fi
   if [ -n "$crates" ] && [ -n "$max_crates" ] && [ "$crates" -gt "$max_crates" ]; then
     status=fail; reasons+=("${crates} crates over budget ${max_crates}")

@@ -80,11 +80,14 @@ if [ -z "$base_crates" ]; then
   [ -n "$base_crates" ] && base_src=$budget_file
 fi
 
+relative=fail
+[ -n "${BASE_REF:-}" ] || [ -n "${PR_NUMBER:-}" ] || relative=warn
+
 rows=()
 worst=ok
 add_row() {
   local name=$1 size=$2 bsize=$3 res status why
-  res=$(evaluate "$size" "$bsize" "$crates" "$base_crates" "$size_pct" "$warn_pct" "$crate_max" "$max_bytes" "$max_crates")
+  res=$(evaluate "$size" "$bsize" "$crates" "$base_crates" "$size_pct" "$warn_pct" "$crate_max" "$max_bytes" "$max_crates" "$relative")
   status=${res%%|*}; why=${res#*|}
   case $status in
     fail) worst=fail; echo "::error title=plugin-size-check::${name} ${TARGET:-host}: ${why}" ;;

@@ -38,6 +38,10 @@ eq "crates at limit" "$(evaluate "" "" 215 200 10 5 15 "" "")" "ok|"
 eq "absolute size" "$(evaluate $((21 * mib)) "" 200 "" 10 5 15 $((20 * mib)) "")" "fail|size over budget 20.00 MiB"
 eq "absolute crates" "$(evaluate "" "" 301 "" 10 5 15 "" 300)" "fail|301 crates over budget 300"
 eq "no baseline" "$(evaluate $mib "" 200 "" 10 5 15 "" "")" "ok|"
+eq "release size advisory" "$(evaluate 11534337 $((10 * mib)) 200 200 10 5 15 "" "" warn)" "warn|size +10.0% > +10%"
+eq "release crates advisory" "$(evaluate "" "" 216 200 10 5 15 "" "" warn)" "warn|+16 crates > +15"
+eq "release absolute size" "$(evaluate $((21 * mib)) $((10 * mib)) 200 200 10 5 15 $((20 * mib)) "" warn)" "fail|size +110.0% > +10%;size over budget 20.00 MiB"
+eq "release absolute crates" "$(evaluate "" "" 301 200 10 5 15 "" 300 warn)" "fail|+101 crates > +15;301 crates over budget 300"
 eq "warn then crate fail" "$(evaluate 11100000 $((10 * mib)) 300 200 10 5 15 "" "")" "fail|size +5.8% > +5%;+100 crates > +15"
 
 work=$(mktemp -d)
@@ -73,10 +77,14 @@ else
   echo "FAIL: summary row" >&2; cat "$work/summary" >&2; fail=1
 fi
 head -c 12582912 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
+run fail CRATES=200 BASE_REF=main
+run pass CRATES=200
+head -c 22020096 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
 run fail CRATES=200
+head -c 12582912 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
 cp "$fx/size-budget.toml" "$work/size-budget.toml"
 run pass CRATES=200
-run fail CRATES=230
+run fail CRATES=230 BASE_REF=main
 cp "$fx/no-reason.toml" "$work/size-budget.toml"
 run fail CRATES=200
 rm "$work/size-budget.toml"
