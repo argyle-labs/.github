@@ -222,11 +222,21 @@ jobs:
         if: steps.sel.outputs.skip != 'true' && inputs.asset-profile == 'full' && contains(needs.version.outputs.version, '-rc.')
         run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
 
+      - name: Release size profile
+        id: relprof
+        if: ${{ steps.sel.outputs.skip != 'true' && inputs.asset-profile != 'full' }}
+        uses: ./.ci/.github/actions/rust-release-profile
+        with:
+          strip: symbols
+          lto: fat
+          codegen-units: "1"
+          opt-level: s
+
       - name: Rust setup
         if: steps.sel.outputs.skip != 'true'
         uses: ./.ci/.github/actions/rust-setup
         with:
-          cache-key: release-${{ steps.sel.outputs.target }}
+          cache-key: release-${{ steps.sel.outputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
@@ -262,10 +272,6 @@ jobs:
           target: ${{ steps.sel.outputs.target }}
           bins: ${{ steps.bins.outputs.list }}
           version: ${{ needs.version.outputs.version }}
-          profile-strip: ${{ inputs.asset-profile != 'full' && 'symbols' || '' }}
-          profile-lto: ${{ inputs.asset-profile != 'full' && 'fat' || '' }}
-          profile-codegen-units: ${{ inputs.asset-profile != 'full' && '1' || '' }}
-          profile-opt-level: ${{ inputs.asset-profile != 'full' && 's' || '' }}
 
       - name: Stage assets
         if: steps.sel.outputs.skip != 'true'

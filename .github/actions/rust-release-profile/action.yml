@@ -1,0 +1,56 @@
+name: Rust release profile (shared)
+description: >
+  Opt-in size profile for release builds. Each non-empty input is exported to
+  $GITHUB_ENV as CARGO_PROFILE_RELEASE_* unless the job already set it, so
+  later steps and cache keys see it. All inputs empty = leave the Cargo.toml
+  profile untouched. Run before rust-setup / rust-cache.
+
+inputs:
+  strip:
+    description: CARGO_PROFILE_RELEASE_STRIP (e.g. symbols). Empty = unset.
+    required: false
+    default: ""
+  lto:
+    description: CARGO_PROFILE_RELEASE_LTO (e.g. fat). Empty = unset.
+    required: false
+    default: ""
+  codegen-units:
+    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS (e.g. 1). Empty = unset.
+    required: false
+    default: ""
+  opt-level:
+    description: CARGO_PROFILE_RELEASE_OPT_LEVEL (e.g. s). Empty = unset.
+    required: false
+    default: ""
+
+outputs:
+  key:
+    description: Cache-key fragment for the effective release profile; empty when nothing is set.
+    value: ${{ steps.profile.outputs.key }}
+
+runs:
+  using: composite
+  steps:
+    - id: profile
+      shell: bash
+      env:
+        IN_STRIP: ${{ inputs.strip }}
+        IN_LTO: ${{ inputs.lto }}
+        IN_CGU: ${{ inputs.codegen-units }}
+        IN_OPT: ${{ inputs.opt-level }}
+      run: |
+        set -euo pipefail
+        strip="${CARGO_PROFILE_RELEASE_STRIP:-$IN_STRIP}"
+        lto="${CARGO_PROFILE_RELEASE_LTO:-$IN_LTO}"
+        cgu="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-$IN_CGU}"
+        opt="${CARGO_PROFILE_RELEASE_OPT_LEVEL:-$IN_OPT}"
+        {
+          if [ -n "$strip" ]; then echo "CARGO_PROFILE_RELEASE_STRIP=$strip"; fi
+          if [ -n "$lto" ]; then echo "CARGO_PROFILE_RELEASE_LTO=$lto"; fi
+          if [ -n "$cgu" ]; then echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=$cgu"; fi
+          if [ -n "$opt" ]; then echo "CARGO_PROFILE_RELEASE_OPT_LEVEL=$opt"; fi
+        } >> "$GITHUB_ENV"
+        key=""
+        if [ -n "$strip$lto$cgu$opt" ]; then key="rp-${strip:-x}-${lto:-x}-${cgu:-x}-${opt:-x}"; fi
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+        echo "release profile: ${key:-<Cargo.toml>}"
