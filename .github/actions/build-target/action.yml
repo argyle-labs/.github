@@ -25,6 +25,22 @@ inputs:
     description: macOS SDK version for darwin cross-linking.
     required: false
     default: "14.5"
+  profile-strip:
+    description: CARGO_PROFILE_RELEASE_STRIP. Empty = leave the Cargo.toml profile.
+    required: false
+    default: symbols
+  profile-lto:
+    description: CARGO_PROFILE_RELEASE_LTO. Empty = leave the Cargo.toml profile.
+    required: false
+    default: fat
+  profile-codegen-units:
+    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS. Empty = leave the Cargo.toml profile.
+    required: false
+    default: "1"
+  profile-opt-level:
+    description: CARGO_PROFILE_RELEASE_OPT_LEVEL. Empty = leave the Cargo.toml profile.
+    required: false
+    default: s
 
 runs:
   using: composite
@@ -86,8 +102,16 @@ runs:
         RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
         TARGET: ${{ inputs.target }}
         BINS: ${{ inputs.bins }}
+        IN_STRIP: ${{ inputs.profile-strip }}
+        IN_LTO: ${{ inputs.profile-lto }}
+        IN_CGU: ${{ inputs.profile-codegen-units }}
+        IN_OPT: ${{ inputs.profile-opt-level }}
       run: |
         set -euo pipefail
+        [ -n "$IN_STRIP" ] && export CARGO_PROFILE_RELEASE_STRIP="${CARGO_PROFILE_RELEASE_STRIP:-$IN_STRIP}"
+        [ -n "$IN_LTO" ] && export CARGO_PROFILE_RELEASE_LTO="${CARGO_PROFILE_RELEASE_LTO:-$IN_LTO}"
+        [ -n "$IN_CGU" ] && export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-$IN_CGU}"
+        [ -n "$IN_OPT" ] && export CARGO_PROFILE_RELEASE_OPT_LEVEL="${CARGO_PROFILE_RELEASE_OPT_LEVEL:-$IN_OPT}"
         export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/release-phases"' EXIT
         # zig's linker opens every input object at once (thousands for a release
         # binary — e.g. orca's darwin link touches ~3k .o files). The container's

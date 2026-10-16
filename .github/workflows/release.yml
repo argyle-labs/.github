@@ -262,6 +262,10 @@ jobs:
           target: ${{ steps.sel.outputs.target }}
           bins: ${{ steps.bins.outputs.list }}
           version: ${{ needs.version.outputs.version }}
+          profile-strip: ${{ inputs.asset-profile != 'full' && 'symbols' || '' }}
+          profile-lto: ${{ inputs.asset-profile != 'full' && 'fat' || '' }}
+          profile-codegen-units: ${{ inputs.asset-profile != 'full' && '1' || '' }}
+          profile-opt-level: ${{ inputs.asset-profile != 'full' && 's' || '' }}
 
       - name: Stage assets
         if: steps.sel.outputs.skip != 'true'

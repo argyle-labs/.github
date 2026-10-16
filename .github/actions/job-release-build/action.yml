@@ -118,6 +118,10 @@ runs:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}
         version: ${{ inputs.version }}
+        profile-strip: ${{ inputs.asset-profile != 'full' && 'symbols' || '' }}
+        profile-lto: ${{ inputs.asset-profile != 'full' && 'fat' || '' }}
+        profile-codegen-units: ${{ inputs.asset-profile != 'full' && '1' || '' }}
+        profile-opt-level: ${{ inputs.asset-profile != 'full' && 's' || '' }}
     - name: Stage assets
       id: stage
       shell: bash
