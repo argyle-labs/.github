@@ -1,0 +1,75 @@
+name: Plugin release job — build one target
+description: >
+  One plugin `build-<target>` job, Linux or darwin: checks out full history,
+  fetches the prebuilt `ui-dist` when the ui-build job produced one, then runs
+  plugin-build (artifact `plugin-<target>`: <bin>-<tag>-<target> + .sha256).
+  Linux targets run in the ci-rust container; darwin targets on the host.
+
+inputs:
+  target:
+    description: Rust target triple.
+    required: true
+  version:
+    description: Release version (needs.version.outputs.version).
+    required: true
+  tag:
+    description: Release tag (needs.version.outputs.tag).
+    required: true
+  has-ui:
+    description: 'needs.ui-build.outputs.has-ui; "true" downloads ui-dist into ui/dist.'
+    required: false
+    default: "false"
+  bins:
+    description: JSON array of bin names. Empty ([]) = derive from cargo metadata.
+    required: false
+    default: "[]"
+  size-budget-mib:
+    description: Soft thinness budget (MiB); over it emits a warning.
+    required: false
+    default: "20"
+  orca-fetch-token:
+    description: 'Pass `secrets.ORCA_FETCH_TOKEN`.'
+    required: true
+  sccache-endpoint:
+    description: 'Pass `vars.SCCACHE_ENDPOINT`.'
+    required: false
+    default: ""
+  sccache-access-key:
+    description: 'Pass `secrets.SCCACHE_S3_ACCESS_KEY`.'
+    required: false
+    default: ""
+  sccache-secret-key:
+    description: 'Pass `secrets.SCCACHE_S3_SECRET_KEY`.'
+    required: false
+    default: ""
+
+outputs:
+  orca-source:
+    description: Cargo.lock source of plugin-toolkit as resolved by this build.
+    value: ${{ steps.build.outputs.orca-source }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
+      if: inputs.has-ui == 'true'
+      uses: actions/download-artifact@v4
+      with:
+        name: ui-dist
+        path: ui/dist
+    - id: build
+      uses: argyle-labs/.github/.github/actions/plugin-build@main
+      with:
+        target: ${{ inputs.target }}
+        version: ${{ inputs.version }}
+        tag: ${{ inputs.tag }}
+        bins: ${{ inputs.bins }}
+        size-budget-mib: ${{ inputs.size-budget-mib }}
+        orca-fetch-token: ${{ inputs.orca-fetch-token }}
+        sccache-access-key: ${{ inputs.sccache-access-key }}
+        sccache-secret-key: ${{ inputs.sccache-secret-key }}
+        sccache-endpoint: ${{ inputs.sccache-endpoint }}
