@@ -49,6 +49,9 @@ runs:
         IMAGE: ${{ inputs.image }}
         EXTRA_PATHS: ${{ inputs.extra-paths }}
         WORKFLOW_FILE: ${{ inputs.workflow-file }}
+        CARGO_HTTP_MULTIPLEXING: "false"
+        CARGO_NET_RETRY: "10"
+        CARGO_HTTP_TIMEOUT: "60"
       run: |
         set -euo pipefail
         hashes=$("$GITHUB_ACTION_PATH/hashes.sh")

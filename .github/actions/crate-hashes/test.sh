@@ -19,6 +19,7 @@ T
 for c in a b c d; do
   printf '[package]\nname = "%s"\nversion = "0.0.0"\nedition = "2021"\n' "$c" > "$c/Cargo.toml"
 done
+printf '[dependencies]\na = { path = "../a", optional = true }\n[dev-dependencies]\nb = { path = "../b" }\n' >> c/Cargo.toml
 echo 'pub const X: u8 = 1;' > shared/x.rs
 echo 'one' > shared/assets/one.txt
 echo '-- m' > migrations/0001.sql
@@ -28,7 +29,7 @@ echo 'static D: Dir = include_dir!("$CARGO_MANIFEST_DIR/../shared/assets");' > b
 echo 'static M: Migrator = sqlx::migrate!("../migrations");' > c/src/lib.rs
 echo 'include!(concat!(env!("OUT_DIR"), "/gen.rs"));' > d/src/lib.rs
 git add -A
-cargo generate-lockfile -q --offline 2>/dev/null || cargo generate-lockfile -q
+cargo generate-lockfile -q --offline
 git add -A
 
 run() { WORKFLOW_FILE=.github/workflows/ci.yml bash "$script"; }
@@ -49,6 +50,8 @@ check() {
 check a shared/x.rs
 check b shared/assets/one.txt
 check c migrations/0001.sql
+check c a/src/lib.rs
+check c b/src/lib.rs
 
 expect() {
   local want=$1 name=$2 got=pass err="" errs

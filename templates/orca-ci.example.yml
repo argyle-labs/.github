@@ -31,6 +31,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_TIMEOUT: "60"
   CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
   OPENSSL_NO_VENDOR: "1"
 
