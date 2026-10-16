@@ -24,7 +24,7 @@ inputs:
     required: false
     default: "[]"
   size-budget-mib:
-    description: Soft thinness budget (MiB); over it emits a warning.
+    description: Absolute binary size budget (MiB) for plugin-size-check; over it fails.
     required: false
     default: "20"
   orca-fetch-token:

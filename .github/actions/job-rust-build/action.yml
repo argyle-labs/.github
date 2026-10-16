@@ -30,6 +30,10 @@ inputs:
     description: 'CARGO_PROFILE_{DEV,TEST}_DEBUG. Empty keeps the profile default.'
     required: false
     default: "0"
+  size-check:
+    description: 'Run plugin-size-check (dependency count vs the PR base; one PR comment).'
+    required: false
+    default: "true"
   sccache-endpoint:
     description: 'MinIO host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
     required: false
@@ -96,6 +100,12 @@ runs:
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ inputs.packages }} --all-features
+    - name: Plugin size check
+      if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
+      uses: argyle-labs/.github/.github/actions/plugin-size-check@main
+      with:
+        base-ref: ${{ github.event.pull_request.base.sha }}
+        pr-number: ${{ github.event.pull_request.number }}
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main

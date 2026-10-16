@@ -29,6 +29,19 @@ jobs:
       - name: Self-test
         run: bash .github/actions/job-release-version/test.sh
 
+  plugin-size-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Tools
+        run: command -v jq >/dev/null || { apt-get -qq update && apt-get -qq install -y jq >/dev/null; }
+      - name: Self-test
+        run: bash .github/actions/plugin-size-check/test.sh
+
   crate-hashes:
     runs-on: ubuntu-latest
     container: rust:1.95-slim-bookworm

@@ -20,7 +20,7 @@ inputs:
     required: false
     default: "[]"
   size-budget-mib:
-    description: Soft thinness budget (MiB); over it emits a warning.
+    description: Absolute binary size budget (MiB) for plugin-size-check; over it fails.
     required: false
     default: "20"
   orca-fetch-token:
@@ -457,17 +457,16 @@ runs:
         echo "plugin-toolkit source: ${src:-<none>}"
         echo "source=$src" >> "$GITHUB_OUTPUT"
 
-    - name: Stage artifacts (+ thinness report)
+    - name: Stage artifacts
       shell: bash
       env:
-        SIZE_BUDGET_MIB: ${{ inputs.size-budget-mib }}
         TARGET: ${{ inputs.target }}
         TAG: ${{ inputs.tag }}
         BINS: ${{ steps.bins.outputs.list }}
       run: |
         set -euo pipefail
         mkdir -p dist
-        budget="$SIZE_BUDGET_MIB"; target="$TARGET"
+        target="$TARGET"
         while IFS= read -r bin; do
           [ -z "$bin" ] && continue
           path="${CARGO_TARGET_DIR:-target}/${target}/release/${bin}"
@@ -480,13 +479,15 @@ runs:
           ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
           bytes=$(wc -c < "dist/$asset" | tr -d '[:space:]'); mib=$(( bytes / 1048576 ))
           echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
-          # Use `if` — NOT `[ ... ] && echo`. Under `set -e` a bare failing
-          # test as the last statement in the loop body aborts the step, so the
-          # healthy under-budget case (mib <= budget) would fail the release.
-          if [ "$mib" -gt "$budget" ]; then
-            echo "::warning title=Plugin over size budget::${asset} is ${mib} MiB (budget ${budget} MiB)."
-          fi
         done <<< "$BINS"
+
+    - name: Plugin size check
+      uses: argyle-labs/.github/.github/actions/plugin-size-check@main
+      with:
+        target: ${{ inputs.target }}
+        bins: ${{ steps.bins.outputs.list }}
+        dist-dir: dist
+        budget-mib: ${{ inputs.size-budget-mib }}
 
     - name: Timings + sccache summary
       if: ${{ always() }}
