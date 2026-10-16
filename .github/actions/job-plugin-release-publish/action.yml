@@ -1,0 +1,161 @@
+name: Plugin release job — publish
+description: >
+  The whole plugin `publish` job: checks the build results, gathers every
+  `plugin-<target>` artifact into dist/ (<bin>-<tag>-<target> + .sha256 only),
+  minisign-signs each binary, promotes the :tree-<sha> image when image-name is
+  set, creates the Gitea (pre)release with all assets, and mirrors the image
+  release tags to ghcr.io (warn-only). Run with `permissions: contents: write`.
+
+inputs:
+  version:
+    description: needs.version.outputs.version
+    required: true
+  tag:
+    description: needs.version.outputs.tag
+    required: true
+  prerelease:
+    description: needs.version.outputs.prerelease
+    required: true
+  channel:
+    description: rc | stable
+    required: true
+  targets:
+    description: JSON array of target triples; each must yield a binary.
+    required: true
+  notes:
+    description: Extra release notes. Empty = generated body.
+    required: false
+    default: ""
+  orca-source:
+    description: plugin-toolkit Cargo.lock source from a build job (musl first).
+    required: false
+    default: ""
+  build-results:
+    description: 'Lines of <name>:<needs.<job>.result>; anything but success|skipped fails.'
+    required: false
+    default: ""
+  signing-key:
+    description: 'Pass `secrets.PLUGIN_SIGNING_KEY`. Empty = no release.'
+    required: true
+  release-token:
+    description: 'Pass `secrets.ORCA_RELEASE_TOKEN`. Empty = github.token.'
+    required: false
+    default: ""
+  image-name:
+    description: Container image to promote, e.g. argyle-labs/<repo>. Empty = no image.
+    required: false
+    default: ""
+  image-public:
+    description: '"true" mirrors the image release tags to ghcr.io.'
+    required: false
+    default: "true"
+  image-wait-minutes:
+    description: Minutes to wait for :tree-<sha> of the release commit.
+    required: false
+    default: "15"
+  registry:
+    description: "Pass `vars.CI_REGISTRY || 'gitea.scottkey.me'`."
+    required: false
+    default: gitea.scottkey.me
+  registry-http:
+    description: "Pass `vars.CI_REGISTRY_HTTP || 'false'`."
+    required: false
+    default: "false"
+  registry-user:
+    description: 'Pass `secrets.CI_REGISTRY_USER`.'
+    required: false
+    default: ""
+  registry-token:
+    description: 'Pass `secrets.CI_REGISTRY_TOKEN`.'
+    required: false
+    default: ""
+  github-token:
+    description: 'Pass `secrets.GH_TOKEN` (ghcr.io mirror).'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Verify no requested build failed
+      shell: bash
+      env:
+        RESULTS: ${{ inputs.build-results }}
+      run: "$GITHUB_ACTION_PATH/verify.sh"
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Download all target artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Collect release assets
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        TARGETS: ${{ inputs.targets }}
+      run: "$GITHUB_ACTION_PATH/collect.sh"
+
+    - name: Sign release assets (minisign)
+      shell: bash
+      env:
+        PLUGIN_SIGNING_KEY: ${{ inputs.signing-key }}
+        TAG: ${{ inputs.tag }}
+        VERSION: ${{ inputs.version }}
+        MINISIGN_VERSION: "0.12"
+        MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+        PLUGIN_SIGNING_PUBKEY: RWTVrqFS7EuVqssBkmxckIHagYOZcLz4beDvFcAxtiDSqqVvl3fjobl4
+      run: "$GITHUB_ACTION_PATH/sign.sh"
+
+    - name: Promote image
+      if: ${{ inputs.image-name != '' }}
+      uses: argyle-labs/.github/.github/actions/image-promote@main
+      with:
+        name: ${{ inputs.image-name }}
+        tags: |
+          ${{ inputs.version }}
+          ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+        wait-minutes: ${{ inputs.image-wait-minutes }}
+        registry: ${{ inputs.registry }}
+        registry-http: ${{ inputs.registry-http }}
+        username: ${{ inputs.registry-user }}
+        password: ${{ inputs.registry-token }}
+
+    - name: Create Gitea Release (pipeline-tagged)
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.release-token || github.token }}
+        NOTES: ${{ inputs.notes }}
+        ORCA_SOURCE: ${{ inputs.orca-source }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ inputs.tag }}
+        API_URL: ${{ github.api_url }}
+        SERVER_URL: ${{ github.server_url }}
+        CHANNEL: ${{ inputs.channel }}
+        SHA: ${{ github.sha }}
+        PRERELEASE: ${{ inputs.prerelease }}
+      run: "$GITHUB_ACTION_PATH/gitea-release.sh"
+
+    - name: Log in to ghcr.io (public image mirror)
+      id: ghcr-login
+      if: ${{ inputs.image-name != '' && inputs.image-public == 'true' }}
+      continue-on-error: true
+      uses: argyle-labs/.github/.github/actions/registry-login@main
+      with:
+        registry: ghcr.io
+        setup-buildx: "false"
+        username: x-access-token
+        password: ${{ inputs.github-token }}
+
+    - name: Mirror image release tags to ghcr.io
+      if: ${{ inputs.image-name != '' && inputs.image-public == 'true' }}
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        NAME: ${{ inputs.image-name }}
+        VERSION: ${{ inputs.version }}
+        CHANNEL_TAG: ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+        LOGIN_OUTCOME: ${{ steps.ghcr-login.outcome }}
+      run: "$GITHUB_ACTION_PATH/mirror-image.sh"
