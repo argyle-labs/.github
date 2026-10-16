@@ -1,0 +1,9 @@
+[size-check]
+size-pct = 25
+max-mib = 30 # adds sqlite
+reason = "bundles SQLCipher"
+
+[baseline]
+x86_64-unknown-linux-gnu = 10485760
+"aarch64-unknown-linux-gnu" = 9000000
+crates = 210

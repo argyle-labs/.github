@@ -1,0 +1,81 @@
+name: Plugin size check
+description: >
+  Gate plugin growth. Counts normal dependencies (`cargo tree -e normal`) and,
+  when `dist-dir` holds release binaries, their stripped size; compares both
+  with the latest published release (size from its asset, crates from its tag
+  or `base-ref`), falling back to `[baseline]` in `size-budget.toml`. Fails
+  past `size-pct` / `crates` growth or an absolute budget, warns past
+  `warn-pct`. `[size-check]` in `size-budget.toml` overrides the thresholds and
+  must carry a `reason`. Writes a step summary table and, on a PR, one
+  updated PR comment.
+
+inputs:
+  target:
+    description: 'Rust target triple; empty = host (dependency count only).'
+    required: false
+    default: ""
+  bins:
+    description: 'Bin names, one per line; assets are `<bin>-<tag>-<target>` in `dist-dir`.'
+    required: false
+    default: ""
+  dist-dir:
+    description: 'Directory holding release binaries. Empty = dependency count only.'
+    required: false
+    default: ""
+  base-ref:
+    description: 'Commit to count baseline crates at. Empty = the baseline release tag.'
+    required: false
+    default: ""
+  pr-number:
+    description: 'PR to post the report on. Empty = no comment.'
+    required: false
+    default: ""
+  size-pct:
+    description: 'Fail when binary size grows more than this percent.'
+    required: false
+    default: "10"
+  warn-pct:
+    description: 'Warn when binary size grows more than this percent.'
+    required: false
+    default: "5"
+  crates:
+    description: 'Fail when the dependency count grows by more than this.'
+    required: false
+    default: "15"
+  budget-mib:
+    description: 'Absolute binary size budget (MiB). Empty = none.'
+    required: false
+    default: "20"
+  max-crates:
+    description: 'Absolute dependency count budget. Empty = none.'
+    required: false
+    default: ""
+  budget-file:
+    required: false
+    default: size-budget.toml
+  gitea-token:
+    description: 'Token reading releases and writing PR comments.'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plugin size check
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        BINS: ${{ inputs.bins }}
+        DIST_DIR: ${{ inputs.dist-dir }}
+        BASE_REF: ${{ inputs.base-ref }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SIZE_PCT: ${{ inputs.size-pct }}
+        WARN_PCT: ${{ inputs.warn-pct }}
+        CRATE_MAX: ${{ inputs.crates }}
+        BUDGET_MIB: ${{ inputs.budget-mib }}
+        MAX_CRATES: ${{ inputs.max-crates }}
+        BUDGET_FILE: ${{ inputs.budget-file }}
+        GITEA_TOKEN: ${{ inputs.gitea-token }}
+        API_URL: ${{ github.api_url }}
+        REPO: ${{ github.repository }}
+      run: bash "$GITHUB_ACTION_PATH/check.sh"
