@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Prints `true` when a library target in the cargo package selection in "$@"
-# has a fenced code block in a doc comment (or a doc include), `false` otherwise. Exit 2 when a
-# -p name is not a workspace member; any other nonzero exit = error.
+# may have a doctest, `false` otherwise. Exit 2 when a -p name is not a
+# workspace member; any other nonzero exit = error.
+# Scans only *.rs under each lib target's directory: modules pulled in via
+# #[path] from outside it, and docs from include!/include_str! of OUT_DIR
+# (build-script output), are not seen.
 set -euo pipefail
 
 args=("$@")
@@ -53,10 +56,14 @@ jq -r --arg mode "$mode" \
   | .src_path' <<< "$meta" > "$srcs" \
   || { rc=$?; echo "has-doctests: package selection failed" >&2; exit $((rc == 5 ? 2 : rc)); }
 
+pattern='^[[:space:]]*//[/!].*(```|~~~)|^[[:space:]]*//[/!] {5,}[^[:space:]]|/\*[*!]([^*/]|$)|doc *= *include_str!|#!?\[doc *= *"'
 while IFS= read -r src; do
-  if grep -rqsE --include='*.rs' '^[[:space:]]*//[/!].*```|#!?\[doc *= *include_str!' -- "$(dirname "$src")"; then
-    echo true
-    exit 0
-  fi
+  rc=0
+  grep -rqE --include='*.rs' -- "$pattern" "$(dirname "$src")" || rc=$?
+  case $rc in
+    0) echo true; exit 0 ;;
+    1) ;;
+    *) echo "has-doctests: grep failed ($rc) under $(dirname "$src")" >&2; exit "$rc" ;;
+  esac
 done < "$srcs"
 echo false
