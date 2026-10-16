@@ -49,6 +49,22 @@ inputs:
       Tracks orca/rust-toolchain.toml and the ci-rust image tag.
     required: false
     default: "1.95.0"
+  profile-strip:
+    description: CARGO_PROFILE_RELEASE_STRIP (rust-release-profile). Empty = Cargo.toml profile.
+    required: false
+    default: ""
+  profile-lto:
+    description: CARGO_PROFILE_RELEASE_LTO (rust-release-profile). Empty = Cargo.toml profile.
+    required: false
+    default: ""
+  profile-codegen-units:
+    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS (rust-release-profile). Empty = Cargo.toml profile.
+    required: false
+    default: ""
+  profile-opt-level:
+    description: CARGO_PROFILE_RELEASE_OPT_LEVEL (rust-release-profile). Empty = Cargo.toml profile.
+    required: false
+    default: ""
 
 outputs:
   orca-source:
@@ -153,11 +169,20 @@ runs:
 
     # Skipped on macOS: the build there uses a CARGO_TARGET_DIR outside the
     # workspace that rust-cache does not track.
+    - name: Release size profile
+      id: relprof
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
+      with:
+        strip: ${{ inputs.profile-strip }}
+        lto: ${{ inputs.profile-lto }}
+        codegen-units: ${{ inputs.profile-codegen-units }}
+        opt-level: ${{ inputs.profile-opt-level }}
+
     - name: Cache cargo (rust-cache)
       uses: Swatinem/rust-cache@v2
       if: ${{ runner.os != 'macOS' }}
       with:
-        key: ${{ inputs.target }}
+        key: ${{ inputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
 
     - name: Install sccache
       if: ${{ steps.host.outputs.use_sccache == 'true' && steps.host.outputs.prebaked != 'true' }}

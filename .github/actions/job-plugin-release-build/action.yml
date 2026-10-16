@@ -43,6 +43,23 @@ inputs:
     required: false
     default: ""
 
+  profile-strip:
+    description: CARGO_PROFILE_RELEASE_STRIP. Empty = Cargo.toml profile.
+    required: false
+    default: symbols
+  profile-lto:
+    description: CARGO_PROFILE_RELEASE_LTO. Empty = Cargo.toml profile.
+    required: false
+    default: fat
+  profile-codegen-units:
+    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS. Empty = Cargo.toml profile.
+    required: false
+    default: "1"
+  profile-opt-level:
+    description: CARGO_PROFILE_RELEASE_OPT_LEVEL. Empty = Cargo.toml profile.
+    required: false
+    default: s
+
 outputs:
   orca-source:
     description: Cargo.lock source of plugin-toolkit as resolved by this build.
@@ -73,3 +90,7 @@ runs:
         sccache-access-key: ${{ inputs.sccache-access-key }}
         sccache-secret-key: ${{ inputs.sccache-secret-key }}
         sccache-endpoint: ${{ inputs.sccache-endpoint }}
+        profile-strip: ${{ inputs.profile-strip }}
+        profile-lto: ${{ inputs.profile-lto }}
+        profile-codegen-units: ${{ inputs.profile-codegen-units }}
+        profile-opt-level: ${{ inputs.profile-opt-level }}

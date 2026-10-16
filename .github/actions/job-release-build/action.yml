@@ -84,10 +84,19 @@ runs:
       if: ${{ inputs.disable-lto-for-rc == 'true' && contains(inputs.version, '-rc.') }}
       shell: bash
       run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+    - name: Release size profile
+      id: relprof
+      if: ${{ inputs.asset-profile != 'full' }}
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
+      with:
+        strip: symbols
+        lto: fat
+        codegen-units: "1"
+        opt-level: s
     - name: Set up Rust (toolchain, sccache)
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
-        cache-key: release-${{ inputs.target }}
+        cache-key: release-${{ inputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
         orca-fetch-token: ${{ inputs.orca-fetch-token }}
         sccache-endpoint: ${{ inputs.sccache-endpoint }}
         sccache-access-key: ${{ inputs.sccache-access-key }}
@@ -118,10 +127,6 @@ runs:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}
         version: ${{ inputs.version }}
-        profile-strip: ${{ inputs.asset-profile != 'full' && 'symbols' || '' }}
-        profile-lto: ${{ inputs.asset-profile != 'full' && 'fat' || '' }}
-        profile-codegen-units: ${{ inputs.asset-profile != 'full' && '1' || '' }}
-        profile-opt-level: ${{ inputs.asset-profile != 'full' && 's' || '' }}
     - name: Stage assets
       id: stage
       shell: bash
