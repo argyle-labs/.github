@@ -1,0 +1,42 @@
+name: Release job — draft RC
+description: >
+  The on-merge job: computes the next vX.Y.Z-rc.N from the tags and replaces
+  any unpublished draft RC with a draft prerelease `<repo> v<version>` at the
+  merged commit. Publishing that draft is the operator's approval. No build.
+
+inputs:
+  release-token:
+    description: 'Pass `secrets.ORCA_RELEASE_TOKEN`.'
+    required: true
+  bump:
+    description: patch | minor | major
+    required: false
+    default: patch
+
+outputs:
+  version:
+    description: Draft RC version, no v prefix.
+    value: ${{ steps.cv.outputs.rc-version }}
+  tag:
+    description: Draft RC tag.
+    value: ${{ steps.cv.outputs.rc-tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Compute version
+      id: cv
+      uses: argyle-labs/.github/.github/actions/compute-version@main
+      with:
+        bump: ${{ inputs.bump }}
+    - name: Replace draft RC
+      uses: argyle-labs/.github/.github/actions/release-draft@main
+      with:
+        release-token: ${{ inputs.release-token }}
+        tag: ${{ steps.cv.outputs.rc-tag }}
+        target-commitish: ${{ github.sha }}
+        prerelease: "true"
