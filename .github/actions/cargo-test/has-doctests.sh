@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prints `true` when the cargo package selection in "$@" has a library target
-# (rustdoc needs one), `false` when it is binary-only or empty. Exit 2 when a
+# Prints `true` when a library target in the cargo package selection in "$@"
+# has a fenced code block in a doc comment (or a doc include), `false` otherwise. Exit 2 when a
 # -p name is not a workspace member; any other nonzero exit = error.
 set -euo pipefail
 
@@ -33,6 +33,8 @@ else
   mode=default
 fi
 
+srcs=$(mktemp)
+trap 'rm -f "$srcs"' EXIT
 meta=$(cargo metadata --locked --format-version 1 --no-deps)
 jq -r --arg mode "$mode" \
       --argjson pkgs "$(jq -nc '$ARGS.positional' --args "${pkgs[@]}")" \
@@ -46,5 +48,15 @@ jq -r --arg mode "$mode" \
     else . end
   | [$ws[]
      | select(if $mode == "packages" then (.name as $n | $pkgs | any(.[]; . == $n)) else (.name as $n | $excl | any(.[]; . == $n) | not) end)]
-  | any(.[].targets[].kind[]; . == "lib" or . == "rlib" or . == "dylib" or . == "proc-macro")' <<< "$meta" \
+  | .[].targets[]
+  | select(any(.kind[]; . == "lib" or . == "rlib" or . == "dylib" or . == "proc-macro"))
+  | .src_path' <<< "$meta" > "$srcs" \
   || { rc=$?; echo "has-doctests: package selection failed" >&2; exit $((rc == 5 ? 2 : rc)); }
+
+while IFS= read -r src; do
+  if grep -rqsE --include='*.rs' '^[[:space:]]*//[/!].*```|#!?\[doc *= *include_str!' -- "$(dirname "$src")"; then
+    echo true
+    exit 0
+  fi
+done < "$srcs"
+echo false

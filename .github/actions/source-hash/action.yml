@@ -2,8 +2,8 @@ name: Source hash
 description: >
   Hash of every tracked input that can change a Rust build or test result, from
   `git ls-files -s` blob ids (no file contents are read). CI-only and doc-only
-  changes leave it unchanged, except the calling workflow file and this repo's
-  shared actions and workflows. Callers must pin every argyle-labs/.github
+  changes leave it unchanged, except the calling workflow file and the shared
+  actions named in `actions` plus every shared action they reach. Callers must pin every argyle-labs/.github
   action to the same ref: nested actions are pulled `@main`, so only then is
   the hashed tree the one that runs. Keyed per job by ci-pass-cache, so the hash itself is
   job-independent.
@@ -27,6 +27,13 @@ inputs:
       empty.
     required: false
     default: ""
+  actions:
+    description: >
+      Shared actions the calling job runs, whitespace-separated (e.g.
+      `job-rust-test`); the actions they use are followed transitively. Empty
+      hashes every shared action and workflow.
+    required: false
+    default: ""
   working-directory:
     required: false
     default: "."
@@ -47,6 +54,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         EXTRA_PATHS: ${{ inputs.extra-paths }}
         WORKFLOW_FILE: ${{ inputs.workflow-file }}
+        ACTIONS: ${{ inputs.actions }}
       run: |
         set -euo pipefail
         workflow=$WORKFLOW_FILE
@@ -71,8 +79,27 @@ runs:
             extras+=("$p")
           done
         done <<< "$EXTRA_PATHS"
-        # This repo's actions and workflows, as checked out for this action.
-        actions=$(cd "$GITHUB_ACTION_PATH/../.." && find actions workflows -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+        shared=$GITHUB_ACTION_PATH/../..
+        if [ -z "$ACTIONS" ]; then
+          actions=$(cd "$shared" && find actions workflows -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+        else
+          read -ra queue <<< "$ACTIONS"
+          declare -A seen=()
+          while ((${#queue[@]})); do
+            a=${queue[0]}
+            queue=("${queue[@]:1}")
+            [ -n "${seen[$a]:-}" ] && continue
+            if [ ! -d "$shared/actions/$a" ]; then
+              echo "::error title=source-hash::actions entry '$a' is not a shared action"
+              exit 1
+            fi
+            seen[$a]=1
+            while IFS= read -r dep; do
+              queue+=("$dep")
+            done < <(grep -rhoE 'argyle-labs/\.github/\.github/actions/[A-Za-z0-9_-]+@|GITHUB_ACTION_PATH}?/\.\./[A-Za-z0-9_-]+/' "$shared/actions/$a" | sed -E 's#.*actions/([^@]+)@#\1#; s#.*/\.\./([^/]+)/#\1#')
+          done
+          actions=$(cd "$shared/actions" && printf '%s\n' "${!seen[@]}" | LC_ALL=C sort | xargs -I{} find {} -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+        fi
         specs=(
           ':(glob)**/*.rs'
           ':(glob)**/Cargo.toml'
@@ -80,6 +107,10 @@ runs:
           ':(glob)**/build.rs'
           ':(glob)**/rust-toolchain*'
           ':(glob)**/.cargo/config.toml'
+          ':(glob)**/rustfmt.toml'
+          ':(glob)**/.rustfmt.toml'
+          ':(glob)**/clippy.toml'
+          ':(glob)**/.clippy.toml'
           ':(glob)**/tests/**'
           ":(top)$workflow"
           "${extras[@]}"

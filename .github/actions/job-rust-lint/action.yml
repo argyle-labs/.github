@@ -1,10 +1,18 @@
 name: CI job — rust lint
 description: >
   The whole `lint` job: fmt, clippy, Cargo.lock drift and actionlint. Runs
-  beside `build` (clippy's check build cannot reuse the archive) and always
-  runs: no pass cache.
+  beside `build` (clippy's check build cannot reuse the archive). Skipped when
+  this source hash already passed `lint` with the same lock-check mode.
 
 inputs:
+  image-tag:
+    description: 'ci-rust image tag the job runs in; hashed into the source hash.'
+    required: false
+    default: "1.95.0"
+  workflow-file:
+    description: 'Calling workflow file (repo-root relative); hashed into the source hash.'
+    required: false
+    default: .github/workflows/ci.yml
   ui:
     description: 'The crate embeds ui/dist: place the `vite-dist` artifact before clippy (the job `needs:` build-ui).'
     required: false
@@ -43,8 +51,36 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Source hash
+      id: src
+      uses: argyle-labs/.github/.github/actions/source-hash@main
+      with:
+        actions: job-rust-lint
+        image: ci-rust:${{ inputs.image-tag }}
+        workflow-file: ${{ inputs.workflow-file }}
+        extra-paths: |
+          .github
+          ${{ inputs.ui == 'true' && 'ui' || '' }}
+    - name: Check pass cache
+      id: pass
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: check
+        job: lint-${{ inputs.lock-check }}
+        hash: ${{ steps.src.outputs.hash }}
+        force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        access-key: ${{ inputs.sccache-access-key }}
+        secret-key: ${{ inputs.sccache-secret-key }}
+    - name: Reuse unchanged pass
+      if: ${{ steps.pass.outputs.hit == 'true' }}
+      shell: bash
+      env:
+        PASS_SHA: ${{ steps.pass.outputs.sha }}
+      run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
       id: setup
+      if: ${{ steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
         wrap-cc: 'true'
@@ -60,21 +96,32 @@ runs:
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
     - name: Format (cargo fmt)
+      if: ${{ steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/cargo-fmt@main
     - name: Clippy
-      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-clippy@main
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ inputs.packages }} --all-targets --all-features
     - name: Lock file check
-      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
       with:
         mode: ${{ inputs.lock-check }}
     - name: actionlint
-      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/actionlint@main
+    - name: Record pass
+      if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: record
+        job: lint-${{ inputs.lock-check }}
+        hash: ${{ steps.src.outputs.hash }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        access-key: ${{ inputs.sccache-access-key }}
+        secret-key: ${{ inputs.sccache-secret-key }}
     - name: CI summary
       if: ${{ !cancelled() }}
       uses: argyle-labs/.github/.github/actions/ci-summary@main

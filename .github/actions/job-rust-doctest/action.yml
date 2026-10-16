@@ -52,6 +52,7 @@ runs:
       id: src
       uses: argyle-labs/.github/.github/actions/source-hash@main
       with:
+        actions: job-rust-doctest
         image: ci-rust:${{ inputs.image-tag }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
@@ -103,7 +104,7 @@ runs:
         read -ra args <<< "$ARGS"
         has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" "${args[@]}")
         if [ "$has" != true ]; then
-          echo "::notice::No library target in the selected packages; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::notice::No doc-comment code blocks in the selected library targets; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
         cargo test --locked "${args[@]}" --doc
