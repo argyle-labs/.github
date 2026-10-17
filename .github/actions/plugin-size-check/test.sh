@@ -91,6 +91,29 @@ run fail CRATES=200
 printf '[size-check]\nsize-pct = "%s(touch %s)"\nreason = "x"\n' "$" "$work/pwn2" > "$work/size-budget.toml"
 run fail CRATES=200
 eq "toml override not executed" "$([ -e "$work/pwn2" ] && echo pwned || echo clean)" "clean"
+cat > "$work/bin/git" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  *"worktree add"*) prev=""; for a in "\$@"; do [ "\$prev" = "--detach" ] && mkdir -p "\$a"; prev=\$a; done ;;
+  *) exit 0 ;;
+esac
+STUB
+cat > "$work/bin/cargo" <<'STUB'
+#!/usr/bin/env bash
+[ -f Cargo.toml ] || { echo "error: could not find Cargo.toml" >&2; exit 101; }
+seq 1 "${CRATES:?}" | sed 's/^/crate-/'
+STUB
+touch "$work/Cargo.toml"
+rm -f "$work/size-budget.toml" "$work/summary"
+run pass CRATES=200 BASE_REF=main DIST_DIR= BINS=
+eq "new repo baseline is none" "$(grep -c "crates at .none." "$work/summary" || true)" "1"
+rm -f "$work/Cargo.toml"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$work/bin/git"
+cat > "$work/bin/cargo" <<'STUB'
+#!/usr/bin/env bash
+seq 1 "${CRATES:?}" | sed 's/^/crate-/'
+echo crate-1
+STUB
 printf '[baseline]\ncrates = "a[%s(touch %s)]"\n' "$" "$work/pwn3" > "$work/size-budget.toml"
 run pass CRATES=200 DIST_DIR= BINS=
 eq "toml baseline not executed" "$([ -e "$work/pwn3" ] && echo pwned || echo clean)" "clean"
