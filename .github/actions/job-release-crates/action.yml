@@ -6,6 +6,9 @@ description: >
   `ci-rust` container after `publish`.
 
 inputs:
+  tag:
+    description: 'Release tag (github.event.release.tag_name || inputs.version).'
+    required: true
   registry-token:
     description: 'Gitea cargo registry token (pass `secrets.CI_REGISTRY_TOKEN`).'
     required: true
@@ -13,6 +16,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag }}
     - name: Check out release branch
       uses: actions/checkout@v4
       with:
@@ -20,16 +28,15 @@ runs:
         fetch-depth: 0
     - name: Check out release tag
       shell: bash
+      env:
+        TAG: ${{ steps.rel.outputs.tag }}
       run: |
         set -euo pipefail
         git config --global --add safe.directory '*'
-        version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
-        tag="v$version"
-        [ -n "$version" ] || { echo "::error::no [workspace.package] version in Cargo.toml"; exit 1; }
-        git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "::error::tag $tag not found"; exit 1; }
-        git checkout -q "$tag"
-        [ "$(git rev-parse HEAD)" = "$(git rev-parse "$tag^{commit}")" ] || { echo "::error::HEAD is not $tag"; exit 1; }
-        echo "Publishing from $tag ($(git rev-parse HEAD))"
+        git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "::error::tag $TAG not found"; exit 1; }
+        git checkout -q "$TAG"
+        [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")" ] || { echo "::error::HEAD is not $TAG"; exit 1; }
+        echo "Publishing from $TAG ($(git rev-parse HEAD))"
     - name: Fetch dependencies (cargo fetch)
       uses: argyle-labs/.github/.github/actions/cargo-fetch@main
     - name: Publish crates in dependency order (publish-crates.sh)

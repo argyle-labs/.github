@@ -5,6 +5,11 @@ description: >
   is absent are skipped), assembles checksums.sha256 and install.sh, and uploads
   `native-packages`. Checks out the repo itself; needs sudo apt (ubuntu-latest).
 
+inputs:
+  tag:
+    description: 'Release tag (github.event.release.tag_name || inputs.version).'
+    required: true
+
 outputs:
   artifact:
     description: Name of the uploaded artifact.
@@ -13,6 +18,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag }}
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -30,6 +40,11 @@ runs:
         # Artifact round-trips drop +x; build_native_packages requires it.
         find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
         echo "── dist-release ──"; ls -la dist-release
+    - name: Set package version
+      shell: bash
+      env:
+        REL_VERSION: ${{ steps.rel.outputs.version }}
+      run: sed -i '0,/^version = ".*"/s//version = "'"$REL_VERSION"'"/' Cargo.toml
     - name: Build native packages (package-native)
       uses: argyle-labs/.github/.github/actions/package-native@main
     - name: Assemble checksums + install.sh

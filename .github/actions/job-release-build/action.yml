@@ -11,11 +11,8 @@ inputs:
   target:
     description: Linux target triple, e.g. aarch64-unknown-linux-gnu.
     required: true
-  version:
-    description: Release version to bake into Cargo.toml (needs.version.outputs.version).
-    required: true
   tag:
-    description: Release tag; part of the asset name in the `binaries` profile.
+    description: Release tag (github.event.release.tag_name || inputs.version); validated before anything builds.
     required: true
   asset-profile:
     description: 'full = dist-release/<bin>-<target> (orca); binaries = dist/<bin>-<tag>-<target> (plugins).'
@@ -54,6 +51,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag }}
     - name: Check target
       shell: bash
       env:
@@ -81,7 +83,7 @@ runs:
     # Set before rust-setup so rust-cache, which keys on CARGO_* env, keeps RC
     # and stable target dirs apart.
     - name: Disable LTO for release candidates
-      if: ${{ inputs.disable-lto-for-rc == 'true' && contains(inputs.version, '-rc.') }}
+      if: ${{ inputs.disable-lto-for-rc == 'true' && steps.rel.outputs.prerelease == 'true' }}
       shell: bash
       run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
     - name: Release size profile
@@ -125,14 +127,14 @@ runs:
       with:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}
-        version: ${{ inputs.version }}
+        version: ${{ steps.rel.outputs.version }}
     - name: Stage assets
       id: stage
       shell: bash
       env:
         PROFILE: ${{ inputs.asset-profile }}
         TARGET: ${{ inputs.target }}
-        TAG: ${{ inputs.tag }}
+        TAG: ${{ steps.rel.outputs.tag }}
         BINS: ${{ steps.bins.outputs.list }}
       run: |
         set -euo pipefail
