@@ -97,11 +97,11 @@ eq "rc baseline falls back to stable" "$(size_baseline_tag "$(jq -c '[.[] | sele
 eq "no baseline" "$(size_baseline_tag "[]" v0.1.0)" ""
 
 e1='[{"tag":"v2","target":"t","bin":"b","size":2,"crates":1}]'
-eq "history append" "$(size_history_merge '[{"tag":"v1","size":1}]' "$e1" v2 | jq -c 'map(.tag)')" '["v1","v2"]'
+eq "history append" "$(size_history_merge '[{"tag":"v1","target":"t","bin":"b","size":1}]' "$e1" v2 | jq -c 'map(.tag)')" '["v1","v2"]'
 eq "history rerun replaces" "$(size_history_merge "$(size_history_merge '[]' "$e1" v2)" "$e1" v2 | jq length)" "1"
 
-cur='[{"bin":"orca-plugin-demo","target":"x86_64-unknown-linux-gnu","size":11534336,"crates":204}]'
-prev='[{"bin":"orca-plugin-demo","target":"x86_64-unknown-linux-gnu","size":10485760,"crates":200}]'
+cur='[{"tag":"v1","bin":"orca-plugin-demo","target":"x86_64-unknown-linux-gnu","size":11534336,"crates":204}]'
+prev='[{"tag":"v1","bin":"orca-plugin-demo","target":"x86_64-unknown-linux-gnu","size":10485760,"crates":200}]'
 sec=$(size_section "$cur" "$prev" v0.3.0 20 5 15 $((20 * mib)) "" 2>"$work/warn") || true
 warn=$(cat "$work/warn")
 eq "headline" "$(sed -n 2p <<< "$sec")" "**⚠ size grew +10.0% since v0.3.0, +4 crates**"
@@ -110,10 +110,10 @@ eq "growth ::warning" "$(grep -c '^::warning title=release-size::orca-plugin-dem
 quiet=$(size_section "$prev" "$prev" v0.3.0 20 5 15 "" "" 2>&1 >/dev/null)
 eq "no growth no warning" "$quiet" ""
 eq "no growth no headline" "$(size_section "$prev" "$prev" v0.3.0 20 5 15 "" "" 2>/dev/null | sed -n 2p)" "### Size"
-crw=$(size_section '[{"bin":"b","target":"t","size":10,"crates":203}]' '[{"bin":"b","target":"t","size":10,"crates":200}]' v1 20 5 15 "" "" 2>&1 >/dev/null)
+crw=$(size_section '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":203}]' '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":200}]' v1 20 5 15 "" "" 2>&1 >/dev/null)
 eq "crate growth ::warning" "$crw" "::warning title=release-size::b t: +3 crates since v1"
-eq "crate headline" "$(size_section '[{"bin":"b","target":"t","size":10,"crates":203}]' '[{"bin":"b","target":"t","size":10,"crates":200}]' v1 20 5 15 "" "" 2>/dev/null | sed -n 2p)" "**⚠ crates grew +3 since v1**"
-eq "absolute fail" "$(size_section '[{"bin":"b","target":"t","size":30,"crates":1}]' "[]" "" 20 5 15 20 "" 2>/dev/null | grep -c '❌ fail: size over budget')" "1"
+eq "crate headline" "$(size_section '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":203}]' '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":200}]' v1 20 5 15 "" "" 2>/dev/null | sed -n 2p)" "**⚠ crates grew +3 since v1**"
+eq "absolute fail" "$(size_section '[{"tag":"v1","bin":"b","target":"t","size":30,"crates":1}]' "[]" "" 20 5 15 20 "" 2>/dev/null | grep -c '❌ fail: size over budget')" "1"
 
 once=$(body_with_section "notes" "$SIZE_MARKER
 A
@@ -149,6 +149,7 @@ mkdir -p "$rs/bin" "$rs/dist" "$rs/sizes"
 cat > "$rs/bin/curl" <<STUB
 #!/usr/bin/env bash
 args="\$*"
+echo "\$args" >> "$rs/argv"
 case "\$args" in
   *"-X PATCH"*) u=""; d=""; while [ \$# -gt 0 ]; do case "\$1" in http*) u=\$1 ;; -d) d=\$2 ;; esac; shift; done; printf '%s' "\$d" > "$rs/patch-\${u##*/}" ;;
   *"-X DELETE"*) echo "\$args" >> "$rs/deleted" ;;
@@ -160,7 +161,7 @@ esac
 STUB
 chmod +x "$rs/bin/curl"
 rsrun() {
-  (cd "$rs" && env PATH="$rs/bin:$PATH" GITHUB_STEP_SUMMARY="$rs/summary" REPO=argyle-labs/demo "$@" \
+  (cd "$rs" && env PATH="$rs/bin:$PATH" GITHUB_STEP_SUMMARY="$rs/summary" REPO=argyle-labs/demo GITEA_TOKEN=sekrit-token "$@" \
     bash "$here/release-size.sh") >"$rs/out" 2>&1
 }
 cp "$fx/channels.json" "$rs/releases.json"
@@ -190,4 +191,44 @@ rsrun TAG=v0.4.0-rc.2 DIST_DIR=dist SIZES_DIR=sizes || { cat "$rs/out" >&2; fail
 again=$(jq -r .body "$rs/patch-5")
 eq "rerun idempotent" "$(grep -c '^<!-- release-size -->' <<< "$again")" "1"
 eq "rerun replaces asset" "$(grep -c 'assets/51' "$rs/deleted")" "1"
+
+pwn="$work/pwn"
+hostile=$(jq -c -n --arg p "a[\$(touch $pwn)]" '[
+  {tag:"v1", target:"t", bin:"b", size:10, crates:$p},
+  {tag:"v1", target:"t", bin:"<!-- release-size -->", size:10, crates:1},
+  {tag:"v1", target:"t|x", bin:"b", size:10, crates:1},
+  {tag:"v1", target:"t", bin:"b", size:"10", crates:1},
+  {tag:"v1", target:"t", bin:"ok", size:10.7, crates:2.2}]')
+eq "hostile entries dropped" "$(size_history_sanitize "$hostile")" '[{"tag":"v1","target":"t","bin":"ok","size":10,"crates":2,"date":null}]'
+eq "non-array history" "$(size_history_sanitize '{"a":1}')" "[]"
+eq "invalid json history" "$(size_history_sanitize 'nope')" "[]"
+size_section "$hostile" "$hostile" v1 20 5 15 "" "" >/dev/null 2>&1
+evaluate 1 1 "a[\$(touch $pwn)]" 1 10 5 15 "" "" >/dev/null
+eq "no code execution" "$([ -e "$pwn" ] && echo pwned || echo clean)" "clean"
+eq "md clean" "$(md_clean 'a<b>|c`d')" "abcd"
+eq "body END before MARKER" "$(body_with_section "x $SIZE_END y
+$SIZE_MARKER
+A" "$SIZE_MARKER
+B
+$SIZE_END")" "x  y
+$SIZE_MARKER
+B
+$SIZE_END"
+eq "body stray END" "$(body_with_section "x $SIZE_END" "S")" "x 
+
+S"
+sv='[{"tag_name":"v0.10.0","draft":false,"prerelease":false},{"tag_name":"v0.9.0","draft":false,"prerelease":false},{"tag_name":"v1.0.0","draft":false,"prerelease":false},{"tag_name":"vXdotY","draft":false,"prerelease":false}]'
+eq "semver baseline" "$(size_baseline_tag "$sv" v0.11.0)" "v0.10.0"
+eq "baseline below current only" "$(size_baseline_tag "$sv" v0.9.1)" "v0.9.0"
+
+cp "$fx/channels.json" "$rs/releases.json"
+rm -f "$rs"/patch-*
+printf '#!/usr/bin/env bash\nexit 22\n' > "$rs/bin/curl.fail"
+mv "$rs/bin/curl" "$rs/bin/curl.ok"; mv "$rs/bin/curl.fail" "$rs/bin/curl"; chmod +x "$rs/bin/curl"
+if rsrun TAG=v0.4.0-rc.2 DIST_DIR=dist SIZES_DIR=sizes; then got=pass; else got=fail; fi
+eq "curl failure fails step" "$got" "fail"
+eq "curl failure ::warning" "$(grep -c '^::warning title=release-size::failed at line' "$rs/out")" "1"
+eq "curl failure no patch" "$(find "$rs" -maxdepth 1 -name 'patch-*' | wc -l | tr -d ' ')" "0"
+eq "curl called" "$([ -s "$rs/argv" ] && echo yes)" "yes"
+eq "token not in argv" "$(grep -c 'sekrit-token' "$rs/argv" || true)" "0"
 exit "$fail"

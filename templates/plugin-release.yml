@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.repository }}-release-${{ github.event.release.tag_name || inputs.version }}
+  group: ${{ github.repository }}-release
   cancel-in-progress: false
 
 env:
