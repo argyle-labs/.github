@@ -49,6 +49,7 @@ trap '[ -n "${KEEP:-}" ] || rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/dist"
 cat > "$work/bin/curl" <<STUB
 #!/usr/bin/env bash
+echo "\$*" >> "$work/argv"
 case "\$*" in *releases*) cat "$fx/releases.json" ;; *) exit 22 ;; esac
 STUB
 cat > "$work/bin/cargo" <<'STUB'
@@ -66,7 +67,7 @@ run() {
   local want=$1 got=pass; shift
   (cd "$work" && env PATH="$work/bin:$PATH" GITHUB_STEP_SUMMARY="$work/summary" REPO=argyle-labs/demo \
     TARGET=x86_64-unknown-linux-gnu BINS=orca-plugin-demo DIST_DIR=dist \
-    SIZE_PCT=10 WARN_PCT=5 CRATE_MAX=15 BUDGET_MIB=20 "$@" bash "$here/check.sh") >/dev/null 2>&1 || got=fail
+    SIZE_PCT=10 WARN_PCT=5 CRATE_MAX=15 BUDGET_MIB=20 GITEA_TOKEN=sekrit-token "$@" bash "$here/check.sh") >/dev/null 2>&1 || got=fail
   eq "check.sh $*" "$got" "$want"
 }
 head -c 11100000 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
@@ -89,6 +90,8 @@ cp "$fx/no-reason.toml" "$work/size-budget.toml"
 run fail CRATES=200
 rm "$work/size-budget.toml"
 run pass CRATES=200 DIST_DIR= BINS=
+eq "check.sh curl called" "$([ -s "$work/argv" ] && echo yes)" "yes"
+eq "check.sh token not in argv" "$(grep -c 'sekrit-token' "$work/argv" || true)" "0"
 
 ch=$(cat "$fx/channels.json")
 eq "rc baseline = latest rc" "$(size_baseline_tag "$ch" v0.4.0-rc.2)" "v0.4.0-rc.1"

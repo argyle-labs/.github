@@ -6,7 +6,8 @@ description: >
   set, uploads all assets to the tag's existing Gitea release (or creates it
   when `create` is "true"), writes the release Size section and
   size-history.json asset (rebuilt from the newest lower release's copy;
-  a rerun replaces this tag's entries, an unreadable copy restarts it), and mirrors the image release tags to ghcr.io
+  a rerun replaces this tag's entries, an unreadable copy restarts it; templates run one release per repo at a time,
+  so a third queued release cancels the one waiting), and mirrors the image release tags to ghcr.io
   (warn-only). Run with `permissions: contents: write`.
 
 inputs:

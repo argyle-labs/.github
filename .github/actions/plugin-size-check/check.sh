@@ -5,7 +5,10 @@ set -euo pipefail
 
 budget_file=${BUDGET_FILE:-size-budget.toml}
 api=${API_URL:-https://gitea.scottkey.me/api/v1}
-auth=(-H "Authorization: token ${GITEA_TOKEN:-}" -H "Accept: application/json")
+hdr=$(mktemp -d "${RUNNER_TEMP:-/tmp}/size-check.XXXXXX")
+(umask 077 && printf 'Authorization: token %s\n' "${GITEA_TOKEN:-}" > "$hdr/auth")
+auth=(-H "@$hdr/auth" -H "Accept: application/json")
+trap 'rm -rf "$hdr"' EXIT
 marker='<!-- plugin-size-check -->'
 
 size_pct=${SIZE_PCT:?}; warn_pct=${WARN_PCT:?}; crate_max=${CRATE_MAX:?}
@@ -37,7 +40,7 @@ count_crates() {
 }
 
 wt="${RUNNER_TEMP:-/tmp}/size-base-$$"
-trap 'git worktree remove --force "$wt" >/dev/null 2>&1 || true' EXIT
+trap 'git worktree remove --force "$wt" >/dev/null 2>&1 || true; rm -rf "$hdr"' EXIT
 crates_at() {
   local ref=$1
   [ -n "$ref" ] || return 0
