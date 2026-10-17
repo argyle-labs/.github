@@ -49,6 +49,7 @@ crates_at() {
   git rev-parse -q --verify "${ref}^{commit}" >/dev/null || git fetch -q --depth 1 origin "$ref" || return 0
   git worktree add -q --detach "$wt" "$ref" || return 0
   rm -f "$wt/.cargo/config.toml"
+  [ -f "$wt/Cargo.toml" ] || return 0
   count_crates "$wt" || true
 }
 
