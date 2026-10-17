@@ -88,6 +88,12 @@ run pass CRATES=200
 run fail CRATES=230 BASE_REF=main
 cp "$fx/no-reason.toml" "$work/size-budget.toml"
 run fail CRATES=200
+printf '[size-check]\nsize-pct = "%s(touch %s)"\nreason = "x"\n' "$" "$work/pwn2" > "$work/size-budget.toml"
+run fail CRATES=200
+eq "toml override not executed" "$([ -e "$work/pwn2" ] && echo pwned || echo clean)" "clean"
+printf '[baseline]\ncrates = "a[%s(touch %s)]"\n' "$" "$work/pwn3" > "$work/size-budget.toml"
+run pass CRATES=200 DIST_DIR= BINS=
+eq "toml baseline not executed" "$([ -e "$work/pwn3" ] && echo pwned || echo clean)" "clean"
 rm "$work/size-budget.toml"
 run pass CRATES=200 DIST_DIR= BINS=
 eq "check.sh curl called" "$([ -s "$work/argv" ] && echo yes)" "yes"
@@ -208,6 +214,8 @@ eq "invalid json history" "$(size_history_sanitize 'nope')" "[]"
 size_section "$hostile" "$hostile" v1 20 5 15 "" "" >/dev/null 2>&1
 evaluate 1 1 "a[\$(touch $pwn)]" 1 10 5 15 "" "" >/dev/null
 eq "no code execution" "$([ -e "$pwn" ] && echo pwned || echo clean)" "clean"
+eq "uint length cap" "$(is_uint 1234567890123456 && echo y || echo n)" "n"
+eq "uint 15 digits" "$(is_uint 123456789012345 && echo y || echo n)" "y"
 eq "md clean" "$(md_clean 'a<b>|c`d')" "abcd"
 eq "body END before MARKER" "$(body_with_section "x $SIZE_END y
 $SIZE_MARKER
