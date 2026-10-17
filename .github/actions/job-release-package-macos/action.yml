@@ -10,8 +10,8 @@ inputs:
     description: Darwin target triple whose binary is packaged.
     required: false
     default: aarch64-apple-darwin
-  version:
-    description: Release version (needs.version.outputs.version).
+  tag:
+    description: 'Release tag (github.event.release.tag_name || inputs.version).'
     required: true
 
 outputs:
@@ -22,6 +22,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag }}
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -34,7 +39,7 @@ runs:
     - name: Build .pkg (build_native_packages)
       shell: bash
       env:
-        REL_VERSION: ${{ inputs.version }}
+        REL_VERSION: ${{ steps.rel.outputs.version }}
         TARGET: ${{ inputs.target }}
       run: |
         set -euo pipefail

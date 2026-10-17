@@ -1,17 +1,13 @@
-name: Release job — version from tag
+name: Release tag
 description: >
-  The `version` job for a published release (or a dispatch naming a tag):
-  accepts only vX.Y.Z-rc.N (prerelease) or vX.Y.Z (stable), checks it against
-  the event's prerelease flag, and emits the job-release-publish inputs.
+  Validates a release tag (vX.Y.Z-rc.N prerelease or vX.Y.Z stable, matching
+  the published release's prerelease flag when there is one) and derives the
+  version, rel-name and prerelease flag from it.
 
 inputs:
   tag:
     description: 'github.event.release.tag_name || inputs.version'
     required: true
-  prerelease:
-    description: 'github.event.release.prerelease; empty for a dispatch.'
-    required: false
-    default: ""
 
 outputs:
   version:
@@ -26,12 +22,6 @@ outputs:
   prerelease:
     description: '"true" for vX.Y.Z-rc.N.'
     value: ${{ steps.pick.outputs.prerelease }}
-  draft:
-    description: Always "false".
-    value: "false"
-  mirror:
-    description: Always "true".
-    value: "true"
 
 runs:
   using: composite
@@ -41,6 +31,6 @@ runs:
       shell: bash
       env:
         TAG: ${{ inputs.tag }}
-        EVENT_PRERELEASE: ${{ inputs.prerelease }}
+        EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
         REPO: ${{ github.repository }}
-      run: "$GITHUB_ACTION_PATH/pick.sh"
+      run: "$GITHUB_ACTION_PATH/tag.sh"

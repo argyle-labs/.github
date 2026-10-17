@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script=$(realpath "$(dirname "$0")/pick.sh")
+script=$(realpath "$(dirname "$0")/tag.sh")
 fail=0
 export REPO=argyle-labs/orca
 expect() {

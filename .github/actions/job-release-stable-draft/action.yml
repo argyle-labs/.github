@@ -5,11 +5,8 @@ description: >
   stable. No-op unless `prerelease` is "true".
 
 inputs:
-  version:
-    description: needs.version.outputs.version (vX.Y.Z-rc.N, no v prefix)
-    required: true
-  prerelease:
-    description: needs.version.outputs.prerelease
+  tag:
+    description: 'Release tag (github.event.release.tag_name || inputs.version).'
     required: true
   release-token:
     description: 'Pass `secrets.ORCA_RELEASE_TOKEN`.'
@@ -18,15 +15,20 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag }}
     - name: Base version
       id: base
-      if: ${{ inputs.prerelease == 'true' }}
+      if: ${{ steps.rel.outputs.prerelease == 'true' }}
       shell: bash
       env:
-        VERSION: ${{ inputs.version }}
+        VERSION: ${{ steps.rel.outputs.version }}
       run: echo "tag=v${VERSION%-rc.*}" >> "$GITHUB_OUTPUT"
     - name: Replace draft stable
-      if: ${{ inputs.prerelease == 'true' }}
+      if: ${{ steps.rel.outputs.prerelease == 'true' }}
       uses: argyle-labs/.github/.github/actions/release-draft@main
       with:
         release-token: ${{ inputs.release-token }}

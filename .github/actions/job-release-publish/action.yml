@@ -7,24 +7,17 @@ description: >
   The draft stage skips the version commit and the mirror.
 
 inputs:
-  version:
-    description: needs.version.outputs.version
-    required: true
   tag:
-    description: needs.version.outputs.tag
-    required: true
-  rel-name:
-    description: needs.version.outputs.rel-name
-    required: true
-  prerelease:
-    description: needs.version.outputs.prerelease
+    description: 'Release tag (github.event.release.tag_name || inputs.version).'
     required: true
   draft:
-    description: needs.version.outputs.draft
-    required: true
+    description: '"true" publishes a draft.'
+    required: false
+    default: "false"
   mirror:
-    description: needs.version.outputs.mirror
-    required: true
+    description: '"true" mirrors to GitHub.'
+    required: false
+    default: "true"
   version-commit:
     description: '"false" when the tag already exists (published release): skip the version commit and publish on the tagged commit.'
     required: false
@@ -51,6 +44,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag }}
     - name: Gather all release assets
       uses: actions/download-artifact@v4
       with:
@@ -63,7 +61,7 @@ runs:
       shell: bash
       env:
         PROFILE: ${{ inputs.asset-profile }}
-        TAG: ${{ inputs.tag }}
+        TAG: ${{ steps.rel.outputs.tag }}
         TARGETS: ${{ inputs.targets }}
       run: |
         set -euo pipefail
@@ -133,7 +131,7 @@ runs:
       if: ${{ inputs.draft != 'true' && inputs.version-commit != 'false' }}
       uses: argyle-labs/.github/.github/actions/write-release-version@main
       with:
-        version: ${{ inputs.version }}
+        version: ${{ steps.rel.outputs.version }}
         working-directory: repo
     - name: Commit release version
       id: bump
@@ -141,8 +139,8 @@ runs:
       shell: bash
       working-directory: repo
       env:
-        REL_VERSION: ${{ inputs.version }}
-        TAG: ${{ inputs.tag }}
+        REL_VERSION: ${{ steps.rel.outputs.version }}
+        TAG: ${{ steps.rel.outputs.tag }}
         REF_NAME: ${{ github.ref_name }}
       run: |
         set -euo pipefail
@@ -161,11 +159,11 @@ runs:
       uses: argyle-labs/.github/.github/actions/publish-gitea@main
       with:
         gitea-token: ${{ inputs.release-token }}
-        tag: ${{ inputs.tag }}
+        tag: ${{ steps.rel.outputs.tag }}
         target-commitish: ${{ steps.bump.outputs.sha || github.sha }}
-        name: ${{ inputs.rel-name }}
+        name: ${{ steps.rel.outputs.rel-name }}
         body: ${{ inputs.notes }}
-        prerelease: ${{ inputs.prerelease }}
+        prerelease: ${{ steps.rel.outputs.prerelease }}
         draft: ${{ inputs.draft }}
         assets-dir: release-assets
     - name: Mirror to GitHub (mirror-github)
@@ -174,8 +172,8 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         gitea-token: ${{ inputs.release-token }}
-        tag: ${{ inputs.tag }}
-        name: ${{ inputs.rel-name }}
+        tag: ${{ steps.rel.outputs.tag }}
+        name: ${{ steps.rel.outputs.rel-name }}
         body: ${{ inputs.notes }}
-        prerelease: ${{ inputs.prerelease }}
+        prerelease: ${{ steps.rel.outputs.prerelease }}
         assets-dir: release-assets
