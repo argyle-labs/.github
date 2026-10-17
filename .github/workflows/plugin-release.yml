@@ -319,6 +319,7 @@ jobs:
             musl-arm:${{ needs.build-aarch64-linux-musl.result }}
             darwin-arm:${{ needs.build-aarch64-darwin.result }}
             darwin-x86:${{ needs.build-x86_64-darwin.result }}
+          create: "true"
           signing-key: ${{ secrets.PLUGIN_SIGNING_KEY }}
           release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
           image-name: ${{ inputs.image_name }}
