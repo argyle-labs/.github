@@ -3,31 +3,41 @@ description: >
   The whole plugin `publish` job: checks the build results, gathers every
   `plugin-<target>` artifact into dist/ (<bin>-<tag>-<target> + .sha256 only),
   minisign-signs each binary, promotes the :tree-<sha> image when image-name is
-  set, creates the Gitea (pre)release with all assets, and mirrors the image
-  release tags to ghcr.io (warn-only). Run with `permissions: contents: write`.
+  set, uploads all assets to the tag's existing Gitea release (or creates it
+  when `create` is "true"), and mirrors the image release tags to ghcr.io
+  (warn-only). Run with `permissions: contents: write`.
 
 inputs:
-  version:
-    description: needs.version.outputs.version
-    required: true
   tag:
-    description: needs.version.outputs.tag
-    required: true
+    description: Release tag. Empty = env.TAG.
+    required: false
+    default: ""
+  version:
+    description: Release version. Empty = derived from the tag.
+    required: false
+    default: ""
   prerelease:
-    description: needs.version.outputs.prerelease
-    required: true
+    description: Empty = derived from the tag.
+    required: false
+    default: ""
   channel:
-    description: rc | stable
-    required: true
+    description: rc | stable. Empty = derived from the tag.
+    required: false
+    default: ""
+  create:
+    description: '"true" creates the release when the tag has none; otherwise it must exist.'
+    required: false
+    default: "false"
   targets:
-    description: JSON array of target triples; each must yield a binary.
-    required: true
+    description: JSON array of target triples; each must yield a binary. Empty = no per-target check.
+    required: false
+    default: ""
   notes:
     description: Extra release notes. Empty = generated body.
     required: false
     default: ""
   orca-source:
-    description: plugin-toolkit Cargo.lock source from a build job (musl first).
+    description: plugin-toolkit Cargo.lock source. Empty = read from Cargo.lock.
     required: false
     default: ""
   build-results:
@@ -86,6 +96,22 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag || env.TAG }}
+
+    - name: Resolve release
+      id: r
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version || steps.rel.outputs.version }}
+        PRERELEASE: ${{ inputs.prerelease || steps.rel.outputs.prerelease }}
+        CHANNEL: ${{ inputs.channel }}
+        ORCA_SOURCE: ${{ inputs.orca-source }}
+      run: "$GITHUB_ACTION_PATH/resolve.sh"
+
     - name: Download all target artifacts
       uses: actions/download-artifact@v4
       with:
@@ -94,7 +120,7 @@ runs:
     - name: Collect release assets
       shell: bash
       env:
-        TAG: ${{ inputs.tag }}
+        TAG: ${{ steps.rel.outputs.tag }}
         TARGETS: ${{ inputs.targets }}
       run: "$GITHUB_ACTION_PATH/collect.sh"
 
@@ -102,8 +128,8 @@ runs:
       shell: bash
       env:
         PLUGIN_SIGNING_KEY: ${{ inputs.signing-key }}
-        TAG: ${{ inputs.tag }}
-        VERSION: ${{ inputs.version }}
+        TAG: ${{ steps.rel.outputs.tag }}
+        VERSION: ${{ steps.r.outputs.version }}
         MINISIGN_VERSION: "0.12"
         MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
         PLUGIN_SIGNING_PUBKEY: RWTVrqFS7EuVqssBkmxckIHagYOZcLz4beDvFcAxtiDSqqVvl3fjobl4
@@ -115,27 +141,28 @@ runs:
       with:
         name: ${{ inputs.image-name }}
         tags: |
-          ${{ inputs.version }}
-          ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+          ${{ steps.r.outputs.version }}
+          ${{ steps.r.outputs.channel-tag }}
         wait-minutes: ${{ inputs.image-wait-minutes }}
         registry: ${{ inputs.registry }}
         registry-http: ${{ inputs.registry-http }}
         username: ${{ inputs.registry-user }}
         password: ${{ inputs.registry-token }}
 
-    - name: Create Gitea Release (pipeline-tagged)
+    - name: Publish Gitea release
       shell: bash
       env:
         GITEA_TOKEN: ${{ inputs.release-token || github.token }}
         NOTES: ${{ inputs.notes }}
-        ORCA_SOURCE: ${{ inputs.orca-source }}
+        ORCA_SOURCE: ${{ steps.r.outputs.orca-source }}
         REPO: ${{ github.repository }}
-        TAG: ${{ inputs.tag }}
+        TAG: ${{ steps.rel.outputs.tag }}
         API_URL: ${{ github.api_url }}
         SERVER_URL: ${{ github.server_url }}
-        CHANNEL: ${{ inputs.channel }}
+        CHANNEL: ${{ steps.r.outputs.channel }}
         SHA: ${{ github.sha }}
-        PRERELEASE: ${{ inputs.prerelease }}
+        PRERELEASE: ${{ steps.r.outputs.prerelease }}
+        CREATE: ${{ inputs.create }}
       run: "$GITHUB_ACTION_PATH/gitea-release.sh"
 
     - name: Log in to ghcr.io (public image mirror)
@@ -155,7 +182,7 @@ runs:
       env:
         REGISTRY: ${{ inputs.registry }}
         NAME: ${{ inputs.image-name }}
-        VERSION: ${{ inputs.version }}
-        CHANNEL_TAG: ${{ inputs.channel == 'stable' && 'latest' || inputs.channel }}
+        VERSION: ${{ steps.r.outputs.version }}
+        CHANNEL_TAG: ${{ steps.r.outputs.channel-tag }}
         LOGIN_OUTCOME: ${{ steps.ghcr-login.outcome }}
       run: "$GITHUB_ACTION_PATH/mirror-image.sh"

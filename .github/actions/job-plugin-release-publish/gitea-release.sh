@@ -18,23 +18,33 @@ notes="${NOTES:-}"
 [ -z "$notes" ] && notes="Automated ${CHANNEL} release of \`${repo}\`, built against plugin-toolkit from ${orca_ref}. Plugin binary + sha256 + minisign signature per host target."
 ls -la dist
 
-payload=$(jq -n \
-  --arg tag "$tag" \
-  --arg sha "$SHA" \
-  --arg name "$tag" \
-  --arg body "$notes" \
-  --argjson pre "$PRERELEASE" \
-  '{tag_name:$tag, target_commitish:$sha, name:$name, body:$body, prerelease:$pre, draft:false}')
-resp=$(curl -fsSL -X POST -H "$hdr_auth" -H "$accept" -H "Content-Type: application/json" \
-  "$api/repos/$repo/releases" -d "$payload" 2>/dev/null || true)
-rid=$(printf '%s' "$resp" | jq -r '.id // empty')
-if [ -z "$rid" ]; then
-  echo "→ create did not return an id; looking up existing release for $tag"
-  rid=$(curl -fsSL -H "$hdr_auth" -H "$accept" \
-    "$api/repos/$repo/releases/tags/$tag" | jq -r '.id // empty')
-fi
-if [ -z "$rid" ]; then
-  echo "::error::could not create or find release $tag"; echo "$resp"; exit 1
+existing=$(curl -fsS -H "$hdr_auth" -H "$accept" "$api/repos/$repo/releases/tags/$tag" 2>/dev/null || true)
+rid=$(printf '%s' "$existing" | jq -r '.id // empty' 2>/dev/null || true)
+if [ -n "$rid" ]; then
+  echo "→ publishing on existing release $tag (id $rid)"
+  if [ -n "${NOTES:-}" ] || [ -z "$(printf '%s' "$existing" | jq -r '.body // empty')" ]; then
+    curl -fsS -X PATCH -H "$hdr_auth" -H "$accept" -H "Content-Type: application/json" \
+      "$api/repos/$repo/releases/$rid" -d "$(jq -n --arg body "$notes" '{body:$body}')" >/dev/null
+  fi
+  for f in dist/*; do
+    name=$(basename "$f")
+    aid=$(printf '%s' "$existing" | jq -r --arg n "$name" '.assets[]? | select(.name == $n) | .id')
+    [ -z "$aid" ] || curl -fsS -X DELETE -H "$hdr_auth" "$api/repos/$repo/releases/$rid/assets/$aid" >/dev/null
+  done
+elif [ "${CREATE:-false}" = true ]; then
+  payload=$(jq -n \
+    --arg tag "$tag" \
+    --arg sha "$SHA" \
+    --arg name "$tag" \
+    --arg body "$notes" \
+    --argjson pre "$PRERELEASE" \
+    '{tag_name:$tag, target_commitish:$sha, name:$name, body:$body, prerelease:$pre, draft:false}')
+  resp=$(curl -fsSL -X POST -H "$hdr_auth" -H "$accept" -H "Content-Type: application/json" \
+    "$api/repos/$repo/releases" -d "$payload")
+  rid=$(printf '%s' "$resp" | jq -r '.id // empty')
+  [ -n "$rid" ] || { echo "::error::could not create release $tag"; echo "$resp"; exit 1; }
+else
+  echo "::error::no release for $tag"; exit 1
 fi
 echo "release id: $rid"
 

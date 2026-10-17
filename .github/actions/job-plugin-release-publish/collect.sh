@@ -35,7 +35,6 @@ for f in "${assets[@]}"; do
   esac
 done
 IFS=, read -ra requested <<< "${TARGETS//[][\"[:space:]]/}"
-[ ${#requested[@]} -gt 0 ] || { echo "::error::no targets requested"; bad=1; }
 for t in "${requested[@]}"; do
   bins=(dist/*-"${TAG}-${t}")
   [ ${#bins[@]} -gt 0 ] || { echo "::error::no binary for requested target $t"; bad=1; }

@@ -1,7 +1,7 @@
 name: Plugin release job — build one target
 description: >
   One plugin `build-<target>` job, Linux or darwin: checks out full history,
-  fetches the prebuilt `ui-dist` when the ui-build job produced one, then runs
+  fetches the prebuilt `ui-dist` when the repo has ui/package.json, then runs
   plugin-build (artifact `plugin-<target>`: <bin>-<tag>-<target> + .sha256).
   Linux targets run in the ci-rust container; darwin targets on the host.
 
@@ -9,16 +9,18 @@ inputs:
   target:
     description: Rust target triple.
     required: true
-  version:
-    description: Release version (needs.version.outputs.version).
-    required: true
   tag:
-    description: Release tag (needs.version.outputs.tag).
-    required: true
-  has-ui:
-    description: 'needs.ui-build.outputs.has-ui; "true" downloads ui-dist into ui/dist.'
+    description: Release tag. Empty = env.TAG.
     required: false
-    default: "false"
+    default: ""
+  version:
+    description: Release version. Empty = derived from the tag.
+    required: false
+    default: ""
+  has-ui:
+    description: '"true" downloads ui-dist into ui/dist. Empty = when ui/package.json exists.'
+    required: false
+    default: ""
   bins:
     description: JSON array of bin names. Empty ([]) = derive from cargo metadata.
     required: false
@@ -28,21 +30,21 @@ inputs:
     required: false
     default: "20"
   orca-fetch-token:
-    description: 'Pass `secrets.ORCA_FETCH_TOKEN`.'
-    required: true
+    description: 'Empty = env.ORCA_FETCH_TOKEN.'
+    required: false
+    default: ""
   sccache-endpoint:
-    description: 'Pass `vars.SCCACHE_ENDPOINT`.'
+    description: 'Empty = env.SCCACHE_ENDPOINT.'
     required: false
     default: ""
   sccache-access-key:
-    description: 'Pass `secrets.SCCACHE_S3_ACCESS_KEY`.'
+    description: 'Empty = env.SCCACHE_S3_ACCESS_KEY.'
     required: false
     default: ""
   sccache-secret-key:
-    description: 'Pass `secrets.SCCACHE_S3_SECRET_KEY`.'
+    description: 'Empty = env.SCCACHE_S3_SECRET_KEY.'
     required: false
     default: ""
-
   profile-strip:
     description: CARGO_PROFILE_RELEASE_STRIP. Empty = Cargo.toml profile.
     required: false
@@ -72,8 +74,13 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+    - name: Release tag
+      id: rel
+      uses: argyle-labs/.github/.github/actions/release-tag@main
+      with:
+        tag: ${{ inputs.tag || env.TAG }}
     - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-      if: inputs.has-ui == 'true'
+      if: inputs.has-ui == 'true' || (inputs.has-ui == '' && hashFiles('ui/package.json') != '')
       uses: actions/download-artifact@v4
       with:
         name: ui-dist
@@ -82,14 +89,14 @@ runs:
       uses: argyle-labs/.github/.github/actions/plugin-build@main
       with:
         target: ${{ inputs.target }}
-        version: ${{ inputs.version }}
-        tag: ${{ inputs.tag }}
+        version: ${{ inputs.version || steps.rel.outputs.version }}
+        tag: ${{ steps.rel.outputs.tag }}
         bins: ${{ inputs.bins }}
         size-budget-mib: ${{ inputs.size-budget-mib }}
-        orca-fetch-token: ${{ inputs.orca-fetch-token }}
-        sccache-access-key: ${{ inputs.sccache-access-key }}
-        sccache-secret-key: ${{ inputs.sccache-secret-key }}
-        sccache-endpoint: ${{ inputs.sccache-endpoint }}
+        orca-fetch-token: ${{ inputs.orca-fetch-token || env.ORCA_FETCH_TOKEN }}
+        sccache-access-key: ${{ inputs.sccache-access-key || env.SCCACHE_S3_ACCESS_KEY }}
+        sccache-secret-key: ${{ inputs.sccache-secret-key || env.SCCACHE_S3_SECRET_KEY }}
+        sccache-endpoint: ${{ inputs.sccache-endpoint || env.SCCACHE_ENDPOINT }}
         profile-strip: ${{ inputs.profile-strip }}
         profile-lto: ${{ inputs.profile-lto }}
         profile-codegen-units: ${{ inputs.profile-codegen-units }}
