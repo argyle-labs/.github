@@ -4,7 +4,8 @@ description: >
   `plugin-<target>` artifact into dist/ (<bin>-<tag>-<target> + .sha256 only),
   minisign-signs each binary, promotes the :tree-<sha> image when image-name is
   set, uploads all assets to the tag's existing Gitea release (or creates it
-  when `create` is "true"), and mirrors the image release tags to ghcr.io
+  when `create` is "true"), writes the release Size section and
+  size-history.json asset, and mirrors the image release tags to ghcr.io
   (warn-only). Run with `permissions: contents: write`.
 
 inputs:
@@ -44,6 +45,10 @@ inputs:
     description: 'Lines of <name>:<needs.<job>.result>; anything but success|skipped fails.'
     required: false
     default: ""
+  size-budget-mib:
+    description: Absolute binary size budget (MiB) shown in the release Size section.
+    required: false
+    default: "20"
   signing-key:
     description: 'Pass `secrets.PLUGIN_SIGNING_KEY`. Empty = no release.'
     required: true
@@ -164,6 +169,19 @@ runs:
         PRERELEASE: ${{ steps.r.outputs.prerelease }}
         CREATE: ${{ inputs.create }}
       run: "$GITHUB_ACTION_PATH/gitea-release.sh"
+
+    - name: Release size notes + history
+      continue-on-error: true
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.release-token || github.token }}
+        API_URL: ${{ github.api_url }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ steps.rel.outputs.tag }}
+        DIST_DIR: dist
+        SIZES_DIR: sizes
+        BUDGET_MIB: ${{ inputs.size-budget-mib }}
+      run: bash "$GITHUB_ACTION_PATH/../plugin-size-check/release-size.sh"
 
     - name: Log in to ghcr.io (public image mirror)
       id: ghcr-login

@@ -1,0 +1,4 @@
+[
+  {"tag": "v0.3.0", "target": "x86_64-unknown-linux-gnu", "bin": "orca-plugin-demo", "size": 10485760, "crates": 200, "date": "2026-10-01T00:00:00Z"},
+  {"tag": "v0.4.0-rc.1", "target": "x86_64-unknown-linux-gnu", "bin": "orca-plugin-demo", "size": 10800000, "crates": 205, "date": "2026-10-10T00:00:00Z"}
+]

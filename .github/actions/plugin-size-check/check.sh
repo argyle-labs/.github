@@ -139,4 +139,8 @@ if [ -n "${PR_NUMBER:-}" ]; then
   fi
 fi
 
+if [ -n "${DIST_DIR:-}" ] && [ -n "${TARGET:-}" ]; then
+  jq -n --arg t "$TARGET" --argjson c "$crates" '{target:$t, crates:$c}' > "$DIST_DIR/size-${TARGET}.json"
+fi
+
 [ "$worst" != fail ]

@@ -2,7 +2,7 @@ name: Release job — draft stable
 description: >
   After an RC is published: replaces any unpublished draft stable with a draft
   `<repo> v<base version>` at the RC's commit. Publishing it promotes to
-  stable. No-op unless `prerelease` is "true".
+  stable. Its body carries the RC's Size section against the previous stable. No-op unless `prerelease` is "true".
 
 inputs:
   tag:
@@ -35,3 +35,14 @@ runs:
         tag: ${{ steps.base.outputs.tag }}
         target-commitish: ${{ github.sha }}
         prerelease: "false"
+    - name: Size section on draft stable
+      if: ${{ steps.rel.outputs.prerelease == 'true' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.release-token }}
+        API_URL: ${{ github.api_url }}
+        REPO: ${{ github.repository }}
+        TAG: ${{ steps.rel.outputs.tag }}
+        BODY_TAG: ${{ steps.base.outputs.tag }}
+      run: bash "$GITHUB_ACTION_PATH/../plugin-size-check/release-size.sh"

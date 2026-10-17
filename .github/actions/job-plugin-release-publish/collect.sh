@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s nullglob
-mkdir -p dist
+mkdir -p dist sizes
 bad=0
 for d in artifacts/*/; do
   d=${d%/}; art=${d#artifacts/}
@@ -15,6 +15,7 @@ for d in artifacts/*/; do
     rel=${f#"$d"/}
     case "$rel" in
       */*) echo "::error::$art: unexpected nested file $rel"; bad=1 ;;
+      "size-${triple}.json") mv "$f" sizes/ ;;
       ?*"-${TAG}-${triple}"|?*"-${TAG}-${triple}.sha256")
         if [ -e "dist/$rel" ]; then
           echo "::error::duplicate asset $rel"; bad=1
