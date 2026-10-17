@@ -5,7 +5,10 @@ set -euo pipefail
 
 budget_file=${BUDGET_FILE:-size-budget.toml}
 api=${API_URL:-https://gitea.scottkey.me/api/v1}
-auth=(-H "Authorization: token ${GITEA_TOKEN:-}" -H "Accept: application/json")
+hdr=$(mktemp -d "${RUNNER_TEMP:-/tmp}/size-check.XXXXXX")
+trap 'rm -rf "$hdr"' EXIT
+(umask 077 && printf 'Authorization: token %s\n' "${GITEA_TOKEN:-}" > "$hdr/auth")
+auth=(-H "@$hdr/auth" -H "Accept: application/json")
 marker='<!-- plugin-size-check -->'
 
 size_pct=${SIZE_PCT:?}; warn_pct=${WARN_PCT:?}; crate_max=${CRATE_MAX:?}
@@ -14,6 +17,7 @@ overridden=false
 for key in size-pct warn-pct crates max-mib max-crates; do
   v=$(toml_get "$budget_file" size-check "$key")
   [ -n "$v" ] || continue
+  is_uint "$v" || { echo "::error title=plugin-size-check::$budget_file [size-check] $key is not a whole number"; exit 1; }
   overridden=true
   case $key in
     size-pct) size_pct=$v ;;
@@ -29,7 +33,8 @@ if [ "$overridden" = true ] && [ -z "$reason" ]; then
   exit 1
 fi
 max_bytes=""
-[ -n "$max_mib" ] && max_bytes=$(( max_mib * 1048576 ))
+if is_uint "$max_mib"; then max_bytes=$(( max_mib * 1048576 )); else max_mib=""; fi
+is_uint "$max_crates" || max_crates=""
 
 count_crates() {
   (cd "$1" && cargo tree -e normal --prefix none --no-dedupe --workspace ${TARGET:+--target "$TARGET"}) \
@@ -37,7 +42,7 @@ count_crates() {
 }
 
 wt="${RUNNER_TEMP:-/tmp}/size-base-$$"
-trap 'git worktree remove --force "$wt" >/dev/null 2>&1 || true' EXIT
+trap 'git worktree remove --force "$wt" >/dev/null 2>&1 || true; rm -rf "$hdr"' EXIT
 crates_at() {
   local ref=$1
   [ -n "$ref" ] || return 0
@@ -67,6 +72,7 @@ for b in ${bins[@]+"${bins[@]}"}; do
     base_tag=${base_tag:-$t}
   else
     s=$(toml_get "$budget_file" baseline "$TARGET")
+    is_uint "$s" || s=""
   fi
   base_sizes+=("$s")
 done
@@ -76,6 +82,7 @@ base_crates=$(crates_at "$base_ref")
 base_src=${base_ref:-none}
 if [ -z "$base_crates" ]; then
   base_crates=$(toml_get "$budget_file" baseline crates)
+  is_uint "$base_crates" || base_crates=""
   base_src=none
   [ -n "$base_crates" ] && base_src=$budget_file
 fi
@@ -137,6 +144,10 @@ if [ -n "${PR_NUMBER:-}" ]; then
       "$api/repos/$REPO/issues/$PR_NUMBER/comments" -d "$body" >/dev/null \
       || echo "::warning title=plugin-size-check::could not post PR comment"
   fi
+fi
+
+if [ -n "${DIST_DIR:-}" ] && [ -n "${TARGET:-}" ]; then
+  jq -n --arg t "$TARGET" --argjson c "$crates" '{target:$t, crates:$c}' > "$DIST_DIR/size-${TARGET}.json"
 fi
 
 [ "$worst" != fail ]

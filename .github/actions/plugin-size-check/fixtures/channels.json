@@ -1,0 +1,11 @@
+[
+  {"id": 6, "tag_name": "v0.4.0", "draft": true, "prerelease": false, "body": "", "assets": []},
+  {"id": 5, "tag_name": "v0.4.0-rc.2", "draft": false, "prerelease": true, "body": "Automated rc release.", "assets": []},
+  {"id": 4, "tag_name": "v0.4.0-rc.1", "draft": false, "prerelease": true, "body": "", "assets": [
+    {"id": 41, "name": "size-history.json", "browser_download_url": "https://git.example/history-rc1.json"}
+  ]},
+  {"id": 3, "tag_name": "v0.3.0", "draft": false, "prerelease": false, "body": "", "assets": [
+    {"id": 31, "name": "orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu", "size": 10485760},
+    {"id": 32, "name": "orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu.sha256", "size": 99}
+  ]}
+]
