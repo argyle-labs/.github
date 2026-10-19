@@ -75,11 +75,28 @@ runs:
           echo "::error title=partition::'$PARTITION' is not <k>/<n> with 1 <= k <= n"
           exit 1
         fi
+    # The build's hashes, so a .github change landing mid-run cannot make this
+    # job select crates the build skipped. Absent from older builds: recompute.
+    - name: Download crate hashes
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: crate-hashes
+    - name: Build crate hashes
+      id: buildhash
+      shell: bash
+      run: |
+        if [ -f crate-hashes.json ]; then
+          echo "hashes=$(jq -c . crate-hashes.json)" >> "$GITHUB_OUTPUT"
+        else
+          echo "::notice title=crate-hashes missing::recomputing crate hashes"
+        fi
     - name: Select crates
       id: sel
       uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
         job: ${{ steps.key.outputs.job }}
+        hashes: ${{ steps.buildhash.outputs.hashes }}
         image: ci-rust:${{ inputs.image-tag }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: |
@@ -99,15 +116,24 @@ runs:
     # A build from an older action version uploads no crate-selection; derive
     # the archived crates from the archive itself instead.
     - name: Download test archive for crate list
+      id: listart
       if: ${{ steps.sel.outputs.selection != '' && steps.selart.outcome != 'success' }}
+      continue-on-error: true
       uses: actions/download-artifact@v4
       with:
         name: nextest-archive
     - name: Crate list from archive
       if: ${{ steps.sel.outputs.selection != '' && steps.selart.outcome != 'success' }}
       shell: bash
+      env:
+        LISTED: ${{ steps.listart.outcome }}
+        MISSING: ${{ steps.sel.outputs.missing }}
       run: |
         set -euo pipefail
+        if [ "$LISTED" != success ]; then
+          echo "::error title=crate hash mismatch::selected $(jq length <<< "$MISSING") crate(s) but the build archived none (it found recorded passes); build and test computed different crate hashes. Re-run the workflow."
+          exit 1
+        fi
         echo "::notice title=crate-selection missing::deriving archived crates from nextest-archive"
         cargo nextest list --archive-file nextest-archive.tar.zst --workspace-remap . \
             --list-type binaries-only --message-format json \

@@ -4,7 +4,7 @@ description: >
   `test` pass for its crate hash (crate-select: changed crates plus their
   reverse dependents) compiled once, coverage-instrumented, into the
   `nextest-archive` artifact that job-rust-test runs, plus the `crate-selection`
-  artifact naming those crates; then those crates' doctests against the same
+  artifact naming those crates and the `crate-hashes` artifact the test job selects against; then those crates' doctests against the same
   compiled tree. Skipped when no crate is selected. Run in the `ci-rust`
   container; checks out the repo itself.
 
@@ -108,6 +108,17 @@ runs:
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
+    - name: Write crate hashes
+      shell: bash
+      env:
+        HASHES: ${{ steps.sel.outputs.hashes }}
+      run: printf '%s\n' "$HASHES" > crate-hashes.json
+    - name: Upload crate hashes artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: crate-hashes
+        path: crate-hashes.json
+        retention-days: 3
     - name: Reuse recorded passes
       if: ${{ steps.sel.outputs.selection == '' }}
       shell: bash
