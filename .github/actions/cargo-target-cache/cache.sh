@@ -43,7 +43,7 @@ for d in "$root"/*/*/; do
 done
 [ ! -d "$dir" ] || total=$((total + $(du -sk "$dir" | cut -f1)))
 while IFS=' ' read -r _ kb d; do
-  [ -n "$d" ] && [ "$total" -gt "$max_kb" ] || break
+  if [ -z "$d" ] || [ "$total" -le "$max_kb" ]; then break; fi
   rm -rf "$d"
   total=$((total - kb))
   echo "pruned (over $((max_kb / 1048576))G): ${d#"$root"/}" >&2
