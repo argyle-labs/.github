@@ -3,7 +3,8 @@ description: >
   The `package-macos` job (orca) on a macOS runner: builds the .pkg from the
   `build-<target>` darwin binary (pkgbuild is macOS-only) and uploads
   `macos-pkg`. Callers set `continue-on-error: true` so a packaging failure
-  does not block the release; the binary still ships.
+  does not block the release; the binary still ships. RC tags skip every
+  step: darwin ships on stable tags only.
 
 inputs:
   target:
@@ -27,16 +28,23 @@ runs:
       uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag }}
+    - name: Skip darwin on release candidates
+      if: ${{ steps.rel.outputs.prerelease == 'true' }}
+      shell: bash
+      run: echo "::notice::darwin builds ship on stable tags only; skipping for ${{ steps.rel.outputs.tag }}"
     - name: Checkout
+      if: ${{ steps.rel.outputs.prerelease != 'true' }}
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
     - name: Fetch the darwin binary
+      if: ${{ steps.rel.outputs.prerelease != 'true' }}
       uses: actions/download-artifact@v4
       with:
         name: build-${{ inputs.target }}
         path: dist-release
     - name: Build .pkg (build_native_packages)
+      if: ${{ steps.rel.outputs.prerelease != 'true' }}
       shell: bash
       env:
         REL_VERSION: ${{ steps.rel.outputs.version }}
@@ -50,6 +58,7 @@ runs:
         build_native_packages
         echo "── dist-release (.pkg) ──"; ls -la dist-release/*.pkg || true
     - name: Upload macos-pkg
+      if: ${{ steps.rel.outputs.prerelease != 'true' }}
       uses: actions/upload-artifact@v4
       with:
         name: macos-pkg
