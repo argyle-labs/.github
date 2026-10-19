@@ -57,7 +57,7 @@ on:
         type: string
         default: ""
       size_budget_mib:
-        description: "Thinness budget (MiB). Over this, the build emits a warning (soft gate)."
+        description: "Thinness budget (MiB). Over this, the build fails."
         required: false
         type: number
         default: 20

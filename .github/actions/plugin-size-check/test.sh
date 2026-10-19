@@ -84,6 +84,8 @@ run fail CRATES=200 BASE_REF=main
 run pass CRATES=200
 head -c 22020096 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
 run fail CRATES=200
+run pass CRATES=200 SIZE_PCT=1000 WARN_PCT=1000 BUDGET_MIB=30
+run fail CRATES=200 SIZE_PCT=1000 WARN_PCT=1000 BUDGET_MIB=
 head -c 12582912 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
 cp "$fx/size-budget.toml" "$work/size-budget.toml"
 run pass CRATES=200
