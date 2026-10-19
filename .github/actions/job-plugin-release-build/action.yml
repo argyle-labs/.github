@@ -3,7 +3,8 @@ description: >
   One plugin `build-<target>` job, Linux or darwin: checks out full history,
   fetches the prebuilt `ui-dist` when the repo has ui/package.json, then runs
   plugin-build (artifact `plugin-<target>`: <bin>-<tag>-<target> + .sha256).
-  Linux targets run in the ci-rust container; darwin targets on the host.
+  Linux targets run in the ci-rust container; darwin targets on the host,
+  and only for stable tags (an RC darwin job succeeds without building).
   -rc. tags build with thin LTO, 16 codegen units and opt-level s, and skip
   the absolute size budget; the profile-* inputs apply to stable tags.
 
@@ -85,13 +86,18 @@ runs:
       uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag || env.TAG }}
+    - name: Skip darwin on release candidates
+      if: ${{ steps.rel.outputs.prerelease == 'true' && endsWith(inputs.target, '-apple-darwin') }}
+      shell: bash
+      run: echo "::notice::darwin builds ship on stable tags only; skipping for ${{ steps.rel.outputs.tag }}"
     - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-      if: inputs.has-ui == 'true' || (inputs.has-ui == '' && hashFiles('ui/package.json') != '')
+      if: ${{ (steps.rel.outputs.prerelease != 'true' || !endsWith(inputs.target, '-apple-darwin')) && (inputs.has-ui == 'true' || (inputs.has-ui == '' && hashFiles('ui/package.json') != '')) }}
       uses: actions/download-artifact@v4
       with:
         name: ui-dist
         path: ui/dist
     - id: build
+      if: ${{ steps.rel.outputs.prerelease != 'true' || !endsWith(inputs.target, '-apple-darwin') }}
       uses: argyle-labs/.github/.github/actions/plugin-build@main
       with:
         target: ${{ inputs.target }}
