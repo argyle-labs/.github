@@ -58,7 +58,7 @@ runs:
         rel_api="${api}/repos/${REPO}/releases"
 
         # Find an existing release for this tag (idempotent re-run).
-        existing=$(curl -fsS "${auth[@]}" "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
+        existing=$(curl -fsS ${auth[@]+"${auth[@]}"} "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
         rel_id=$(echo "$existing" | jq -r '.id // empty' 2>/dev/null || true)
 
         body_json=$(jq -n \
@@ -69,15 +69,15 @@ runs:
 
         if [ -n "$rel_id" ]; then
           echo "→ updating existing Gitea release id=$rel_id ($TAG)"
-          curl -fsS "${auth[@]}" -X PATCH -H "Content-Type: application/json" \
+          curl -fsS ${auth[@]+"${auth[@]}"} -X PATCH -H "Content-Type: application/json" \
             -d "$body_json" "${rel_api}/${rel_id}" >/dev/null
           # Drop existing assets so the upload set is authoritative.
           for aid in $(echo "$existing" | jq -r '.assets[]?.id // empty'); do
-            curl -fsS "${auth[@]}" -X DELETE "${rel_api}/${rel_id}/assets/${aid}" >/dev/null || true
+            curl -fsS ${auth[@]+"${auth[@]}"} -X DELETE "${rel_api}/${rel_id}/assets/${aid}" >/dev/null || true
           done
         else
           echo "→ creating Gitea release ($TAG)"
-          created=$(curl -fsS "${auth[@]}" -X POST -H "Content-Type: application/json" \
+          created=$(curl -fsS ${auth[@]+"${auth[@]}"} -X POST -H "Content-Type: application/json" \
             -d "$body_json" "$rel_api")
           rel_id=$(echo "$created" | jq -r '.id')
         fi
@@ -89,7 +89,7 @@ runs:
           [ -f "$f" ] || continue
           name=$(basename "$f")
           echo "  ↑ $name"
-          curl -fsS "${auth[@]}" -X POST \
+          curl -fsS ${auth[@]+"${auth[@]}"} -X POST \
             -F "attachment=@${f};filename=${name}" \
             "${rel_api}/${rel_id}/assets?name=${name}" >/dev/null
           count=$((count+1))

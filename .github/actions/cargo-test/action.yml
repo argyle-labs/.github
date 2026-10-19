@@ -74,7 +74,7 @@ runs:
         export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra nextest_args <<< "$NEXTEST_ARGS"
         [ -z "$PARTITION" ] || nextest_args+=(--partition "hash:$PARTITION")
-        cargo nextest run "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
+        cargo nextest run ${nextest_args[@]+"${nextest_args[@]}"} --archive-file nextest-archive.tar.zst --workspace-remap .
 
     - name: Doctests
       if: ${{ !cancelled() && inputs.doctests == 'true' }}
@@ -85,9 +85,9 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
-        has=$(/bin/bash "$GITHUB_ACTION_PATH/has-doctests.sh" "${args[@]}")
+        has=$(/bin/bash "$GITHUB_ACTION_PATH/has-doctests.sh" ${args[@]+"${args[@]}"})
         if [ "$has" != true ]; then
           echo "::notice::No doc-comment code blocks in the selected library targets; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
-        cargo test --locked "${args[@]}" --doc
+        cargo test --locked ${args[@]+"${args[@]}"} --doc

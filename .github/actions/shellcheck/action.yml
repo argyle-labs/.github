@@ -27,7 +27,7 @@ runs:
         export t0=$SECONDS; trap 'echo "shellcheck|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         if [ -n "$FILES" ]; then
           read -ra files <<< "$FILES"
-          shellcheck "${files[@]}"
+          shellcheck ${files[@]+"${files[@]}"}
         else
           git ls-files -z '*.sh' | xargs -0 -r shellcheck
         fi

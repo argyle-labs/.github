@@ -34,4 +34,4 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "clippy|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
-        cargo clippy --locked "${args[@]}" -- -D warnings
+        cargo clippy --locked ${args[@]+"${args[@]}"} -- -D warnings

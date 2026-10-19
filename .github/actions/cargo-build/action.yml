@@ -51,9 +51,9 @@ runs:
         export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
         if [ "$COVERAGE" = true ]; then
-          cargo llvm-cov nextest-archive --locked "${args[@]}" --archive-file nextest-archive.tar.zst
+          cargo llvm-cov nextest-archive --locked ${args[@]+"${args[@]}"} --archive-file nextest-archive.tar.zst
         else
-          cargo nextest archive --locked "${args[@]}" --archive-file nextest-archive.tar.zst
+          cargo nextest archive --locked ${args[@]+"${args[@]}"} --archive-file nextest-archive.tar.zst
         fi
 
     - name: Upload test archive

@@ -85,7 +85,7 @@ runs:
           exit 1
         fi
 
-        existing=$(curl -fsS "${auth[@]}" "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
+        existing=$(curl -fsS ${auth[@]+"${auth[@]}"} "${rel_api}/tags/${TAG}" 2>/dev/null || echo "")
         rel_id=$(echo "$existing" | jq -r '.id // empty' 2>/dev/null || true)
 
         body_json=$(jq -n \
@@ -96,13 +96,13 @@ runs:
 
         if [ -n "$rel_id" ]; then
           echo "→ updating existing GitHub release id=$rel_id ($TAG)"
-          curl -fsS "${auth[@]}" -X PATCH -d "$body_json" "${rel_api}/${rel_id}" >/dev/null
+          curl -fsS ${auth[@]+"${auth[@]}"} -X PATCH -d "$body_json" "${rel_api}/${rel_id}" >/dev/null
           for aid in $(echo "$existing" | jq -r '.assets[]?.id // empty'); do
-            curl -fsS "${auth[@]}" -X DELETE "${rel_api}/assets/${aid}" >/dev/null || true
+            curl -fsS ${auth[@]+"${auth[@]}"} -X DELETE "${rel_api}/assets/${aid}" >/dev/null || true
           done
         else
           echo "→ creating GitHub release ($TAG)"
-          created=$(curl -fsS "${auth[@]}" -X POST -d "$body_json" "$rel_api")
+          created=$(curl -fsS ${auth[@]+"${auth[@]}"} -X POST -d "$body_json" "$rel_api")
           rel_id=$(echo "$created" | jq -r '.id')
         fi
         [ -n "$rel_id" ] && [ "$rel_id" != "null" ] || { echo "::error::no GitHub release id"; exit 1; }
@@ -113,7 +113,7 @@ runs:
           [ -f "$f" ] || continue
           name=$(basename "$f")
           echo "  ↑ $name"
-          curl -fsS "${auth[@]}" -H "Content-Type: application/octet-stream" \
+          curl -fsS ${auth[@]+"${auth[@]}"} -H "Content-Type: application/octet-stream" \
             --data-binary "@${f}" \
             "${up}/repos/${REPO}/releases/${rel_id}/assets?name=${name}" >/dev/null
           count=$((count+1))

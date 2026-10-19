@@ -69,7 +69,7 @@ runs:
         mkdir -p release-assets
         bad=0
         mapfile -t files < <(find incoming -type f); wait $!
-        for f in "${files[@]}"; do
+        for f in ${files[@]+"${files[@]}"}; do
           case "$f" in
             */orca-apk-staging/*) continue ;;
             */orca-*-staging/*) echo "::error::packager fallback output $f"; bad=1; continue ;;
@@ -91,7 +91,7 @@ runs:
         [ "$bad" = 0 ] || exit 1
         assets=(release-assets/*)
         [ ${#assets[@]} -gt 0 ] || { echo "::error::no release assets collected"; exit 1; }
-        for f in "${assets[@]}"; do
+        for f in ${assets[@]+"${assets[@]}"}; do
           case "$f" in
             */checksums.sha256) ;;
             *.sha256) [ -f "${f%.sha256}" ] || { echo "::error::orphan checksum $f"; bad=1; } ;;
@@ -100,7 +100,7 @@ runs:
           esac
         done
         IFS=, read -ra targets <<< "${TARGETS//[][\"[:space:]]/}"
-        for t in "${targets[@]}"; do
+        for t in ${targets[@]+"${targets[@]}"}; do
           if [ "$PROFILE" = full ]; then bins=(release-assets/orca-"$t"); else bins=(release-assets/*-"${TAG}-${t}"); fi
           [ -f "${bins[0]:-}" ] || { echo "::error::no binary for requested target $t"; bad=1; }
         done

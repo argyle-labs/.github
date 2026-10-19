@@ -43,7 +43,7 @@ runs:
         export t0=$SECONDS; trap 'echo "bash-n|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra files <<< "$LIST"
         rc=0
-        for f in "${files[@]}"; do
+        for f in ${files[@]+"${files[@]}"}; do
           bash -n "$f" || { echo "::error file=$f::bash -n failed"; rc=1; }
         done
         exit "$rc"
@@ -56,7 +56,7 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "shellcheck|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra files <<< "$LIST"
-        docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.9.0 "${files[@]}"
+        docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.9.0 ${files[@]+"${files[@]}"}
     - name: CI summary
       if: ${{ !cancelled() }}
       uses: argyle-labs/.github/.github/actions/ci-summary@main
