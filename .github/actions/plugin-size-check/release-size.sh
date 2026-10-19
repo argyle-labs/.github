@@ -32,7 +32,7 @@ is_uint "$max_mib" && max_bytes=$(( max_mib * 1048576 ))
 
 releases="[]"
 for page in $(seq 1 20); do
-  resp=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/releases?draft=true&limit=50&page=$page")
+  resp=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/releases?limit=50&page=$page")
   jq -e 'type == "array"' <<< "$resp" >/dev/null
   releases=$(jq -c -n --argjson a "$releases" --argjson b "$resp" '$a + $b')
   [ "$(jq length <<< "$resp")" -eq 50 ] || break
