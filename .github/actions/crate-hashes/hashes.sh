@@ -100,18 +100,8 @@ owner() {
 }
 embed_macro_re='\b(include|include_str|include_bytes|include_dir|migrate)!\('
 embed_re='\b(include|include_str|include_bytes|include_dir|migrate)!\( *"[^"]+" *\)|#\[folder *= *"[^"]+"\]|\b(include|include_str|include_bytes|include_dir)!\( *(concat!\( *)?env!\( *"[^"]+"'
-normpath() {
-  local part parts segs=()
-  IFS=/ read -ra parts <<< "$1"
-  for part in "${parts[@]}"; do
-    case "$part" in
-      ''|.) ;;
-      ..) if [ "${#segs[@]}" -gt 0 ] && [ "${segs[${#segs[@]}-1]}" != .. ]; then unset 'segs[${#segs[@]}-1]'; else segs+=(..); fi ;;
-      *) segs+=("$part") ;;
-    esac
-  done
-  if [ "${#segs[@]}" -eq 0 ]; then echo .; else (IFS=/; echo "${segs[*]}"); fi
-}
+# shellcheck source-path=SCRIPTDIR source=../path-utils/normpath.sh
+source "$(dirname "$0")/../path-utils/normpath.sh"
 idx() {
   local pre=${1%%"$2"*}
   if [ "$pre" = "$1" ]; then echo 0; else echo $((${#pre} + 1)); fi

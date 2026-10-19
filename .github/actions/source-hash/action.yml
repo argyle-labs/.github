@@ -80,8 +80,9 @@ runs:
           done
         done <<< "$EXTRA_PATHS"
         shared=$GITHUB_ACTION_PATH/../..
+        source "$GITHUB_ACTION_PATH/../path-utils/normpath.sh"
         if [ -z "$ACTIONS" ]; then
-          actions=$(cd "$shared" && find actions workflows -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+          actions=$(cd "$shared" && find actions workflows -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
         else
           read -ra queue <<< "$ACTIONS"
           declare -A seen=()
@@ -98,7 +99,7 @@ runs:
               queue+=("$dep")
             done < <(grep -rhoE 'argyle-labs/\.github/\.github/actions/[A-Za-z0-9_-]+@|GITHUB_ACTION_PATH}?/\.\./[A-Za-z0-9_-]+/' "$shared/actions/$a" | sed -E 's#.*actions/([^@]+)@#\1#; s#.*/\.\./([^/]+)/#\1#')
           done
-          actions=$(cd "$shared/actions" && printf '%s\n' "${!seen[@]}" | LC_ALL=C sort | xargs -I{} find {} -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+          actions=$(cd "$shared/actions" && printf '%s\0' "${!seen[@]}" | LC_ALL=C sort -z | xargs -0 -I{} find {} -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
         fi
         specs=(
           ':(glob)**/*.rs'
@@ -153,9 +154,9 @@ runs:
               exit 1
             fi
             if [[ "$arg" == '#'* ]]; then
-              dir=$(realpath -m --relative-to=. "$base/$path")
+              dir=$(normpath "$base/$path")
             else
-              dir=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
+              dir=$(normpath "$base/$(dirname "$path")")
             fi
             case "$dir" in
               ..|../*)
@@ -174,7 +175,7 @@ runs:
             echo "image=$IMAGE"
             echo "actions=$actions"
             rustc -vV 2>/dev/null || true
-            printf '%s\n' "${specs[@]}" | sort -u | xargs -d '\n' git ls-files -s --
+            printf '%s\0' "${specs[@]}" | sort -zu | xargs -0 git ls-files -s --
           } | sha256sum | cut -d' ' -f1
         )
         echo "hash=$hash" >> "$GITHUB_OUTPUT"

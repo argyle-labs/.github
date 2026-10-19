@@ -1,7 +1,7 @@
 name: CI pass cache
 description: >
   Records and looks up "this job passed for this source hash" markers at
-  s3://<bucket>/ci-pass/<repo>/<job>/<hash> on the sccache MinIO (SigV4 via
+  s3://<bucket>/ci-pass/<repo>/<job>/<hash> on the sccache S3 cache (SigV4 via
   curl). `check` reports a hit only when every required marker exists; any
   backend error is a miss with a warning, never a false hit. `record` writes
   the marker (body = commit sha); call it only after the job succeeded.
@@ -36,7 +36,7 @@ inputs:
     required: false
     default: "false"
   endpoint:
-    description: 'MinIO host:port (vars.SCCACHE_ENDPOINT); http:// is assumed when no scheme is given.'
+    description: 'S3 cache host:port (vars.SCCACHE_ENDPOINT); http:// is assumed when no scheme is given.'
     required: false
     default: ""
   region:
