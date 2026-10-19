@@ -3,13 +3,17 @@ description: >
   One `build` matrix leg of a multi-arch image: builds a single platform with
   Buildx on a runner of that arch (no QEMU), pushes it by digest only, and
   uploads the digest as `digests-<image>-<platform>`. Pair with job-image-merge,
-  which assembles the tagged manifest list. Needs a host docker daemon and a
-  checkout.
+  which assembles the tagged manifest list. Needs a host docker daemon. Checks
+  out `ref` when given (a release tag), else expects a checkout.
 
 inputs:
   image:
     description: 'Image name without registry, e.g. `argyle-labs/<repo>`; lowercased.'
     required: true
+  ref:
+    description: 'Git ref to check out and build, e.g. the release tag; empty uses the existing checkout.'
+    required: false
+    default: ""
   platform:
     description: 'Single buildx platform, e.g. linux/arm64. Must match the runner arch.'
     required: true
@@ -49,6 +53,12 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Checkout ${{ inputs.ref }}
+      if: ${{ inputs.ref != '' }}
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+
     - name: Resolve names
       id: names
       shell: bash
