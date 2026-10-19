@@ -17,9 +17,10 @@ toml_get() {
 }
 
 release_baseline() {
-  local json=$1 bin=$2 target=$3
-  jq -r --arg bin "$bin" --arg target "$target" '
-    [ .[] | select(.draft | not) | . as $r
+  local json=$1 bin=$2 target=$3 channel=${4:-any}
+  jq -r --arg bin "$bin" --arg target "$target" --arg channel "$channel" '
+    [ .[] | select(.draft | not)
+      | select($channel != "stable" or (.prerelease | not)) | . as $r
       | .assets[]? | select(.name == "\($bin)-\($r.tag_name)-\($target)")
       | "\($r.tag_name) \(.size)" ] | first // empty' <<< "$json"
 }
