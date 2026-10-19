@@ -3,7 +3,10 @@ description: >
   One plugin `build-<target>` job, Linux or darwin: checks out full history,
   fetches the prebuilt `ui-dist` when the repo has ui/package.json, then runs
   plugin-build (artifact `plugin-<target>`: <bin>-<tag>-<target> + .sha256).
-  Linux targets run in the ci-rust container; darwin targets on the host.
+  Linux targets run in the ci-rust container; darwin targets on the host,
+  and only for stable tags (an RC darwin job succeeds without building).
+  -rc. tags build with thin LTO, 16 codegen units and opt-level s, and skip
+  the absolute size budget; the profile-* inputs apply to stable tags.
 
 inputs:
   target:
@@ -54,15 +57,15 @@ inputs:
     required: false
     default: symbols
   profile-lto:
-    description: CARGO_PROFILE_RELEASE_LTO. Empty = Cargo.toml profile.
+    description: CARGO_PROFILE_RELEASE_LTO for stable tags. Empty = Cargo.toml profile.
     required: false
     default: "true"
   profile-codegen-units:
-    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS. Empty = Cargo.toml profile.
+    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS for stable tags. Empty = Cargo.toml profile.
     required: false
     default: "1"
   profile-opt-level:
-    description: CARGO_PROFILE_RELEASE_OPT_LEVEL. Empty = Cargo.toml profile.
+    description: CARGO_PROFILE_RELEASE_OPT_LEVEL for stable tags. Empty = Cargo.toml profile.
     required: false
     default: z
 
@@ -83,26 +86,31 @@ runs:
       uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag || env.TAG }}
+    - name: Skip darwin on release candidates
+      if: ${{ steps.rel.outputs.prerelease == 'true' && endsWith(inputs.target, '-apple-darwin') }}
+      shell: bash
+      run: echo "::notice::darwin builds ship on stable tags only; skipping for ${{ steps.rel.outputs.tag }}"
     - name: Fetch prebuilt UI (real frontend for UI plugins; skipped otherwise)
-      if: inputs.has-ui == 'true' || (inputs.has-ui == '' && hashFiles('ui/package.json') != '')
+      if: ${{ (steps.rel.outputs.prerelease != 'true' || !endsWith(inputs.target, '-apple-darwin')) && (inputs.has-ui == 'true' || (inputs.has-ui == '' && hashFiles('ui/package.json') != '')) }}
       uses: actions/download-artifact@v4
       with:
         name: ui-dist
         path: ui/dist
     - id: build
+      if: ${{ steps.rel.outputs.prerelease != 'true' || !endsWith(inputs.target, '-apple-darwin') }}
       uses: argyle-labs/.github/.github/actions/plugin-build@main
       with:
         target: ${{ inputs.target }}
         version: ${{ inputs.version || steps.rel.outputs.version }}
         tag: ${{ steps.rel.outputs.tag }}
         bins: ${{ inputs.bins }}
-        size-budget-mib: ${{ inputs.size-budget-mib }}
+        size-budget-mib: ${{ steps.rel.outputs.prerelease != 'true' && inputs.size-budget-mib || '' }}
         orca-fetch-token: ${{ inputs.orca-fetch-token || env.ORCA_FETCH_TOKEN }}
         sccache-access-key: ${{ inputs.sccache-access-key || env.SCCACHE_S3_ACCESS_KEY }}
         sccache-secret-key: ${{ inputs.sccache-secret-key || env.SCCACHE_S3_SECRET_KEY }}
         sccache-endpoint: ${{ inputs.sccache-endpoint || env.SCCACHE_ENDPOINT }}
         sccache-region: ${{ inputs.sccache-region }}
         profile-strip: ${{ inputs.profile-strip }}
-        profile-lto: ${{ inputs.profile-lto }}
-        profile-codegen-units: ${{ inputs.profile-codegen-units }}
-        profile-opt-level: ${{ inputs.profile-opt-level }}
+        profile-lto: ${{ steps.rel.outputs.prerelease == 'true' && 'thin' || inputs.profile-lto }}
+        profile-codegen-units: ${{ steps.rel.outputs.prerelease == 'true' && '16' || inputs.profile-codegen-units }}
+        profile-opt-level: ${{ steps.rel.outputs.prerelease == 'true' && 's' || inputs.profile-opt-level }}

@@ -68,7 +68,7 @@ base_tag=""
 base_sizes=()
 for b in ${bins[@]+"${bins[@]}"}; do
   t=""; s=""
-  read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET")" || true
+  read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET" "${BASELINE:-stable}")" || true
   if [ -n "$s" ]; then
     base_tag=${base_tag:-$t}
   else
@@ -131,7 +131,8 @@ report=$(
   echo "|---|---|---:|---:|---:|---:|---:|---|"
   printf '%s\n' "${rows[@]}"
 )
-echo "$report" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+echo "$report"
+[ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$report" >> "$GITHUB_STEP_SUMMARY"
 
 if [ -n "${PR_NUMBER:-}" ]; then
   body=$(jq -n --arg b "$report" '{body:$b}')

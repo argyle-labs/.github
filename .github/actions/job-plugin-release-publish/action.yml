@@ -32,7 +32,7 @@ inputs:
     required: false
     default: "false"
   targets:
-    description: JSON array of target triples; each must yield a binary. Empty = no per-target check.
+    description: JSON array of target triples; each must yield a binary (darwin only on stable tags). Empty = no per-target check.
     required: false
     default: ""
   notes:

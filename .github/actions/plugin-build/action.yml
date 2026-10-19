@@ -23,6 +23,10 @@ inputs:
     description: Absolute binary size budget (MiB) for plugin-size-check; over it fails.
     required: false
     default: "20"
+  cancel-token:
+    description: Token with actions write; cancels the run when the size check fails.
+    required: false
+    default: ${{ github.token }}
   orca-fetch-token:
     description: Gitea token with read on argyle-labs/orca.
     required: true
@@ -484,17 +488,37 @@ runs:
           asset="${bin}-${TAG}-${target}"
           cp "$path" "dist/$asset"
           ( cd dist && shasum -a 256 "$asset" > "${asset}.sha256" )
-          bytes=$(wc -c < "dist/$asset" | tr -d '[:space:]'); mib=$(( bytes / 1048576 ))
-          echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
+          bytes=$(wc -c < "dist/$asset" | tr -d '[:space:]')
+          mib=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
+          echo "### 📦 ${asset}: ${mib} MiB (${bytes} bytes)" | tee -a "$GITHUB_STEP_SUMMARY"
         done <<< "$BINS"
 
     - name: Plugin size check
+      id: size
       uses: argyle-labs/.github/.github/actions/plugin-size-check@main
       with:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}
         dist-dir: dist
         budget-mib: ${{ inputs.size-budget-mib }}
+        baseline: ${{ contains(inputs.tag, '-rc.') && 'any' || 'stable' }}
+
+    # Every target shares the budget, so one over it dooms the release; stop
+    # the sibling builds instead of letting them run to the same failure.
+    - name: Cancel the run on a failed size check
+      if: ${{ failure() && steps.size.outcome == 'failure' }}
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.cancel-token }}
+        API_URL: ${{ github.api_url }}
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        if curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" "$API_URL/repos/$REPO/actions/runs/$RUN_ID/cancel" >/dev/null; then
+          echo "::error title=plugin-size-check::size check failed; cancelled run $RUN_ID"
+        else
+          echo "::warning title=plugin-size-check::could not cancel run $RUN_ID (needs actions: write)"
+        fi
 
     - name: Timings + sccache summary
       if: ${{ always() }}

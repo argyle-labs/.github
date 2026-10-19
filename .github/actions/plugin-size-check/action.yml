@@ -46,6 +46,10 @@ inputs:
     description: 'Absolute binary size budget (MiB). Empty = none.'
     required: false
     default: "20"
+  baseline:
+    description: 'stable = compare with the latest stable release only; any = include prereleases.'
+    required: false
+    default: stable
   max-crates:
     description: 'Absolute dependency count budget. Empty = none.'
     required: false
@@ -73,6 +77,7 @@ runs:
         WARN_PCT: ${{ inputs.warn-pct }}
         CRATE_MAX: ${{ inputs.crates }}
         BUDGET_MIB: ${{ inputs.budget-mib }}
+        BASELINE: ${{ inputs.baseline }}
         MAX_CRATES: ${{ inputs.max-crates }}
         BUDGET_FILE: ${{ inputs.budget-file }}
         GITEA_TOKEN: ${{ inputs.gitea-token }}
