@@ -56,7 +56,7 @@ inputs:
   profile-lto:
     description: CARGO_PROFILE_RELEASE_LTO. Empty = Cargo.toml profile.
     required: false
-    default: fat
+    default: "true"
   profile-codegen-units:
     description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS. Empty = Cargo.toml profile.
     required: false
@@ -64,7 +64,7 @@ inputs:
   profile-opt-level:
     description: CARGO_PROFILE_RELEASE_OPT_LEVEL. Empty = Cargo.toml profile.
     required: false
-    default: s
+    default: z
 
 outputs:
   orca-source:

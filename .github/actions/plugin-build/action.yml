@@ -56,19 +56,19 @@ inputs:
   profile-strip:
     description: CARGO_PROFILE_RELEASE_STRIP (rust-release-profile). Empty = Cargo.toml profile.
     required: false
-    default: ""
+    default: symbols
   profile-lto:
     description: CARGO_PROFILE_RELEASE_LTO (rust-release-profile). Empty = Cargo.toml profile.
     required: false
-    default: ""
+    default: "true"
   profile-codegen-units:
     description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS (rust-release-profile). Empty = Cargo.toml profile.
     required: false
-    default: ""
+    default: "1"
   profile-opt-level:
     description: CARGO_PROFILE_RELEASE_OPT_LEVEL (rust-release-profile). Empty = Cargo.toml profile.
     required: false
-    default: ""
+    default: z
 
 outputs:
   orca-source:
