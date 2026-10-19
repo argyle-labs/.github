@@ -39,7 +39,7 @@ runs:
         [ -z "$PARTITION" ] || nextest_args+=(--partition "hash:$PARTITION")
         # nextest canonicalizes the --extract-to dir, which a fresh checkout lacks.
         mkdir -p "${CARGO_TARGET_DIR:-target}/llvm-cov-target"
-        cargo llvm-cov nextest --no-report "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
+        cargo llvm-cov nextest --no-report ${nextest_args[@]+"${nextest_args[@]}"} --archive-file nextest-archive.tar.zst --workspace-remap .
 
     - name: Coverage report
       if: ${{ !cancelled() }}

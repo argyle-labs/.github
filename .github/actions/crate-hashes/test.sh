@@ -114,7 +114,7 @@ check d shared/paren.txt
 filler=()
 for _ in $(seq 1500); do filler+=('const Z: u8 = 0;'); done
 t0=$(date +%s)
-expect fail 'unclosed embed before 1500 lines' 'parentheses never close' 'const X: &str = include_str!(' "${filler[@]}"
+expect fail 'unclosed embed before 1500 lines' 'parentheses never close' 'const X: &str = include_str!(' ${filler[@]+"${filler[@]}"}
 if [ $(($(date +%s) - t0)) -ge 5 ]; then
   echo "FAIL: unclosed embed took $(($(date +%s) - t0))s" >&2
   fail=1

@@ -69,5 +69,5 @@ runs:
           echo "Waiting for $src"
           sleep 30
         done
-        docker buildx imagetools create "${args[@]}" "$src"
-        printf 'Promoted %s →%s\n' "$src" "$(printf ' %s' "${args[@]}" | sed 's/ --tag//g')" | tee -a "$GITHUB_STEP_SUMMARY"
+        docker buildx imagetools create ${args[@]+"${args[@]}"} "$src"
+        printf 'Promoted %s →%s\n' "$src" "$(printf ' %s' ${args[@]+"${args[@]}"} | sed 's/ --tag//g')" | tee -a "$GITHUB_STEP_SUMMARY"

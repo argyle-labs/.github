@@ -71,7 +71,7 @@ runs:
           refs+=("$REPO@sha256:$(basename "$d")")
         done
         [ "${#refs[@]}" -gt 0 ] || { echo "::error::no digests downloaded"; exit 1; }
-        docker buildx imagetools create "${args[@]}" "${refs[@]}"
+        docker buildx imagetools create ${args[@]+"${args[@]}"} ${refs[@]+"${refs[@]}"}
 
     - name: Inspect
       shell: bash

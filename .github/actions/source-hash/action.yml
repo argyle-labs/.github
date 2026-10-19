@@ -71,7 +71,7 @@ runs:
         extras=()
         while IFS= read -r line; do
           read -ra ps <<< "$line"
-          for p in "${ps[@]}"; do
+          for p in ${ps[@]+"${ps[@]}"}; do
             if [ -z "$(git ls-files -- "$p")" ]; then
               echo "::error title=source-hash::extra-paths entry '$p' matches no tracked files"
               exit 1
@@ -115,7 +115,7 @@ runs:
           ':(top)size-budget.toml'
           ':(glob)**/tests/**'
           ":(top)$workflow"
-          "${extras[@]}"
+          ${extras[@]+"${extras[@]}"}
         )
         # Literal include_str!/include_bytes! targets resolve against the
         # including file's dir, rust-embed #[folder] against the crate dir;
@@ -175,7 +175,7 @@ runs:
             echo "image=$IMAGE"
             echo "actions=$actions"
             rustc -vV 2>/dev/null || true
-            printf '%s\0' "${specs[@]}" | sort -zu | xargs -0 git ls-files -s --
+            printf '%s\0' ${specs[@]+"${specs[@]}"} | sort -zu | xargs -0 git ls-files -s --
           } | sha256sum | cut -d' ' -f1
         )
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
