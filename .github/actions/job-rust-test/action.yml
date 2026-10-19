@@ -90,10 +90,28 @@ runs:
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
     - name: Download crate selection
+      id: selart
       if: ${{ steps.sel.outputs.selection != '' }}
+      continue-on-error: true
       uses: actions/download-artifact@v4
       with:
         name: crate-selection
+    # A build from an older action version uploads no crate-selection; derive
+    # the archived crates from the archive itself instead.
+    - name: Download test archive for crate list
+      if: ${{ steps.sel.outputs.selection != '' && steps.selart.outcome != 'success' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: nextest-archive
+    - name: Crate list from archive
+      if: ${{ steps.sel.outputs.selection != '' && steps.selart.outcome != 'success' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::notice title=crate-selection missing::deriving archived crates from nextest-archive"
+        cargo nextest list --archive-file nextest-archive.tar.zst --workspace-remap . \
+            --list-type binaries-only --message-format json \
+          | jq -c '[."rust-binaries"[]."binary-id" | split("::")[0]] | unique' > crate-selection.json
     # Only crates the build archived can run; a lookup failure here must not
     # record passes for crates the archive does not hold.
     - name: Intersect with archived crates
