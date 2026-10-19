@@ -1,0 +1,114 @@
+name: CI job — rust coverage
+description: >
+  The `test` job: runs job-rust-build's `nextest-archive`
+  once under cargo-llvm-cov (lcov artifact plus step-summary table; coverage is
+  report-only) and compiles nothing. Use in place of job-rust-test, not beside
+  it. Skipped when this source hash already passed `test`. The job
+  `needs: build`.
+
+inputs:
+  image-tag:
+    description: 'ci-rust image tag the job runs in; hashed into the source hash.'
+    required: false
+    default: "1.95.0"
+  workflow-file:
+    description: 'Calling workflow file (repo-root relative); hashed into the source hash.'
+    required: false
+    default: .github/workflows/ci.yml
+  ui:
+    description: 'The crate embeds ui/dist: hash `ui/` and place the `vite-dist` artifact, matching job-rust-build.'
+    required: false
+    default: "false"
+  build-jobs:
+    description: 'CARGO_BUILD_JOBS. Empty keeps cargo''s default parallelism.'
+    required: false
+    default: ""
+  debuginfo:
+    description: 'CARGO_PROFILE_{DEV,TEST}_DEBUG. Empty keeps the profile default.'
+    required: false
+    default: "0"
+  sccache-endpoint:
+    description: 'S3 cache host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
+    required: false
+    default: ""
+  sccache-access-key:
+    description: 'S3 cache access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`); composites cannot read secrets.'
+    required: false
+    default: ""
+  sccache-secret-key:
+    description: 'S3 cache secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Source hash
+      id: src
+      uses: argyle-labs/.github/.github/actions/source-hash@main
+      with:
+        actions: job-rust-coverage
+        image: ci-rust:${{ inputs.image-tag }}
+        workflow-file: ${{ inputs.workflow-file }}
+        extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
+    - name: Check pass cache
+      id: pass
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: check
+        job: test
+        hash: ${{ steps.src.outputs.hash }}
+        force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        access-key: ${{ inputs.sccache-access-key }}
+        secret-key: ${{ inputs.sccache-secret-key }}
+    - name: Reuse unchanged pass
+      if: ${{ steps.pass.outputs.hit == 'true' }}
+      shell: bash
+      env:
+        PASS_SHA: ${{ steps.pass.outputs.sha }}
+      run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+    - name: Set up Rust (toolchain, sccache)
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/rust-setup@main
+      with:
+        wrap-cc: 'true'
+        build-jobs: ${{ inputs.build-jobs }}
+        debuginfo: ${{ inputs.debuginfo }}
+        sccache-endpoint: ${{ inputs.sccache-endpoint }}
+        sccache-access-key: ${{ inputs.sccache-access-key }}
+        sccache-secret-key: ${{ inputs.sccache-secret-key }}
+        env: |
+          CARGO_TERM_COLOR=always
+          CARGO_NET_GIT_FETCH_WITH_CLI=true
+          OPENSSL_NO_VENDOR=1
+    - name: Fetch artifacts
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      with:
+        artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
+    - name: Download test archive
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: nextest-archive
+    - name: Coverage (cargo llvm-cov)
+      if: ${{ steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@main
+      with:
+        nextest-args: --no-fail-fast
+    - name: Record pass
+      if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: record
+        job: test
+        hash: ${{ steps.src.outputs.hash }}
+        endpoint: ${{ inputs.sccache-endpoint }}
+        access-key: ${{ inputs.sccache-access-key }}
+        secret-key: ${{ inputs.sccache-secret-key }}
+    - name: CI summary
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/ci-summary@main
