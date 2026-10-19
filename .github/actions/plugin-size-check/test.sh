@@ -52,7 +52,7 @@ mkdir -p "$work/bin" "$work/dist"
 cat > "$work/bin/curl" <<STUB
 #!/usr/bin/env bash
 echo "\$*" >> "$work/argv"
-case "\$*" in *releases*) cat "$fx/releases.json" ;; *) exit 22 ;; esac
+case "\$*" in *releases*) cat "\${RELEASES_FIXTURE:-$fx/releases.json}" ;; *) exit 22 ;; esac
 STUB
 cat > "$work/bin/cargo" <<'STUB'
 #!/usr/bin/env bash
@@ -86,6 +86,12 @@ head -c 22020096 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-
 run fail CRATES=200
 run pass CRATES=200 SIZE_PCT=1000 WARN_PCT=1000 BUDGET_MIB=30
 run fail CRATES=200 SIZE_PCT=1000 WARN_PCT=1000 BUDGET_MIB=
+head -c 12582912 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
+head -c 11100000 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
+: > "$work/summary"
+run pass CRATES=200 RELEASES_FIXTURE="$fx/releases-rc-only.json"
+eq "rc fallback tag" "$(grep -cF "release \`v0.3.0-rc.4\`" "$work/summary")" "1"
+eq "rc fallback row" "$(grep -c '| 10.59 MiB | 10.00 MiB | +5.8% |' "$work/summary")" "1"
 head -c 12582912 /dev/zero > "$work/dist/orca-plugin-demo-v0.3.0-x86_64-unknown-linux-gnu"
 cp "$fx/size-budget.toml" "$work/size-budget.toml"
 run pass CRATES=200
