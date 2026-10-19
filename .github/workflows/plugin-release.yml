@@ -91,7 +91,7 @@ jobs:
     steps:
       - name: Version
         id: v
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-version@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-version@main
         with:
           channel: ${{ inputs.channel }}
           bump: ${{ inputs.bump }}
@@ -111,7 +111,7 @@ jobs:
     steps:
       - name: UI build
         id: ui
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-ui-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-ui-build@main
 
   build-x86_64-linux-gnu:
     needs: [version, ui-build]
@@ -130,7 +130,7 @@ jobs:
     steps:
       - name: Build x86_64-unknown-linux-gnu
         id: build
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: x86_64-unknown-linux-gnu
           version: ${{ needs.version.outputs.version }}
@@ -161,7 +161,7 @@ jobs:
     steps:
       - name: Build aarch64-unknown-linux-gnu
         id: build
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: aarch64-unknown-linux-gnu
           version: ${{ needs.version.outputs.version }}
@@ -192,7 +192,7 @@ jobs:
     steps:
       - name: Build x86_64-unknown-linux-musl
         id: build
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: x86_64-unknown-linux-musl
           version: ${{ needs.version.outputs.version }}
@@ -223,7 +223,7 @@ jobs:
     steps:
       - name: Build aarch64-unknown-linux-musl
         id: build
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: aarch64-unknown-linux-musl
           version: ${{ needs.version.outputs.version }}
@@ -246,7 +246,7 @@ jobs:
     steps:
       - name: Build aarch64-apple-darwin
         id: build
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: aarch64-apple-darwin
           version: ${{ needs.version.outputs.version }}
@@ -269,7 +269,7 @@ jobs:
     steps:
       - name: Build x86_64-apple-darwin
         id: build
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-build@main
         with:
           target: x86_64-apple-darwin
           version: ${{ needs.version.outputs.version }}
@@ -302,7 +302,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Publish
-        uses: argyle-labs/.github/.github/actions/job-plugin-release-publish@v1
+        uses: argyle-labs/.github/.github/actions/job-plugin-release-publish@main
         with:
           version: ${{ needs.version.outputs.version }}
           tag: ${{ needs.version.outputs.tag }}

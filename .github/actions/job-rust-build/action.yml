@@ -95,7 +95,7 @@ runs:
         fi
     - name: Select crates
       id: sel
-      uses: argyle-labs/.github/.github/actions/crate-select@v1
+      uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
         job: build
         also-require: ${{ steps.shards.outputs.jobs }}
@@ -114,7 +114,7 @@ runs:
       run: echo "Unchanged — reusing build + test pass for every crate" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
       if: ${{ steps.sel.outputs.selection != '' }}
-      uses: argyle-labs/.github/.github/actions/rust-setup@v1
+      uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
         drop-cargo-config: ${{ inputs.drop-cargo-config }}
         fast-linker: 'true'
@@ -142,7 +142,7 @@ runs:
         echo "$VAR=${v}-dev+gci" >> "$GITHUB_ENV"
     - name: Build test archive (cargo llvm-cov nextest-archive)
       if: ${{ steps.sel.outputs.selection != '' }}
-      uses: argyle-labs/.github/.github/actions/cargo-build@v1
+      uses: argyle-labs/.github/.github/actions/cargo-build@main
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ steps.sel.outputs.packages }} ${{ inputs.features }}
@@ -161,7 +161,7 @@ runs:
         retention-days: 3
     - name: Release profile for size check
       if: ${{ steps.sel.outputs.selection != '' && inputs.size-check == 'true' }}
-      uses: argyle-labs/.github/.github/actions/rust-release-profile@v1
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
       with:
         strip: symbols
         lto: "true"
@@ -218,7 +218,7 @@ runs:
         cargo test --locked ${args[@]+"${args[@]}"} --doc
     - name: Plugin size check
       if: ${{ steps.sel.outputs.selection != '' && inputs.size-check == 'true' }}
-      uses: argyle-labs/.github/.github/actions/plugin-size-check@v1
+      uses: argyle-labs/.github/.github/actions/plugin-size-check@main
       with:
         base-ref: ${{ github.event.pull_request.base.sha }}
         pr-number: ${{ github.event.pull_request.number }}
@@ -227,7 +227,7 @@ runs:
         target: ${{ steps.size-bins.outputs.target }}
     - name: Record pass
       if: ${{ success() && steps.sel.outputs.selection != '' }}
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: record-batch
         job: build
@@ -238,4 +238,4 @@ runs:
         secret-key: ${{ inputs.sccache-secret-key }}
     - name: CI summary
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/ci-summary@v1
+      uses: argyle-labs/.github/.github/actions/ci-summary@main

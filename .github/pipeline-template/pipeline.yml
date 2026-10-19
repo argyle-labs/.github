@@ -34,13 +34,13 @@ jobs:
   # PR gate: test + build.
   ci:
     if: ${{ github.event_name == 'pull_request' }}
-    uses: argyle-labs/.github/.github/workflows/ci.yml@v1
+    uses: argyle-labs/.github/.github/workflows/ci.yml@main
     secrets: inherit
 
   # Merge to main: build a rolling DRAFT release. No tests (the PR gated them).
   rc-draft:
     if: ${{ github.event_name == 'push' }}
-    uses: argyle-labs/.github/.github/workflows/release.yml@v1
+    uses: argyle-labs/.github/.github/workflows/release.yml@main
     with:
       stage: rc-draft
       asset-profile: binaries        # orca overrides → full
@@ -50,7 +50,7 @@ jobs:
   # Operator gate: publish the RC, then (a later dispatch) promote to stable.
   release:
     if: ${{ github.event_name == 'workflow_dispatch' }}
-    uses: argyle-labs/.github/.github/workflows/release.yml@v1
+    uses: argyle-labs/.github/.github/workflows/release.yml@main
     with:
       stage: ${{ inputs.stage }}
       bump: ${{ inputs.bump }}

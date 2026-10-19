@@ -53,7 +53,7 @@ runs:
   steps:
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@v1
+      uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag }}
     - name: Check target
@@ -89,14 +89,14 @@ runs:
     - name: Release size profile
       id: relprof
       if: ${{ inputs.asset-profile != 'full' }}
-      uses: argyle-labs/.github/.github/actions/rust-release-profile@v1
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
       with:
         strip: symbols
         lto: ${{ steps.rel.outputs.prerelease == 'true' && 'thin' || 'fat' }}
         codegen-units: ${{ steps.rel.outputs.prerelease == 'true' && '16' || '1' }}
         opt-level: s
     - name: Set up Rust (toolchain, sccache)
-      uses: argyle-labs/.github/.github/actions/rust-setup@v1
+      uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
         cache-key: release-${{ inputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
         orca-fetch-token: ${{ inputs.orca-fetch-token }}
@@ -119,11 +119,11 @@ runs:
         [ -n "$bins" ] || { echo "::error::no bin targets found"; exit 1; }
         { echo "list<<EOF"; echo "$bins"; echo "EOF"; } >> "$GITHUB_OUTPUT"
     - name: Fetch dependencies (cargo fetch)
-      uses: argyle-labs/.github/.github/actions/cargo-fetch@v1
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
       with:
         phases-file: ${{ runner.temp }}/release-phases
     - name: Build at release version (build-target)
-      uses: argyle-labs/.github/.github/actions/build-target@v1
+      uses: argyle-labs/.github/.github/actions/build-target@main
       with:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}

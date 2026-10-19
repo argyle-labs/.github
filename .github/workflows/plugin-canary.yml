@@ -11,7 +11,7 @@ name: Canary
 #     workflow_dispatch:
 #   jobs:
 #     canary:
-#       uses: argyle-labs/.github/.github/workflows/plugin-canary.yml@v1
+#       uses: argyle-labs/.github/.github/workflows/plugin-canary.yml@main
 #       secrets: inherit
 #
 # fleet-canary.yml runs the same check across every plugin nightly, so callers

@@ -20,7 +20,7 @@ runs:
   steps:
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@v1
+      uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag }}
     - name: Checkout
@@ -46,7 +46,7 @@ runs:
         REL_VERSION: ${{ steps.rel.outputs.version }}
       run: sed -i '0,/^version = ".*"/s//version = "'"$REL_VERSION"'"/' Cargo.toml
     - name: Build native packages (package-native)
-      uses: argyle-labs/.github/.github/actions/package-native@v1
+      uses: argyle-labs/.github/.github/actions/package-native@main
     - name: Assemble checksums + install.sh
       shell: bash
       run: |

@@ -37,7 +37,7 @@ jobs:
         password: ${{ secrets.CI_REGISTRY_TOKEN }}
     steps:
       - name: Build
-        uses: argyle-labs/.github/.github/actions/job-rust-build@v1
+        uses: argyle-labs/.github/.github/actions/job-rust-build@main
         with:
           extra-paths: "orca-inventory-tests: README.md CRATE_RESPONSIBILITIES.md projects docs"
           features: ""
@@ -60,7 +60,7 @@ jobs:
         password: ${{ secrets.CI_REGISTRY_TOKEN }}
     steps:
       - name: Test
-        uses: argyle-labs/.github/.github/actions/job-rust-test@v1
+        uses: argyle-labs/.github/.github/actions/job-rust-test@main
         with:
           extra-paths: "orca-inventory-tests: README.md CRATE_RESPONSIBILITIES.md projects docs"
           force: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
@@ -80,7 +80,7 @@ jobs:
       ORCA_FORBIDDEN_IP_PATTERNS: ${{ secrets.FORBIDDEN_IP_PATTERNS }}
     steps:
       - name: Lint
-        uses: argyle-labs/.github/.github/actions/job-rust-lint@v1
+        uses: argyle-labs/.github/.github/actions/job-rust-lint@main
         with:
           extra-paths: "orca-inventory-tests: README.md CRATE_RESPONSIBILITIES.md projects docs"
           features: ""
