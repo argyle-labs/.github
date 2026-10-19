@@ -11,7 +11,7 @@ name: CI
 #     push:         { branches: [main] }
 #   jobs:
 #     ci:
-#       uses: argyle-labs/.github/.github/workflows/compose-ci.yml@v1
+#       uses: argyle-labs/.github/.github/workflows/compose-ci.yml@main
 #       secrets: inherit
 #
 # The caller needs no `permissions:` block; this workflow neither tags nor
@@ -34,6 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Compose validate
-        uses: argyle-labs/.github/.github/actions/job-compose-validate@v1
+        uses: argyle-labs/.github/.github/actions/job-compose-validate@main
         with:
           paths: ${{ inputs.paths }}

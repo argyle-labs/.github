@@ -4,7 +4,7 @@ description: >
   `git ls-files -s` blob ids (no file contents are read). CI-only and doc-only
   changes leave it unchanged, except the calling workflow file and the shared
   actions named in `actions` plus every shared action they reach. Callers must pin every argyle-labs/.github
-  action to the same ref: nested actions are pulled `@v1`, so only then is
+  action to the same ref: nested actions are pulled `@main`, so only then is
   the hashed tree the one that runs. Keyed per job by ci-pass-cache, so the hash itself is
   job-independent.
 

@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Build and push image
-        uses: argyle-labs/.github/.github/actions/image-build@v1
+        uses: argyle-labs/.github/.github/actions/image-build@main
         with:
           file: Dockerfile
           name: argyle-labs/${{ github.event.repository.name }}

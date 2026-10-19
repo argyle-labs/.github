@@ -44,7 +44,7 @@ runs:
   using: composite
   steps:
     - name: Fetch artifacts
-      uses: argyle-labs/.github/.github/actions/fetch-artifacts@v1
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
       with:
         artifacts: ${{ inputs.artifacts }}
 
@@ -55,7 +55,7 @@ runs:
         path: ${{ inputs.working-directory }}
 
     - name: Coverage report (cargo llvm-cov)
-      uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@v1
+      uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@main
       if: ${{ inputs.coverage == 'true' }}
       with:
         working-directory: ${{ inputs.working-directory }}

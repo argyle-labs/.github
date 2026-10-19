@@ -101,7 +101,7 @@ runs:
         done <<< "$SCRIPTS"
     - name: actionlint
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/actionlint@v1
+      uses: argyle-labs/.github/.github/actions/actionlint@main
     - name: Lint configs
       id: cfg
       if: ${{ !cancelled() }}
@@ -112,7 +112,7 @@ runs:
     - name: Select crates
       id: sel
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/crate-select@v1
+      uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
         job: lint-${{ inputs.lock-check }}
         image: ci-rust:${{ inputs.image-tag }}
@@ -132,7 +132,7 @@ runs:
     - name: Set up Rust (toolchain, sccache)
       id: setup
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' }}
-      uses: argyle-labs/.github/.github/actions/rust-setup@v1
+      uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
         drop-cargo-config: ${{ inputs.drop-cargo-config }}
         fast-linker: 'true'
@@ -150,21 +150,21 @@ runs:
           OPENSSL_NO_VENDOR=1
     - name: Persistent target dir
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/cargo-target-cache@v1
+      uses: argyle-labs/.github/.github/actions/cargo-target-cache@main
       with:
         root: ${{ inputs.target-cache }}
     - name: Format (cargo fmt)
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/cargo-fmt@v1
+      uses: argyle-labs/.github/.github/actions/cargo-fmt@main
     - name: Clippy
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/cargo-clippy@v1
+      uses: argyle-labs/.github/.github/actions/cargo-clippy@main
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ steps.sel.outputs.packages }} --all-targets ${{ inputs.features }}
     - name: Workspace-hack (cargo hakari)
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/cargo-hakari-check@v1
+      uses: argyle-labs/.github/.github/actions/cargo-hakari-check@main
     - name: Extra cargo checks
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' && inputs.cargo-checks != '' }}
       shell: bash
@@ -196,12 +196,12 @@ runs:
     # Last: it deletes .cargo/config.toml, which the cargo steps above need.
     - name: Lock file check
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/cargo-lock-check@v1
+      uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
       with:
         mode: ${{ inputs.lock-check }}
     - name: Record pass
       if: ${{ success() && steps.sel.outputs.selection != '' }}
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: record-batch
         job: lint-${{ inputs.lock-check }}
@@ -212,4 +212,4 @@ runs:
         secret-key: ${{ inputs.sccache-secret-key }}
     - name: CI summary
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/ci-summary@v1
+      uses: argyle-labs/.github/.github/actions/ci-summary@main

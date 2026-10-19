@@ -46,7 +46,7 @@ runs:
         merge-multiple: true
 
     - name: Registry login
-      uses: argyle-labs/.github/.github/actions/registry-login@v1
+      uses: argyle-labs/.github/.github/actions/registry-login@main
       with:
         registry: ${{ inputs.registry }}
         registry-http: ${{ inputs.registry-http }}

@@ -18,7 +18,7 @@ runs:
   steps:
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@v1
+      uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag }}
     - name: Check out release branch
@@ -38,7 +38,7 @@ runs:
         [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")" ] || { echo "::error::HEAD is not $TAG"; exit 1; }
         echo "Publishing from $TAG ($(git rev-parse HEAD))"
     - name: Fetch dependencies (cargo fetch)
-      uses: argyle-labs/.github/.github/actions/cargo-fetch@v1
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
     - name: Publish crates in dependency order (publish-crates.sh)
       shell: bash
       env:

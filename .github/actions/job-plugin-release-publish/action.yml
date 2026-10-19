@@ -105,7 +105,7 @@ runs:
 
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@v1
+      uses: argyle-labs/.github/.github/actions/release-tag@main
       with:
         tag: ${{ inputs.tag || env.TAG }}
 
@@ -144,7 +144,7 @@ runs:
 
     - name: Promote image
       if: ${{ inputs.image-name != '' }}
-      uses: argyle-labs/.github/.github/actions/image-promote@v1
+      uses: argyle-labs/.github/.github/actions/image-promote@main
       with:
         name: ${{ inputs.image-name }}
         tags: |
@@ -189,7 +189,7 @@ runs:
       id: ghcr-login
       if: ${{ inputs.image-name != '' && inputs.image-public == 'true' }}
       continue-on-error: true
-      uses: argyle-labs/.github/.github/actions/registry-login@v1
+      uses: argyle-labs/.github/.github/actions/registry-login@main
       with:
         registry: ghcr.io
         setup-buildx: "false"

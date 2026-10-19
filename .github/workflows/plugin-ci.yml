@@ -17,7 +17,7 @@ name: CI
 #       branches: [main]
 #   jobs:
 #     ci:
-#       uses: argyle-labs/.github/.github/workflows/plugin-ci.yml@v1
+#       uses: argyle-labs/.github/.github/workflows/plugin-ci.yml@main
 #       secrets: inherit           # carries ORCA_FETCH_TOKEN for the private dep
 #
 # The caller needs no `permissions:` block; this workflow neither tags nor
@@ -200,7 +200,7 @@ jobs:
           fi
 
       - name: sccache read-only check
-        uses: argyle-labs/.github/.github/actions/sccache-guard@v1
+        uses: argyle-labs/.github/.github/actions/sccache-guard@main
         with:
           check: errlog
 
@@ -295,6 +295,6 @@ jobs:
 
       - name: sccache read-only check (stats)
         if: ${{ !cancelled() }}
-        uses: argyle-labs/.github/.github/actions/sccache-guard@v1
+        uses: argyle-labs/.github/.github/actions/sccache-guard@main
         with:
           check: stats

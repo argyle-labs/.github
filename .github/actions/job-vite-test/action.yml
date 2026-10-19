@@ -44,7 +44,7 @@ runs:
       uses: actions/checkout@v4
     - name: Source hash
       id: src
-      uses: argyle-labs/.github/.github/actions/source-hash@v1
+      uses: argyle-labs/.github/.github/actions/source-hash@main
       with:
         actions: job-vite-test
         image: ci-rust:${{ inputs.image-tag }}
@@ -52,7 +52,7 @@ runs:
         extra-paths: ${{ inputs.working-directory }}
     - name: Check pass cache
       id: pass
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: check
         job: test-ui
@@ -69,7 +69,7 @@ runs:
       run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Install npm deps (npm ci)
       if: ${{ steps.pass.outputs.hit != 'true' }}
-      uses: argyle-labs/.github/.github/actions/node-install@v1
+      uses: argyle-labs/.github/.github/actions/node-install@main
       with:
         working-directory: ${{ inputs.working-directory }}
     - name: svelte-kit sync
@@ -80,21 +80,21 @@ runs:
     - name: Vitest
       id: vitest
       if: ${{ steps.pass.outputs.hit != 'true' }}
-      uses: argyle-labs/.github/.github/actions/vitest@v1
+      uses: argyle-labs/.github/.github/actions/vitest@main
       with:
         working-directory: ${{ inputs.working-directory }}
         install: 'false'
         command: ${{ inputs.test-command }}
     - name: svelte-check
       if: ${{ !cancelled() && steps.vitest.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/svelte-check@v1
+      uses: argyle-labs/.github/.github/actions/svelte-check@main
       with:
         working-directory: ${{ inputs.working-directory }}
         install: 'false'
         command: ${{ inputs.check-command }}
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: record
         job: test-ui
@@ -104,4 +104,4 @@ runs:
         secret-key: ${{ inputs.sccache-secret-key }}
     - name: CI summary
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/ci-summary@v1
+      uses: argyle-labs/.github/.github/actions/ci-summary@main
