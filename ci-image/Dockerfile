@@ -85,10 +85,13 @@ RUN set -eux; \
     curl -fsSL "https://get.nexte.st/latest/${plat}" | tar -xz -C /usr/local/cargo/bin; \
     cargo-nextest --version
 ARG CARGO_HACK_VERSION=0.6.45
+ARG CARGO_HAKARI_VERSION=0.9.39
 RUN set -eux; \
     cargo install --locked cargo-zigbuild cargo-llvm-cov; \
     cargo install --locked "cargo-hack@${CARGO_HACK_VERSION}"; \
-    cargo hack --version
+    cargo install --locked "cargo-hakari@${CARGO_HAKARI_VERSION}"; \
+    cargo hack --version; \
+    cargo hakari --version
 
 # orca declares sibling deps with `registry = "gitea"`; cargo needs it defined.
 ENV CARGO_REGISTRIES_GITEA_INDEX=sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
