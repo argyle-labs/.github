@@ -56,7 +56,7 @@ runs:
       id: src
       uses: argyle-labs/.github/.github/actions/source-hash@main
       with:
-        actions: job-rust-test
+        actions: job-rust-build job-rust-test
         image: ci-rust:${{ inputs.image-tag }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
