@@ -32,6 +32,7 @@ done
 [ "$SLOT_COUNT" -ge 1 ] || { echo "::error::mint-cargo-slot: slots must be >= 1"; exit 1; }
 
 root="$HOME/Library/Caches/orca-ci/target"
+guard="$(cd "$(dirname "$0")/../sccache-guard" && pwd)/guard.sh"
 base="$root/$SLOT_SCOPE/$SLOT_TARGET"
 
 # Runs under lockf with the slot lock held; the kernel drops the lock if this
@@ -75,8 +76,9 @@ inner() {
       if sccache --start-server >/dev/null 2>&1; then
         use_sccache=true
         sccache --zero-stats >/dev/null 2>&1 || true
-        if [ -n "${SCCACHE_ERROR_LOG:-}" ] && ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
-          echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (backend write check failed): cache will not fill. $(echo "$ro" | tr '\n' ' ')"
+        if [ -n "${SCCACHE_ERROR_LOG:-}" ] && ! /bin/bash "$guard" errlog "$SCCACHE_ERROR_LOG"; then
+          sccache --stop-server >/dev/null 2>&1 || true
+          return 1
         fi
       else
         echo "::warning title=sccache unavailable::sccache did not start on port $SCCACHE_SERVER_PORT; building UNCACHED. $(tail -n 5 "${SCCACHE_ERROR_LOG:-/dev/null}" 2>/dev/null | tr '\n' ' ')"
@@ -119,19 +121,13 @@ inner() {
       echo '```'
       echo "$stats"
       echo '```'
-      # ReadOnly mode fails every write without ever completing one.
-      werr=$(echo "$stats" | awk '/^Cache write errors/ {print $NF}')
-      wavg=$(echo "$stats" | awk '/^Average cache write/ {print $(NF-1)}')
-      case "$werr" in ''|*[!0-9]*) werr=0 ;; esac
-      if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
-        echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill."
-      fi
     fi
   } | tee -a "$summary"
   if [ "$use_sccache" = true ]; then
     if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
       echo "::warning title=sccache errors::$(echo "$errs" | tr '\n' ' ')"
     fi
+    /bin/bash "$guard" stats || rc=1
     sccache --stop-server >/dev/null 2>&1 || true
   fi
   [ "$rc" -eq 0 ] || return "$rc"

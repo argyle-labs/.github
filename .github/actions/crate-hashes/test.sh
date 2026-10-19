@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script=$(realpath "$(dirname "$0")/hashes.sh")
+script="$(cd "$(dirname "$0")" && pwd)/hashes.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"

@@ -35,15 +35,15 @@ inputs:
     required: false
     default: "true"
   sccache-endpoint:
-    description: 'MinIO host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
+    description: 'S3 cache host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
     required: false
     default: ""
   sccache-access-key:
-    description: 'MinIO access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`); composites cannot read secrets.'
+    description: 'S3 cache access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`); composites cannot read secrets.'
     required: false
     default: ""
   sccache-secret-key:
-    description: 'MinIO secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
+    description: 'S3 cache secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
     required: false
     default: ""
 

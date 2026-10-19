@@ -1,0 +1,24 @@
+name: sccache guard
+description: >
+  Fail the job when the sccache backend is READ-ONLY (a warning on pull
+  requests). `check: errlog` inspects the server's write-check result after
+  start; `check: stats` inspects write errors after a build.
+
+inputs:
+  check:
+    description: '`errlog` or `stats`.'
+    required: true
+  error-log:
+    description: 'sccache error log for `errlog` (defaults to $SCCACHE_ERROR_LOG).'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: sccache read-only check
+      shell: bash
+      env:
+        CHECK: ${{ inputs.check }}
+        LOG: ${{ inputs.error-log }}
+      run: /bin/bash "$GITHUB_ACTION_PATH/guard.sh" "$CHECK" "${LOG:-${SCCACHE_ERROR_LOG:-}}"
