@@ -131,7 +131,8 @@ report=$(
   echo "|---|---|---:|---:|---:|---:|---:|---|"
   printf '%s\n' "${rows[@]}"
 )
-echo "$report" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+echo "$report"
+[ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$report" >> "$GITHUB_STEP_SUMMARY"
 
 if [ -n "${PR_NUMBER:-}" ]; then
   body=$(jq -n --arg b "$report" '{body:$b}')
