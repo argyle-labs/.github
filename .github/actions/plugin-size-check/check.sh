@@ -100,6 +100,7 @@ add_row() {
   case $status in
     fail) worst=fail; echo "::error title=plugin-size-check::${name} ${TARGET:-host}: ${why}" ;;
     warn) [ "$worst" = fail ] || worst=warn; echo "::warning title=plugin-size-check::${name} ${TARGET:-host}: ${why}" ;;
+    *) [ -z "$size" ] || echo "${name} ${TARGET:-host}: $(fmt_bytes "$size")${max_bytes:+ within budget $(fmt_bytes "$max_bytes")}" ;;
   esac
   local sz=- bs=- sd=- cd=-
   [ -n "$size" ] && sz=$(fmt_bytes "$size")

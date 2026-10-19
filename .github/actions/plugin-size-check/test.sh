@@ -35,12 +35,12 @@ eq "at warn" "$(evaluate 11010048 $((10 * mib)) 200 200 10 5 15 "" "")" "ok|"
 eq "over threshold" "$(evaluate 11534337 $((10 * mib)) 200 200 10 5 15 "" "")" "fail|size +10.0% > +10%"
 eq "crates growth" "$(evaluate "" "" 216 200 10 5 15 "" "")" "fail|+16 crates > +15"
 eq "crates at limit" "$(evaluate "" "" 215 200 10 5 15 "" "")" "ok|"
-eq "absolute size" "$(evaluate $((21 * mib)) "" 200 "" 10 5 15 $((20 * mib)) "")" "fail|size over budget 20.00 MiB"
+eq "absolute size" "$(evaluate $((21 * mib)) "" 200 "" 10 5 15 $((20 * mib)) "")" "fail|21.00 MiB over budget 20.00 MiB"
 eq "absolute crates" "$(evaluate "" "" 301 "" 10 5 15 "" 300)" "fail|301 crates over budget 300"
 eq "no baseline" "$(evaluate $mib "" 200 "" 10 5 15 "" "")" "ok|"
 eq "release size advisory" "$(evaluate 11534337 $((10 * mib)) 200 200 10 5 15 "" "" warn)" "warn|size +10.0% > +10%"
 eq "release crates advisory" "$(evaluate "" "" 216 200 10 5 15 "" "" warn)" "warn|+16 crates > +15"
-eq "release absolute size" "$(evaluate $((21 * mib)) $((10 * mib)) 200 200 10 5 15 $((20 * mib)) "" warn)" "fail|size +110.0% > +10%;size over budget 20.00 MiB"
+eq "release absolute size" "$(evaluate $((21 * mib)) $((10 * mib)) 200 200 10 5 15 $((20 * mib)) "" warn)" "fail|size +110.0% > +10%;21.00 MiB over budget 20.00 MiB"
 eq "release absolute crates" "$(evaluate "" "" 301 200 10 5 15 "" 300 warn)" "fail|+101 crates > +15;301 crates over budget 300"
 eq "warn then crate fail" "$(evaluate 11100000 $((10 * mib)) 300 200 10 5 15 "" "")" "fail|size +5.8% > +5%;+100 crates > +15"
 
@@ -145,7 +145,7 @@ eq "no growth no headline" "$(size_section "$prev" "$prev" v0.3.0 20 5 15 "" "" 
 crw=$(size_section '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":203}]' '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":200}]' v1 20 5 15 "" "" 2>&1 >/dev/null)
 eq "crate growth ::warning" "$crw" "::warning title=release-size::b t: +3 crates since v1"
 eq "crate headline" "$(size_section '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":203}]' '[{"tag":"v1","bin":"b","target":"t","size":10,"crates":200}]' v1 20 5 15 "" "" 2>/dev/null | sed -n 2p)" "**⚠ crates grew +3 since v1**"
-eq "absolute fail" "$(size_section '[{"tag":"v1","bin":"b","target":"t","size":30,"crates":1}]' "[]" "" 20 5 15 20 "" 2>/dev/null | grep -c '❌ fail: size over budget')" "1"
+eq "absolute fail" "$(size_section '[{"tag":"v1","bin":"b","target":"t","size":30,"crates":1}]' "[]" "" 20 5 15 20 "" 2>/dev/null | grep -c '❌ fail: 0.00 MiB over budget')" "1"
 
 once=$(body_with_section "notes" "$SIZE_MARKER
 A

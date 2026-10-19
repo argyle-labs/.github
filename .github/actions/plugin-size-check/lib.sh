@@ -59,7 +59,7 @@ evaluate() {
     fi
   fi
   if [ -n "$size" ] && [ -n "$max_bytes" ] && [ "$size" -gt "$max_bytes" ]; then
-    status=fail; reasons+=("size over budget $(fmt_bytes "$max_bytes")")
+    status=fail; reasons+=("$(fmt_bytes "$size") over budget $(fmt_bytes "$max_bytes")")
   fi
   if [ -n "$crates" ] && [ -n "$base_crates" ] && [ $(( crates - base_crates )) -gt "$crate_max" ]; then
     [ "$status" = fail ] || status=$relative; reasons+=("+$(( crates - base_crates )) crates > +${crate_max}")
