@@ -1,0 +1,6 @@
+[
+  {"tag_name": "v0.3.0", "draft": true, "prerelease": false, "assets": []},
+  {"tag_name": "v0.3.0-rc.4", "draft": false, "prerelease": true, "assets": [
+    {"name": "orca-plugin-demo-v0.3.0-rc.4-x86_64-unknown-linux-gnu", "size": 10485760}
+  ]}
+]

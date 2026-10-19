@@ -69,6 +69,9 @@ base_sizes=()
 for b in ${bins[@]+"${bins[@]}"}; do
   t=""; s=""
   read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET" "${BASELINE:-stable}")" || true
+  if [ -z "$s" ] && [ "${BASELINE:-stable}" = stable ]; then
+    read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET" any)" || true
+  fi
   if [ -n "$s" ]; then
     base_tag=${base_tag:-$t}
   else
