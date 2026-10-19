@@ -42,6 +42,13 @@ inputs:
     description: 'Also route CC/CXX through sccache (caches C deps built by cc-rs). Leave off for cross builds.'
     required: false
     default: "false"
+  fast-linker:
+    description: >
+      'true' links Linux gnu targets with mold when the image has it (via gcc's
+      COMPILER_PATH, so a job's RUSTFLAGS cannot drop it and sccache keys are
+      unchanged). CI only; release builds keep the default linker.
+    required: false
+    default: "false"
   env:
     description: >
       Extra KEY=VALUE lines appended verbatim to GITHUB_ENV for the rest of the
@@ -162,6 +169,7 @@ runs:
         BUILD_JOBS: ${{ inputs.build-jobs }}
         DEBUGINFO: ${{ inputs.debuginfo }}
         WRAP_CC: ${{ inputs.wrap-cc }}
+        FAST_LINKER: ${{ inputs.fast-linker }}
         EXTRA_ENV: ${{ inputs.env }}
       run: |
         set -uo pipefail
@@ -235,6 +243,10 @@ runs:
             echo "CARGO_PROFILE_TEST_DEBUG=$DEBUGINFO"
           fi
           if [ -n "$BUILD_JOBS" ]; then echo "CARGO_BUILD_JOBS=$BUILD_JOBS"; fi
+          # gcc's collect2 finds mold's `ld` shim here before the system ld.
+          if [ "$FAST_LINKER" = true ] && [ "$(uname -s)" = Linux ] && [ -x /usr/libexec/mold/ld ]; then
+            echo "COMPILER_PATH=/usr/libexec/mold${COMPILER_PATH:+:$COMPILER_PATH}"
+          fi
           if [ -n "$EXTRA_ENV" ]; then printf '%s\n' "$EXTRA_ENV"; fi
         } >> "$GITHUB_ENV"
 
