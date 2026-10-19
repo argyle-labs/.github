@@ -218,6 +218,7 @@ GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL a
 | `job-vite-test` | `test-ui` | `vitest`, `svelte-check` | `working-directory`, `sccache-*` |
 | `job-rust-lint` | `lint` | `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, `actionlint` | as `job-rust-build`, plus `lock-check` (`enforce` \| `warn`) |
 | `job-rust-doctest` | `lint-doctest` | `cargo test --doc` | as `job-rust-build` |
+| `job-shell-lint` | `lint-shell` (host docker, no `container:`) | `bash -n`, then shellcheck from `koalaman/shellcheck:v0.9.0` | `files`, `working-directory` |
 
 `image-tag` (default `1.95.0`) and `workflow-file` (default `.github/workflows/ci.yml`) feed the source hash; set them when a repo's `container:` tag or workflow path differs. `ui: 'true'` hashes `ui/` and places the `vite-dist` artifact, so that job `needs: build-ui`. `packages` (default `--workspace`) selects cargo packages; the actions add `--all-features`. Composites cannot read `secrets` or `vars`, so each job passes `sccache-endpoint` / `sccache-access-key` / `sccache-secret-key` from `vars.SCCACHE_ENDPOINT` and `secrets.SCCACHE_S3_*`. A `workflow_dispatch` input named `force` bypasses the pass cache. Nested actions are pulled `@main`, so a job action pinned to a branch still runs `main`'s tool actions.
 
