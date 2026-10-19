@@ -39,7 +39,7 @@ out=$(WS_JSON="$ws_json" node -e '
 dirs=()
 [[ -n $out ]] && mapfile -t dirs <<< "$out"
 
-for d in "${dirs[@]}"; do
+for d in ${dirs[@]+"${dirs[@]}"}; do
   echo "svelte-kit sync in $d"
   (cd "$d" && npx --no-install svelte-kit sync)
 done

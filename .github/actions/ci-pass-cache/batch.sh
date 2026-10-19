@@ -43,7 +43,7 @@ s3_each() {
   xargs -P 16 -L 1 bash -c '
     put=()
     [ -z "${PUT_BODY:-}" ] || put=(-X PUT --data-binary "$PUT_BODY")
-    code=$(s3 -o /dev/null -w "%{http_code}" "${put[@]}" "$3" 2>/dev/null) || code=err
+    code=$(s3 -o /dev/null -w "%{http_code}" ${put[@]+"${put[@]}"} "$3" 2>/dev/null) || code=err
     echo "$1 $2 $code"' _
 }
 

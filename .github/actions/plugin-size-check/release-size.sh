@@ -32,7 +32,7 @@ is_uint "$max_mib" && max_bytes=$(( max_mib * 1048576 ))
 
 releases="[]"
 for page in $(seq 1 20); do
-  resp=$(curl -fsS "${auth[@]}" "$api/releases?draft=true&limit=50&page=$page")
+  resp=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/releases?draft=true&limit=50&page=$page")
   jq -e 'type == "array"' <<< "$resp" >/dev/null
   releases=$(jq -c -n --argjson a "$releases" --argjson b "$resp" '$a + $b')
   [ "$(jq length <<< "$resp")" -eq 50 ] || break
@@ -43,7 +43,7 @@ fetch_history() {
   local url resp
   url=$(jq -r --arg n "$history_name" '[.assets[]? | select(.name == $n) | .browser_download_url] | first // empty' <<< "$1")
   [ -n "$url" ] || { echo "[]"; return; }
-  if resp=$(curl -fsSL "${auth[@]}" "$url") && jq -e 'type == "array"' <<< "$resp" >/dev/null 2>&1; then
+  if resp=$(curl -fsSL ${auth[@]+"${auth[@]}"} "$url") && jq -e 'type == "array"' <<< "$resp" >/dev/null 2>&1; then
     size_history_sanitize "$resp"
   else
     echo "::warning title=release-size::unreadable $history_name at $url" >&2
@@ -81,8 +81,8 @@ if [ -n "${DIST_DIR:-}" ]; then
   jq . <<< "$history" > "$tmp/$history_name"
   rid=$(jq -r .id <<< "$rel")
   aid=$(jq -r --arg n "$history_name" '.assets[]? | select(.name == $n) | .id' <<< "$rel")
-  [ -z "$aid" ] || curl -fsS -X DELETE "${auth[@]}" "$api/releases/$rid/assets/$aid" >/dev/null
-  curl -fsS -X POST "${auth[@]}" -F "attachment=@$tmp/$history_name;filename=$history_name" \
+  [ -z "$aid" ] || curl -fsS -X DELETE ${auth[@]+"${auth[@]}"} "$api/releases/$rid/assets/$aid" >/dev/null
+  curl -fsS -X POST ${auth[@]+"${auth[@]}"} -F "attachment=@$tmp/$history_name;filename=$history_name" \
     "$api/releases/$rid/assets?name=$history_name" >/dev/null
 else
   history=$(fetch_history "$rel")
@@ -109,6 +109,6 @@ echo "$section" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 target_rel=$(release_of "$body_tag")
 [ -n "$target_rel" ] || { echo "::warning title=release-size::no release $body_tag to annotate"; exit 0; }
 body=$(body_with_section "$(jq -r '.body // ""' <<< "$target_rel")" "$section")
-curl -fsS -X PATCH "${auth[@]}" -H "Content-Type: application/json" \
+curl -fsS -X PATCH ${auth[@]+"${auth[@]}"} -H "Content-Type: application/json" \
   "$api/releases/$(jq -r .id <<< "$target_rel")" -d "$(jq -n --arg b "$body" '{body:$b}')" >/dev/null
 echo "→ size section on $body_tag (baseline ${base_tag:-none})"

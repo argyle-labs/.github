@@ -60,7 +60,7 @@ bins=()
 if [ -n "${DIST_DIR:-}" ]; then
   while IFS= read -r b; do [ -n "$b" ] && bins+=("$b"); done <<< "${BINS:-}"
   if [ "${#bins[@]}" -gt 0 ]; then
-    releases=$(curl -fsS "${auth[@]}" "$api/repos/$REPO/releases?limit=20" 2>/dev/null || echo "[]")
+    releases=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/repos/$REPO/releases?limit=20" 2>/dev/null || echo "[]")
   fi
 fi
 
@@ -129,21 +129,21 @@ report=$(
   echo
   echo "| bin | target | size | baseline | delta | crates | delta | status |"
   echo "|---|---|---:|---:|---:|---:|---:|---|"
-  printf '%s\n' "${rows[@]}"
+  printf '%s\n' ${rows[@]+"${rows[@]}"}
 )
 echo "$report"
 [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$report" >> "$GITHUB_STEP_SUMMARY"
 
 if [ -n "${PR_NUMBER:-}" ]; then
   body=$(jq -n --arg b "$report" '{body:$b}')
-  cid=$(curl -fsS "${auth[@]}" "$api/repos/$REPO/issues/$PR_NUMBER/comments" 2>/dev/null \
+  cid=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/repos/$REPO/issues/$PR_NUMBER/comments" 2>/dev/null \
     | jq -r --arg m "$marker" '[.[] | select(.body | startswith($m)) | .id] | first // empty' || true)
   if [ -n "$cid" ]; then
-    curl -fsS "${auth[@]}" -X PATCH -H "Content-Type: application/json" \
+    curl -fsS ${auth[@]+"${auth[@]}"} -X PATCH -H "Content-Type: application/json" \
       "$api/repos/$REPO/issues/comments/$cid" -d "$body" >/dev/null \
       || echo "::warning title=plugin-size-check::could not update PR comment $cid"
   else
-    curl -fsS "${auth[@]}" -X POST -H "Content-Type: application/json" \
+    curl -fsS ${auth[@]+"${auth[@]}"} -X POST -H "Content-Type: application/json" \
       "$api/repos/$REPO/issues/$PR_NUMBER/comments" -d "$body" >/dev/null \
       || echo "::warning title=plugin-size-check::could not post PR comment"
   fi
