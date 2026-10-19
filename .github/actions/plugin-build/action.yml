@@ -37,6 +37,10 @@ inputs:
     description: MinIO host:port (pass vars.SCCACHE_ENDPOINT). Empty = no sccache.
     required: false
     default: ""
+  sccache-region:
+    description: 'SigV4 region the S3 backend expects (Garage s3_region); falls back to env SCCACHE_REGION, then garage.'
+    required: false
+    default: ""
   sccache-bucket:
     required: false
     default: "sccache"
@@ -316,6 +320,7 @@ runs:
       env:
         SCCACHE_BUCKET: ${{ inputs.sccache-bucket }}
         SCCACHE_ENDPOINT: ${{ inputs.sccache-endpoint }}
+        SCCACHE_REGION: ${{ inputs.sccache-region || env.SCCACHE_REGION || 'garage' }}
         AWS_ACCESS_KEY_ID: ${{ inputs.sccache-access-key }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-key }}
         SLOT: ${{ steps.host.outputs.slot }}
@@ -325,7 +330,7 @@ runs:
           echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
           echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
           echo "SCCACHE_S3_USE_SSL=false"
-          echo "SCCACHE_REGION=us-east-1"
+          echo "SCCACHE_REGION=$SCCACHE_REGION"
           echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
           echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
           echo "SCCACHE_IDLE_TIMEOUT=0"
@@ -335,7 +340,7 @@ runs:
         # The slot build starts its own server on a per-slot port and falls back
         # to an uncached build itself.
         if [ "$SLOT" = true ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-        export SCCACHE_S3_USE_SSL=false SCCACHE_REGION=us-east-1 SCCACHE_IDLE_TIMEOUT=0 \
+        export SCCACHE_S3_USE_SSL=false SCCACHE_IDLE_TIMEOUT=0 \
           SCCACHE_IGNORE_SERVER_IO_ERROR=1 SCCACHE_ERROR_LOG="${RUNNER_TEMP:-/tmp}/sccache-error.log"
         # macOS has no coreutils `timeout` unless Homebrew's gtimeout is present.
         to=$(command -v timeout || command -v gtimeout || true)

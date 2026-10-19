@@ -1,7 +1,7 @@
 name: Rust setup (shared)
 description: >
   The ONE home for the org's Rust CI/build environment: toolchain, the caching
-  strategy (sccache on MinIO or local disk + Swatinem rust-cache), the private orca git-dep
+  strategy (sccache on the shared S3 bucket or local disk + Swatinem rust-cache), the private orca git-dep
   auth (github.com→Gitea host rewrite), and the compile-memory controls that
   keep heavy generated crates under the runner's memory cap. Every CI and
   release job composes this so caching + toolchain are defined in exactly one
@@ -25,8 +25,8 @@ inputs:
     default: ""
   sccache-endpoint:
     description: >
-      MinIO host:port for the shared sccache bucket (pass vars.SCCACHE_ENDPOINT).
-      With the access/secret keys set, sccache uses MinIO; otherwise a local
+      S3 host:port for the shared sccache bucket (pass vars.SCCACHE_ENDPOINT).
+      With the access/secret keys set, sccache uses S3; otherwise a local
       disk cache.
     required: false
     default: ""
@@ -64,6 +64,10 @@ inputs:
   sccache-bucket:
     required: false
     default: "sccache"
+  sccache-region:
+    description: 'SigV4 region the S3 backend expects (Garage s3_region); falls back to env SCCACHE_REGION, then garage.'
+    required: false
+    default: ""
   sccache-access-key:
     required: false
     default: ""
@@ -152,6 +156,7 @@ runs:
       env:
         S3_ENDPOINT: ${{ inputs.sccache-endpoint }}
         S3_BUCKET: ${{ inputs.sccache-bucket }}
+        S3_REGION: ${{ inputs.sccache-region || env.SCCACHE_REGION || 'garage' }}
         S3_ACCESS_KEY: ${{ inputs.sccache-access-key }}
         S3_SECRET_KEY: ${{ inputs.sccache-secret-key }}
         BUILD_JOBS: ${{ inputs.build-jobs }}
@@ -164,14 +169,14 @@ runs:
         backend=none
         if command -v sccache >/dev/null 2>&1; then
           if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ]; then
-            # Shared MinIO bucket: jobs in an ephemeral container have no disk
+            # Shared S3 bucket: jobs in an ephemeral container have no disk
             # that outlives them, so a local SCCACHE_DIR would always be cold.
             export SCCACHE_BUCKET="$S3_BUCKET" SCCACHE_ENDPOINT="$S3_ENDPOINT" \
-              SCCACHE_S3_USE_SSL=false SCCACHE_REGION=us-east-1 \
+              SCCACHE_S3_USE_SSL=false SCCACHE_REGION="$S3_REGION" \
               AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
             backend=s3
           else
-            # No MinIO configured: local disk, which only helps on a runner
+            # No S3 configured: local disk, which only helps on a runner
             # whose filesystem outlives the job.
             export SCCACHE_DIR=/root/.cache/sccache SCCACHE_CACHE_SIZE=20G
             backend=disk
@@ -188,7 +193,11 @@ runs:
             echo "::warning title=sccache unavailable::sccache ($backend) did not start; building UNCACHED. $(tail -n 5 "$err_log" 2>/dev/null | tr '\n' ' ')"
             backend=none
           elif ro=$(grep -A 5 'storage write check failed' "$err_log" 2>/dev/null); then
-            echo "::error title=sccache READ-ONLY::sccache ($backend) cache is READ-ONLY (backend write check failed): cache will not fill; check backend disk/permissions. $(tr '\n' ' ' <<< "$ro")"
+            msg="sccache ($backend) cache is READ-ONLY (backend write check failed): cache will not fill; check backend disk/permissions. $(tr '\n' ' ' <<< "$ro")"
+            case "${GITHUB_EVENT_NAME:-}" in
+              pull_request|pull_request_target) echo "::warning title=sccache READ-ONLY::$msg" ;;
+              *) echo "::error title=sccache READ-ONLY::$msg"; exit 1 ;;
+            esac
           fi
         fi
         echo "sccache backend: $backend"
@@ -204,7 +213,7 @@ runs:
             echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
             echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
             echo "SCCACHE_S3_USE_SSL=false"
-            echo "SCCACHE_REGION=us-east-1"
+            echo "SCCACHE_REGION=$SCCACHE_REGION"
             echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
             echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
           elif [ "$backend" = disk ]; then

@@ -37,6 +37,10 @@ inputs:
     description: 'Empty = env.SCCACHE_ENDPOINT.'
     required: false
     default: ""
+  sccache-region:
+    description: 'Empty = env.SCCACHE_REGION, then garage.'
+    required: false
+    default: ""
   sccache-access-key:
     description: 'Empty = env.SCCACHE_S3_ACCESS_KEY.'
     required: false
@@ -97,6 +101,7 @@ runs:
         sccache-access-key: ${{ inputs.sccache-access-key || env.SCCACHE_S3_ACCESS_KEY }}
         sccache-secret-key: ${{ inputs.sccache-secret-key || env.SCCACHE_S3_SECRET_KEY }}
         sccache-endpoint: ${{ inputs.sccache-endpoint || env.SCCACHE_ENDPOINT }}
+        sccache-region: ${{ inputs.sccache-region }}
         profile-strip: ${{ inputs.profile-strip }}
         profile-lto: ${{ inputs.profile-lto }}
         profile-codegen-units: ${{ inputs.profile-codegen-units }}
