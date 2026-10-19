@@ -41,6 +41,10 @@ inputs:
     description: 'S3 cache secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
     required: false
     default: ""
+  target-cache:
+    description: 'Host-mounted cache root for a persistent incremental clippy target dir (see cargo-target-cache); a no-op when not mounted.'
+    required: false
+    default: /ci-target-cache
   lock-check:
     description: 'Cargo.lock drift gate: `enforce` fails the job, `warn` annotates only.'
     required: false
@@ -96,6 +100,11 @@ runs:
           CARGO_TERM_COLOR=always
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
+    - name: Persistent target dir
+      if: ${{ steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
+      uses: argyle-labs/.github/.github/actions/cargo-target-cache@main
+      with:
+        root: ${{ inputs.target-cache }}
     - name: Format (cargo fmt)
       if: ${{ steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/cargo-fmt@main

@@ -1,0 +1,46 @@
+name: cargo target cache
+description: >
+  Persistent incremental CARGO_TARGET_DIR for check-mode builds (clippy), whose
+  workspace crates sccache cannot cache. Uses a per repo+branch dir under
+  `root`, a host directory the runner mounts into job containers, seeded from
+  the repo's `main` dir; a no-op when `root` is not mounted. Skipped for fork
+  PRs, which must not write a cache same-repo branches seed from. Run after
+  rust-setup, whose CARGO_INCREMENTAL=0 this overrides.
+
+inputs:
+  root:
+    description: 'Mount point of the host cache directory inside the job container.'
+    required: false
+    default: /ci-target-cache
+  max-gb:
+    description: 'Prune least-recently-used branch dirs while `root` holds more than this.'
+    required: false
+    default: "100"
+  max-age-days:
+    description: 'Prune branch dirs unused for this many days.'
+    required: false
+    default: "7"
+
+runs:
+  using: composite
+  steps:
+    - name: Persistent target dir
+      if: ${{ github.event.pull_request.head.repo.full_name == '' || github.event.pull_request.head.repo.full_name == github.repository }}
+      shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        MAX_GB: ${{ inputs.max-gb }}
+        MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+      run: |
+        dir=$(MAX_KB=$((MAX_GB * 1048576)) /bin/bash "$GITHUB_ACTION_PATH/cache.sh")
+        if [ -z "$dir" ]; then
+          echo "::notice title=cargo target cache::$ROOT not mounted; using the job's own target/"
+          exit 0
+        fi
+        echo "target dir: $dir"
+        {
+          echo "CARGO_TARGET_DIR=$dir"
+          echo "CARGO_INCREMENTAL=1"
+        } >> "$GITHUB_ENV"

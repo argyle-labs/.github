@@ -53,6 +53,17 @@ jobs:
       - name: Self-test
         run: bash .github/actions/plugin-size-check/test.sh
 
+  cargo-target-cache:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/cargo-target-cache/test.sh
+
   crate-hashes:
     runs-on: ubuntu-latest
     container: rust:1.95-slim-bookworm
