@@ -47,7 +47,7 @@ inputs:
     required: false
     default: "20"
   baseline:
-    description: 'stable = compare with the latest stable release only; any = include prereleases.'
+    description: 'stable = compare with the latest stable release only; any = include prereleases. PRs always use any.'
     required: false
     default: stable
   max-crates:

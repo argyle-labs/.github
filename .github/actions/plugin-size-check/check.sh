@@ -64,12 +64,13 @@ if [ -n "${DIST_DIR:-}" ]; then
   fi
 fi
 
+channel=$(baseline_channel "${PR_NUMBER:-}" "${BASELINE:-stable}")
 base_tag=""
 base_sizes=()
 for b in ${bins[@]+"${bins[@]}"}; do
   t=""; s=""
-  read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET" "${BASELINE:-stable}")" || true
-  if [ -z "$s" ] && [ "${BASELINE:-stable}" = stable ]; then
+  read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET" "$channel")" || true
+  if [ -z "$s" ] && [ "$channel" = stable ]; then
     read -r t s <<< "$(release_baseline "$releases" "$b" "$TARGET" any)" || true
   fi
   if [ -n "$s" ]; then
