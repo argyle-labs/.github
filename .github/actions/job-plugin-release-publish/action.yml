@@ -182,7 +182,7 @@ runs:
         TAG: ${{ steps.rel.outputs.tag }}
         DIST_DIR: dist
         SIZES_DIR: sizes
-        BUDGET_MIB: ${{ inputs.size-budget-mib }}
+        BUDGET_MIB: ${{ inputs.size-budget-mib || '20' }}
       run: bash "$GITHUB_ACTION_PATH/../plugin-size-check/release-size.sh"
 
     - name: Log in to ghcr.io (public image mirror)

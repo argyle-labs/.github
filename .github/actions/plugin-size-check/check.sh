@@ -12,7 +12,7 @@ auth=(-H "@$hdr/auth" -H "Accept: application/json")
 marker='<!-- plugin-size-check -->'
 
 size_pct=${SIZE_PCT:?}; warn_pct=${WARN_PCT:?}; crate_max=${CRATE_MAX:?}
-max_mib=$BUDGET_MIB; max_crates=${MAX_CRATES:-}
+max_mib=${BUDGET_MIB:-20}; max_crates=${MAX_CRATES:-}
 overridden=false
 for key in size-pct warn-pct crates max-mib max-crates; do
   v=$(toml_get "$budget_file" size-check "$key")

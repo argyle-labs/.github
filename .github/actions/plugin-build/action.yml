@@ -500,7 +500,7 @@ runs:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}
         dist-dir: dist
-        budget-mib: ${{ inputs.size-budget-mib }}
+        budget-mib: ${{ inputs.size-budget-mib || '20' }}
         baseline: ${{ contains(inputs.tag, '-rc.') && 'any' || 'stable' }}
 
     # Every target shares the budget, so one over it dooms the release; stop

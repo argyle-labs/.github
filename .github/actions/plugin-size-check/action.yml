@@ -43,7 +43,7 @@ inputs:
     required: false
     default: "15"
   budget-mib:
-    description: 'Absolute binary size budget (MiB). Empty = none.'
+    description: 'Absolute binary size budget (MiB). Empty = 20.'
     required: false
     default: "20"
   baseline:
