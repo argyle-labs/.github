@@ -31,15 +31,15 @@ inputs:
     required: false
     default: ""
   sccache-endpoint:
-    description: 'MinIO host:port for sccache (pass `vars.SCCACHE_ENDPOINT`).'
+    description: 'S3 cache host:port for sccache (pass `vars.SCCACHE_ENDPOINT`).'
     required: false
     default: ""
   sccache-access-key:
-    description: 'MinIO access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`).'
+    description: 'S3 cache access key (pass `secrets.SCCACHE_S3_ACCESS_KEY`).'
     required: false
     default: ""
   sccache-secret-key:
-    description: 'MinIO secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
+    description: 'S3 cache secret key (pass `secrets.SCCACHE_S3_SECRET_KEY`).'
     required: false
     default: ""
 
@@ -185,16 +185,11 @@ runs:
           echo '```'
           echo "$stats"
           echo '```'
-          # ReadOnly mode fails every write without ever completing one.
-          werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
-          wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
-          if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
-            echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
-          fi
         } | tee -a "$GITHUB_STEP_SUMMARY"
         if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
           echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
         fi
+        /bin/bash "$GITHUB_ACTION_PATH/../sccache-guard/guard.sh" stats || exit 1
     - name: Upload build-${{ inputs.target }}
       uses: actions/upload-artifact@v4
       with:

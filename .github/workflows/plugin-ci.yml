@@ -66,7 +66,7 @@ env:
   CARGO_HTTP_MULTIPLEXING: "false"
   CARGO_NET_RETRY: "10"
   CARGO_HTTP_TIMEOUT: "60"
-  # sccache backed by the fleet MinIO. The endpoint comes from an org variable
+  # sccache backed by the fleet S3 cache. The endpoint comes from an org variable
   # because this repo mirrors to public GitHub. sccache and incremental
   # compilation are mutually exclusive; CARGO_INCREMENTAL=1 silently disables
   # every cache hit.
@@ -183,7 +183,7 @@ jobs:
           [ "$MODE" = enforce ] && exit 1
           exit 0
 
-      # Starting the server up front runs sccache's storage check against MinIO,
+      # Starting the server up front runs sccache's storage check against the S3 cache,
       # so an unreachable backend falls back to an uncached build in seconds
       # with a visible warning instead of stalling inside the first rustc. The
       # wrappers are exported only on success (cc-rs honours a multi-word
@@ -195,12 +195,14 @@ jobs:
           if timeout 60 sccache --start-server; then
             echo "sccache server up ($SCCACHE_ENDPOINT/$SCCACHE_BUCKET)"
             { echo "RUSTC_WRAPPER=sccache"; echo "CC=sccache cc"; echo "CXX=sccache c++"; } >> "$GITHUB_ENV"
-            if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
-              echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (backend write check failed): cache will not fill; check MinIO disk. $(tr '\n' ' ' <<< "$ro")"
-            fi
           else
-            echo "::warning title=sccache unavailable::sccache server did not start against the MinIO backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
+            echo "::warning title=sccache unavailable::sccache server did not start against the S3 cache backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
           fi
+
+      - name: sccache read-only check
+        uses: argyle-labs/.github/.github/actions/sccache-guard@main
+        with:
+          check: errlog
 
       # orca's plugin-toolkit is pinned to the PUBLIC github.com/argyle-labs/orca
       # mirror and fetched from github directly — no auth, no insteadOf rewrite.
@@ -286,13 +288,13 @@ jobs:
             echo '```'
             echo "$stats"
             echo '```'
-            # ReadOnly mode fails every write without ever completing one.
-            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
-            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
-            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
-              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
-            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
           if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
             echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
           fi
+
+      - name: sccache read-only check (stats)
+        if: ${{ !cancelled() }}
+        uses: argyle-labs/.github/.github/actions/sccache-guard@main
+        with:
+          check: stats

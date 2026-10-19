@@ -53,7 +53,7 @@ if [ -z "$workflow_blob" ]; then
 fi
 
 # This repo's actions and workflows, as checked out for this action.
-actions=$(cd "$(dirname "$0")/../.." && find actions workflows -type f | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -d' ' -f1)
+actions=$(cd "$(dirname "$0")/../.." && find actions workflows -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 
 declare -A extra
 extra_all=()
@@ -100,6 +100,7 @@ owner() {
 }
 embed_macro_re='\b(include|include_str|include_bytes|include_dir|migrate)!\('
 embed_re='\b(include|include_str|include_bytes|include_dir|migrate)!\( *"[^"]+" *\)|#\[folder *= *"[^"]+"\]|\b(include|include_str|include_bytes|include_dir)!\( *(concat!\( *)?env!\( *"[^"]+"'
+source "$(dirname "$0")/../path-utils/normpath.sh"
 idx() {
   local pre=${1%%"$2"*}
   if [ "$pre" = "$1" ]; then echo 0; else echo $((${#pre} + 1)); fi
@@ -228,9 +229,9 @@ while IFS= read -r file; do
         exit 1
       fi
       if $dir_arg; then
-        target=$(realpath -m --relative-to=. "$base/$path")
+        target=$(normpath "$base/$path")
       else
-        target=$(realpath -m --relative-to=. "$base/$(dirname "$path")")
+        target=$(normpath "$base/$(dirname "$path")")
       fi
       if [ "$cdir" = . ]; then
         case "$target" in ..|../*) ;; *) continue ;; esac
@@ -248,7 +249,7 @@ while IFS= read -r file; do
       extra[$crate]="${extra[$crate]:-} $target"
     done < <(grep -oE "$embed_re" <<< "$line")
   done < <(grep -nE "$embed_macro_re|#\\[folder" <<< "$stripped" || true)
-done < <(git grep -lE "$embed_macro_re|#\\[folder" -- '*.rs' || true)
+done < <(git grep -lE "(^|[^A-Za-z0-9_])${embed_macro_re#\\b}|#\\[folder" -- '*.rs' || true)
 
 common=$(
   {

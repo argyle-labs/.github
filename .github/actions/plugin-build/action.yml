@@ -27,14 +27,14 @@ inputs:
     description: Gitea token with read on argyle-labs/orca.
     required: true
   sccache-access-key:
-    description: MinIO access key for the shared sccache bucket. Empty = no sccache.
+    description: S3 access key for the shared sccache bucket. Empty = no sccache.
     required: false
     default: ""
   sccache-secret-key:
     required: false
     default: ""
   sccache-endpoint:
-    description: MinIO host:port (pass vars.SCCACHE_ENDPOINT). Empty = no sccache.
+    description: S3 cache host:port (pass vars.SCCACHE_ENDPOINT). Empty = no sccache.
     required: false
     default: ""
   sccache-region:
@@ -310,7 +310,7 @@ runs:
       run: rustup target add "$TARGET"
 
     # Starting the server up front runs sccache's storage check, so a dead
-    # MinIO backend degrades to an uncached build in seconds, visibly.
+    # S3 cache backend degrades to an uncached build in seconds, visibly.
     # IDLE_TIMEOUT=0: the idle timer only resets on new requests, so a single
     # rustc running past the 600s default made the server shut down under it.
     - name: sccache preflight
@@ -351,11 +351,9 @@ runs:
         : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
         if ${to:+$to 60} sccache --start-server; then
           echo "ok=true" >> "$GITHUB_OUTPUT"
-          if ro=$(grep -A 5 'storage write check failed' "$SCCACHE_ERROR_LOG" 2>/dev/null); then
-            echo "::error title=sccache READ-ONLY::sccache cache is READ-ONLY (backend write check failed): cache will not fill; check MinIO disk. $(tr '\n' ' ' <<< "$ro")"
-          fi
+          /bin/bash "$GITHUB_ACTION_PATH/../sccache-guard/guard.sh" errlog "$SCCACHE_ERROR_LOG" || exit 1
         else
-          echo "::warning title=sccache unavailable::sccache server did not start against the MinIO backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
+          echo "::warning title=sccache unavailable::sccache server did not start against the S3 cache backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
           echo "ok=false" >> "$GITHUB_OUTPUT"
         fi
 
@@ -522,16 +520,13 @@ runs:
             echo '```'
             echo "$stats"
             echo '```'
-            # ReadOnly mode fails every write without ever completing one.
-            werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
-            wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
-            if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
-              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
-            fi
           fi
         } | tee -a "$GITHUB_STEP_SUMMARY"
         if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
           echo "::warning title=sccache errors::$(tr '\n' ' ' <<< "$errs")"
+        fi
+        if [ "$SCCACHE_OK" = "true" ] && [ "$SLOT" != "true" ]; then
+          /bin/bash "$GITHUB_ACTION_PATH/../sccache-guard/guard.sh" stats || exit 1
         fi
 
     - name: Stop sccache server (persistent macOS host)
