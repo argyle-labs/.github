@@ -92,8 +92,8 @@ runs:
       uses: argyle-labs/.github/.github/actions/rust-release-profile@main
       with:
         strip: symbols
-        lto: fat
-        codegen-units: "1"
+        lto: ${{ steps.rel.outputs.prerelease == 'true' && 'thin' || 'fat' }}
+        codegen-units: ${{ steps.rel.outputs.prerelease == 'true' && '16' || '1' }}
         opt-level: s
     - name: Set up Rust (toolchain, sccache)
       uses: argyle-labs/.github/.github/actions/rust-setup@main

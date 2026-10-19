@@ -501,6 +501,7 @@ runs:
         bins: ${{ steps.bins.outputs.list }}
         dist-dir: dist
         budget-mib: ${{ inputs.size-budget-mib }}
+        baseline: ${{ contains(inputs.tag, '-rc.') && 'any' || 'stable' }}
 
     # Every target shares the budget, so one over it dooms the release; stop
     # the sibling builds instead of letting them run to the same failure.
