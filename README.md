@@ -285,6 +285,39 @@ PR validation is opt-in. Both `plugin-ci-rust*.yml` templates end with a comment
 
 Registries: Gitea (`gitea.scottkey.me`) is the primary, private registry and holds every tag, including `tree-*`. `ghcr.io/argyle-labs/<repo>` is the public mirror of release tags only. After a successful promote, the `release` job copies `<version>` and `latest`/`rc` from Gitea to ghcr.io with `docker buildx imagetools create`, so the manifest list (every platform) is copied and nothing is rebuilt. It logs in with `secrets.GH_TOKEN`. A failed mirror emits a warning and a step-summary line, and the release still succeeds. Pass `image_public: false` to opt out. Public docs on GitHub reference `ghcr.io` images; internal compose files and hosts pull from Gitea.
 
+Multi-arch images can also be built from the release itself, after `publish`: a `build-image` matrix job per platform (each on a runner of that arch) calls `job-image-build-platform` with `ref: ${{ needs.version.outputs.tag }}`, so it builds exactly the tagged commit and pushes by digest; an `image` job (`needs: build-image`) calls `job-image-merge` with `tags:` set to the version plus `latest` for stable or `rc` for rc. Running after `publish` keeps a failed image build from blocking the release.
+
+```yaml
+build-image:
+  needs: [version, publish]
+  strategy:
+    matrix:
+      include:
+        - { platform: linux/amd64, runner: ubuntu-latest }
+        - { platform: linux/arm64, runner: arm64 }
+  runs-on: ${{ matrix.runner }}
+  steps:
+    - uses: argyle-labs/.github/.github/actions/job-image-build-platform@main
+      with:
+        ref: ${{ needs.version.outputs.tag }}
+        image: argyle-labs/${{ github.event.repository.name }}
+        platform: ${{ matrix.platform }}
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+image:
+  needs: [version, build-image]
+  runs-on: ubuntu-latest
+  steps:
+    - uses: argyle-labs/.github/.github/actions/job-image-merge@main
+      with:
+        image: argyle-labs/${{ github.event.repository.name }}
+        tags: |
+          ${{ needs.version.outputs.version }}
+          ${{ needs.version.outputs.prerelease == 'true' && 'rc' || 'latest' }}
+        username: ${{ secrets.CI_REGISTRY_USER }}
+        password: ${{ secrets.CI_REGISTRY_TOKEN }}
+```
+
 `registry-login` holds the shared Buildx setup (including the plain-HTTP buildkitd config) and the registry login that both image actions use. Pass `setup-buildx: 'false'` to log in to a second registry (ghcr.io) on top of an earlier login.
 
 ### Adding a tool step
