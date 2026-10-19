@@ -193,7 +193,11 @@ runs:
             echo "::warning title=sccache unavailable::sccache ($backend) did not start; building UNCACHED. $(tail -n 5 "$err_log" 2>/dev/null | tr '\n' ' ')"
             backend=none
           elif ro=$(grep -A 5 'storage write check failed' "$err_log" 2>/dev/null); then
-            echo "::error title=sccache READ-ONLY::sccache ($backend) cache is READ-ONLY (backend write check failed): cache will not fill; check backend disk/permissions. $(tr '\n' ' ' <<< "$ro")"
+            msg="sccache ($backend) cache is READ-ONLY (backend write check failed): cache will not fill; check backend disk/permissions. $(tr '\n' ' ' <<< "$ro")"
+            case "${GITHUB_EVENT_NAME:-}" in
+              pull_request|pull_request_target) echo "::warning title=sccache READ-ONLY::$msg" ;;
+              *) echo "::error title=sccache READ-ONLY::$msg"; exit 1 ;;
+            esac
           fi
         fi
         echo "sccache backend: $backend"
