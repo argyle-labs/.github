@@ -23,7 +23,7 @@ inputs:
     required: false
     default: "true"
   targets:
-    description: 'JSON array of every target triple that must have a binary, darwin included (darwin is not required on -rc. tags).'
+    description: 'JSON array of every target triple that must have a binary, darwin included.'
     required: true
   asset-profile:
     description: 'full (orca: binaries + packages) | binaries (plugins).'
@@ -101,7 +101,6 @@ runs:
         done
         IFS=, read -ra targets <<< "${TARGETS//[][\"[:space:]]/}"
         for t in "${targets[@]}"; do
-          case "$TAG" in *-rc.*) case "$t" in *-apple-darwin) continue ;; esac ;; esac
           if [ "$PROFILE" = full ]; then bins=(release-assets/orca-"$t"); else bins=(release-assets/*-"${TAG}-${t}"); fi
           [ -f "${bins[0]:-}" ] || { echo "::error::no binary for requested target $t"; bad=1; }
         done
