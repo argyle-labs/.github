@@ -30,11 +30,11 @@ runs:
         fetch-depth: 0
     - name: Compute version
       id: cv
-      uses: argyle-labs/.github/.github/actions/compute-version@main
+      uses: argyle-labs/.github/.github/actions/compute-version@v1
       with:
         bump: ${{ inputs.bump }}
     - name: Replace draft RC
-      uses: argyle-labs/.github/.github/actions/release-draft@main
+      uses: argyle-labs/.github/.github/actions/release-draft@v1
       with:
         release-token: ${{ inputs.release-token }}
         tag: ${{ steps.cv.outputs.rc-tag }}

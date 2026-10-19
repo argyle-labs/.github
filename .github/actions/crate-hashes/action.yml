@@ -6,7 +6,7 @@ description: >
   inputs (Cargo.lock, root Cargo.toml, rust-toolchain*, .cargo/config.toml,
   the calling workflow file, this repo's actions and workflows, image tag,
   `rustc -vV`). Pin every argyle-labs/.github action to the same ref: nested
-  actions are pulled `@main`. The closure is resolved
+  actions are pulled `@v1`. The closure is resolved
   with all features enabled. Feeds ci-pass-cache's batch modes.
 
 inputs:

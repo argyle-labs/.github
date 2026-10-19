@@ -46,7 +46,7 @@ runs:
   steps:
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@main
+      uses: argyle-labs/.github/.github/actions/release-tag@v1
       with:
         tag: ${{ inputs.tag }}
     - name: Gather all release assets
@@ -129,7 +129,7 @@ runs:
       uses: dtolnay/rust-toolchain@stable
     - name: Write release version (write-release-version)
       if: ${{ inputs.draft != 'true' && inputs.version-commit != 'false' }}
-      uses: argyle-labs/.github/.github/actions/write-release-version@main
+      uses: argyle-labs/.github/.github/actions/write-release-version@v1
       with:
         version: ${{ steps.rel.outputs.version }}
         working-directory: repo
@@ -156,7 +156,7 @@ runs:
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "→ tag ${TAG} will point at $(git rev-parse HEAD)"
     - name: Publish to Gitea (publish-gitea)
-      uses: argyle-labs/.github/.github/actions/publish-gitea@main
+      uses: argyle-labs/.github/.github/actions/publish-gitea@v1
       with:
         gitea-token: ${{ inputs.release-token }}
         tag: ${{ steps.rel.outputs.tag }}
@@ -168,7 +168,7 @@ runs:
         assets-dir: release-assets
     - name: Mirror to GitHub (mirror-github)
       if: ${{ inputs.mirror == 'true' }}
-      uses: argyle-labs/.github/.github/actions/mirror-github@main
+      uses: argyle-labs/.github/.github/actions/mirror-github@v1
       with:
         github-token: ${{ inputs.github-token }}
         gitea-token: ${{ inputs.release-token }}

@@ -77,7 +77,7 @@ runs:
         fi
     - name: Select crates
       id: sel
-      uses: argyle-labs/.github/.github/actions/crate-select@main
+      uses: argyle-labs/.github/.github/actions/crate-select@v1
       with:
         job: ${{ steps.key.outputs.job }}
         image: ci-rust:${{ inputs.image-tag }}
@@ -143,7 +143,7 @@ runs:
       run: echo "Unchanged — reusing test pass for every crate" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
       if: ${{ steps.run.outputs.filter != '' }}
-      uses: argyle-labs/.github/.github/actions/rust-setup@main
+      uses: argyle-labs/.github/.github/actions/rust-setup@v1
       with:
         drop-cargo-config: ${{ inputs.drop-cargo-config }}
         fast-linker: 'true'
@@ -159,7 +159,7 @@ runs:
           OPENSSL_NO_VENDOR=1
     - name: Fetch artifacts
       if: ${{ steps.run.outputs.filter != '' }}
-      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@v1
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
     - name: Download test archive
@@ -169,13 +169,13 @@ runs:
         name: nextest-archive
     - name: Coverage (cargo llvm-cov)
       if: ${{ steps.run.outputs.filter != '' }}
-      uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@main
+      uses: argyle-labs/.github/.github/actions/cargo-llvm-cov@v1
       with:
         nextest-args: --no-fail-fast --no-tests=pass ${{ steps.run.outputs.filter != 'all' && format('-E {0}', steps.run.outputs.filter) || '' }}
         partition: ${{ inputs.partition }}
     - name: Record pass
       if: ${{ success() && steps.run.outputs.filter != '' }}
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
       with:
         mode: record-batch
         job: ${{ steps.key.outputs.job }}
@@ -186,4 +186,4 @@ runs:
         secret-key: ${{ inputs.sccache-secret-key }}
     - name: CI summary
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/ci-summary@main
+      uses: argyle-labs/.github/.github/actions/ci-summary@v1

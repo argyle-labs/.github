@@ -51,7 +51,7 @@ runs:
       uses: actions/checkout@v4
     - name: Source hash
       id: src
-      uses: argyle-labs/.github/.github/actions/source-hash@main
+      uses: argyle-labs/.github/.github/actions/source-hash@v1
       with:
         actions: job-rust-doctest
         image: ci-rust:${{ inputs.image-tag }}
@@ -59,7 +59,7 @@ runs:
         extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
     - name: Check pass cache
       id: pass
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
       with:
         mode: check
         job: doctest
@@ -76,7 +76,7 @@ runs:
       run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
       if: ${{ steps.pass.outputs.hit != 'true' }}
-      uses: argyle-labs/.github/.github/actions/rust-setup@main
+      uses: argyle-labs/.github/.github/actions/rust-setup@v1
       with:
         fast-linker: 'true'
         wrap-cc: 'true'
@@ -93,7 +93,7 @@ runs:
           OPENSSL_NO_VENDOR=1
     - name: Fetch artifacts
       if: ${{ steps.pass.outputs.hit != 'true' }}
-      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@v1
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
     - name: Doctests (cargo test --doc)
@@ -112,7 +112,7 @@ runs:
         cargo test --locked ${args[@]+"${args[@]}"} --doc
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
       with:
         mode: record
         job: doctest
@@ -122,4 +122,4 @@ runs:
         secret-key: ${{ inputs.sccache-secret-key }}
     - name: CI summary
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/ci-summary@main
+      uses: argyle-labs/.github/.github/actions/ci-summary@v1

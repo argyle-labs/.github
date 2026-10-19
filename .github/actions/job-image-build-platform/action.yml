@@ -74,7 +74,7 @@ runs:
         echo "cache=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
 
     - name: Registry login
-      uses: argyle-labs/.github/.github/actions/registry-login@main
+      uses: argyle-labs/.github/.github/actions/registry-login@v1
       with:
         registry: ${{ inputs.registry }}
         registry-http: ${{ inputs.registry-http }}

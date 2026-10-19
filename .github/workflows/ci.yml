@@ -10,7 +10,7 @@ name: CI
 #   jobs:
 #     ci:
 #       if: github.event_name == 'pull_request'
-#       uses: argyle-labs/.github/.github/workflows/ci.yml@main
+#       uses: argyle-labs/.github/.github/workflows/ci.yml@v1
 #       secrets: inherit
 
 on:
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust setup (toolchain + caching + orca dep auth)
-        uses: argyle-labs/.github/.github/actions/rust-setup@main
+        uses: argyle-labs/.github/.github/actions/rust-setup@v1
         with:
           components: clippy, rustfmt
           cache-key: test
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust setup (toolchain + caching + orca dep auth)
-        uses: argyle-labs/.github/.github/actions/rust-setup@main
+        uses: argyle-labs/.github/.github/actions/rust-setup@v1
         with:
           cache-key: ${{ matrix.target }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
@@ -87,7 +87,7 @@ jobs:
           echo "bins: $(echo "$bins" | paste -sd, -)"
 
       - name: Build (no version write — builds at committed version)
-        uses: argyle-labs/.github/.github/actions/build-target@main
+        uses: argyle-labs/.github/.github/actions/build-target@v1
         with:
           target: ${{ matrix.target }}
           bins: ${{ steps.bins.outputs.list }}

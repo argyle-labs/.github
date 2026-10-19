@@ -179,7 +179,7 @@ runs:
     # workspace that rust-cache does not track.
     - name: Release size profile
       id: relprof
-      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@v1
       with:
         strip: ${{ inputs.profile-strip }}
         lto: ${{ inputs.profile-lto }}
@@ -406,7 +406,7 @@ runs:
         [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with no .cargo/config.toml and commit"; diff <(echo "$before") <(echo "$after"); exit 1; }
 
     - name: Fetch dependencies
-      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@v1
       with:
         phases-file: ${{ runner.temp }}/plugin-build-phases
 
@@ -495,7 +495,7 @@ runs:
 
     - name: Plugin size check
       id: size
-      uses: argyle-labs/.github/.github/actions/plugin-size-check@main
+      uses: argyle-labs/.github/.github/actions/plugin-size-check@v1
       with:
         target: ${{ inputs.target }}
         bins: ${{ steps.bins.outputs.list }}

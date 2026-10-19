@@ -31,7 +31,7 @@ runs:
   steps:
     - name: Write release version (write-release-version)
       if: ${{ inputs.version != '' }}
-      uses: argyle-labs/.github/.github/actions/write-release-version@main
+      uses: argyle-labs/.github/.github/actions/write-release-version@v1
       with:
         version: ${{ inputs.version }}
 

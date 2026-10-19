@@ -61,14 +61,14 @@ runs:
   steps:
     - name: Crate hashes
       id: src
-      uses: argyle-labs/.github/.github/actions/crate-hashes@main
+      uses: argyle-labs/.github/.github/actions/crate-hashes@v1
       with:
         image: ${{ inputs.image }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: ${{ inputs.extra-paths }}
     - name: Check pass cache
       id: pass
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@v1
       with:
         mode: check-batch
         job: ${{ inputs.job }}

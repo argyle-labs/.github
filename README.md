@@ -185,7 +185,7 @@ Start from a template:
 | `CI_ACTIONS_REF` | Ref of `argyle-labs/.github` to run (`v1`, `v1.2.0`, a branch) | `v1` |
 | `GIT_SERVER_URL` | Git server to check it out from | the server running the workflow |
 
-GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL and `CI_ACTIONS_REF` to the chosen version. A `vX.Y.Z` tag push or published `vX.Y.Z` release moves `vX` to it ([`actions-major-tag.yml`](.github/workflows/actions-major-tag.yml)); prereleases are skipped. Until the first `v1.0.0` release exists, `v1` does not resolve and callers must set `CI_ACTIONS_REF`.
+GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL and `CI_ACTIONS_REF` to the chosen version. Every push to `main` tags it `v1.N.0` (next N) and moves `v1` there; a `vX.Y.Z` tag push or published `vX.Y.Z` release also moves `vX` to it ([`actions-major-tag.yml`](.github/workflows/actions-major-tag.yml)); prereleases are skipped.
 
 ```yaml
 - uses: actions/checkout@v4
@@ -221,7 +221,7 @@ GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL a
 | `job-shell-lint` | `lint-shell` (host docker, no `container:`) | `bash -n`, then shellcheck from `koalaman/shellcheck:v0.9.0` | `files`, `working-directory` |
 | `job-compose-validate` | `ci` (compose repos; `workflows/compose-ci.yml` calls it) | compose-file YAML parse, then `docker compose config -q` when the CLI is present, with empty placeholders for missing `env_file:` targets | `paths` |
 
-`image-tag` (default `1.95.0`) and `workflow-file` (default `.github/workflows/ci.yml`) feed the source hash; set them when a repo's `container:` tag or workflow path differs. `ui: 'true'` hashes `ui/` and places the `vite-dist` artifact, so that job `needs: build-ui`. `features` (default `--all-features`) follows the package selection. `force: 'true'` (orca passes it on non-PR events) ignores recorded passes. Composites cannot read `secrets` or `vars`, so each job passes `sccache-endpoint` / `sccache-access-key` / `sccache-secret-key` from `vars.SCCACHE_ENDPOINT` and `secrets.SCCACHE_S3_*`. A `workflow_dispatch` input named `force` bypasses the pass cache. Nested actions are pulled `@main`, so a job action pinned to a branch still runs `main`'s tool actions.
+`image-tag` (default `1.95.0`) and `workflow-file` (default `.github/workflows/ci.yml`) feed the source hash; set them when a repo's `container:` tag or workflow path differs. `ui: 'true'` hashes `ui/` and places the `vite-dist` artifact, so that job `needs: build-ui`. `features` (default `--all-features`) follows the package selection. `force: 'true'` (orca passes it on non-PR events) ignores recorded passes. Composites cannot read `secrets` or `vars`, so each job passes `sccache-endpoint` / `sccache-access-key` / `sccache-secret-key` from `vars.SCCACHE_ENDPOINT` and `secrets.SCCACHE_S3_*`. A `workflow_dispatch` input named `force` bypasses the pass cache. Nested actions are pulled `@v1`, so a job action pinned to a branch still runs `v1`'s tool actions.
 
 ### Release job actions
 
@@ -259,7 +259,7 @@ Each job declares the `ci-rust` `container:` with `credentials:` from `secrets.C
 
 CI-only and doc-only changes do not rebuild or retest. `test-ui` runs `source-hash` after checkout, then `ci-pass-cache` in `check` mode; on a hit, a `Reuse unchanged pass` step writes "Unchanged source — reusing pass from <sha>" to the log and step summary, and every heavy step is skipped (`if: steps.pass.outputs.hit != 'true'`). On success a `Record pass` step writes the marker. Each job passes its own action name as `source-hash`'s `actions` input, so only the shared actions that job reaches are hashed; an unrelated `.github` change keeps the pass. `build`, `test` and `lint` use the per-crate cache below. `build` skips `cargo test --doc` when no selected library target has a fenced code block in a doc comment.
 
-The hash covers `git ls-files -s` blob ids (no file contents are read) of: tracked `*.rs`, every `Cargo.toml` and `Cargo.lock`, `build.rs`, `rust-toolchain*`, `.cargo/config.toml`, everything under any `tests/` directory, the directory of each literal `include_str!`/`include_bytes!` target (resolved against the including file) and each rust-embed `#[folder = "..."]` (resolved against the crate dir), with a leading `$CARGO_MANIFEST_DIR` taken as the crate dir and `//` comment lines skipped, plus the `image` input (the ci-rust tag) and `rustc -vV`. Paths the scan cannot see (non-literal include paths, frontend sources, fixtures elsewhere) go in `extra-paths`: the UI template passes `ui`. The calling workflow file's blob is hashed too (the `workflow-file` input, repo-root relative; the templates pass `.github/workflows/ci.yml`; else the path from `GITHUB_WORKFLOW_REF`), so changing build flags or steps invalidates every pass. The content of `.github/actions/` and `.github/workflows/` in the checkout of this repo that the action runs from is hashed as well. Nested actions are pulled `@main`, so that content matches what runs only when the caller pins every `argyle-labs/.github` action to the same ref (the templates use `@main` throughout). A pilot that pins a job action to a branch must run with `force: true`: the hashed action content comes from `@main`, so a branch run would record a pass against `main`'s hash for unmerged action changes. An unresolvable workflow file, an `extra-paths` entry matching no tracked file, a literal include or folder target outside `working-directory` or with no tracked files, or an include path using any other `$VAR` or `env!()` (use `extra-paths`) fails the step.
+The hash covers `git ls-files -s` blob ids (no file contents are read) of: tracked `*.rs`, every `Cargo.toml` and `Cargo.lock`, `build.rs`, `rust-toolchain*`, `.cargo/config.toml`, everything under any `tests/` directory, the directory of each literal `include_str!`/`include_bytes!` target (resolved against the including file) and each rust-embed `#[folder = "..."]` (resolved against the crate dir), with a leading `$CARGO_MANIFEST_DIR` taken as the crate dir and `//` comment lines skipped, plus the `image` input (the ci-rust tag) and `rustc -vV`. Paths the scan cannot see (non-literal include paths, frontend sources, fixtures elsewhere) go in `extra-paths`: the UI template passes `ui`. The calling workflow file's blob is hashed too (the `workflow-file` input, repo-root relative; the templates pass `.github/workflows/ci.yml`; else the path from `GITHUB_WORKFLOW_REF`), so changing build flags or steps invalidates every pass. The content of `.github/actions/` and `.github/workflows/` in the checkout of this repo that the action runs from is hashed as well. Nested actions are pulled `@v1`, so that content matches what runs only when the caller pins every `argyle-labs/.github` action to the same ref (the templates use `@v1` throughout). A pilot that pins a job action to a branch must run with `force: true`: the hashed action content comes from `@v1`, so a branch run would record a pass against `v1`'s hash for unmerged action changes. An unresolvable workflow file, an `extra-paths` entry matching no tracked file, a literal include or folder target outside `working-directory` or with no tracked files, or an include path using any other `$VAR` or `env!()` (use `extra-paths`) fails the step.
 
 Markers live at `s3://<sccache bucket>/ci-pass/<repo>/<job>/<hash>` on the sccache S3 cache (same endpoint and keys as `rust-setup`), written with `curl --aws-sigv4`; the body is the commit sha that passed.
 
@@ -299,7 +299,7 @@ build-image:
         - { platform: linux/arm64, runner: arm64 }
   runs-on: ${{ matrix.runner }}
   steps:
-    - uses: argyle-labs/.github/.github/actions/job-image-build-platform@main
+    - uses: argyle-labs/.github/.github/actions/job-image-build-platform@v1
       with:
         ref: ${{ needs.version.outputs.tag }}
         image: argyle-labs/${{ github.event.repository.name }}
@@ -310,7 +310,7 @@ image:
   needs: [version, build-image]
   runs-on: ubuntu-latest
   steps:
-    - uses: argyle-labs/.github/.github/actions/job-image-merge@main
+    - uses: argyle-labs/.github/.github/actions/job-image-merge@v1
       with:
         image: argyle-labs/${{ github.event.repository.name }}
         tags: |
@@ -324,7 +324,7 @@ image:
 
 ### Adding a tool step
 
-Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` to the job action (or orca job) of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
+Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@v1` to the job action (or orca job) of the check it belongs to, with `if: ${{ !cancelled() }}` when it is not the first tool step, and `with:` for any inputs. No other wiring. Node tools each run `npm ci` unless `install: 'false'`; set that on every node step after the first in a job.
 
 ### Job setup: `rust-setup`
 

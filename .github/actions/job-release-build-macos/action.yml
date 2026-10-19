@@ -42,7 +42,7 @@ runs:
   steps:
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@main
+      uses: argyle-labs/.github/.github/actions/release-tag@v1
       with:
         tag: ${{ inputs.tag }}
     - name: Checkout
@@ -67,7 +67,7 @@ runs:
       shell: bash
       run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
     - name: Build darwin binary natively (mint-cargo-slot)
-      uses: argyle-labs/.github/.github/actions/mint-cargo-slot@main
+      uses: argyle-labs/.github/.github/actions/mint-cargo-slot@v1
       with:
         scope: ${{ steps.rel.outputs.prerelease == 'true' && format('{0}-rc', inputs.slot-scope) || inputs.slot-scope }}
         target: ${{ inputs.target }}
