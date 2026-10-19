@@ -1,6 +1,7 @@
 name: CI job — rust doctest
 description: >
-  The whole `lint-doctest` job: `cargo test --doc`, which nextest cannot run,
+  Superseded: job-rust-build runs the doctests against its compiled tree; drop
+  the `lint-doctest` job. The whole `lint-doctest` job: `cargo test --doc`, which nextest cannot run,
   so rustdoc compiles the crate tree uninstrumented (sccache-backed). Runs
   beside `build`, off the build -> test path. Skipped when this source hash
   already passed `doctest`.
