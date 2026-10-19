@@ -1,16 +1,6 @@
-# Example: how orca's ci.yml composes the same actions. orca keeps its own
-# change detection and test scoping, feeding the scoped package list into
-# `args` and its test env (ORCA_TEST_FAST_KDF, ...) into rust-setup's `env`.
+# orca's ci.yml: the same three job actions as the plugin templates, with orca's
+# inputs. Copy to .github/workflows/ci.yml; add no steps here.
 
-# Required checks are exactly the jobs `build`, `test` and `lint`. Tests run
-# once, coverage-instrumented: `test` also reports coverage (report-only).
-# Each job composes tool actions as steps, so each job IS one
-# check. Later steps run `if: !cancelled()` so every tool reports.
-# `build` and `test` compile and test only the crates whose inputs changed
-# since a recorded pass, intersected with `changes` (see the README's
-# per-crate pass cache section); `lint` always runs.
-# The nightly schedule forces a full run.
-# A new push to a ref cancels that ref's in-flight run.
 name: CI
 
 on:
@@ -18,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: 'Ignore the pass cache and run build + test in full'
+        description: 'Ignore the pass cache'
         type: boolean
         default: false
   schedule:
@@ -28,238 +18,80 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
-  CARGO_TERM_COLOR: always
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_HTTP_MULTIPLEXING: "false"
-  CARGO_NET_RETRY: "10"
-  CARGO_HTTP_TIMEOUT: "60"
-  CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
-  OPENSSL_NO_VENDOR: "1"
+  RUST_BACKTRACE: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Cheap KDF for test builds only; release binaries ignore it.
+  ORCA_TEST_FAST_KDF: "1"
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      packages: ${{ steps.scope.outputs.packages }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      # Emits e.g. "-p server -p system" for a PR, "--workspace" otherwise.
-      - name: Scope packages
-        id: scope
-        run: echo "packages=--workspace" >> "$GITHUB_OUTPUT"
-
   build:
-    needs: changes
     runs-on: ci-large
     container:
       image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
       credentials:
         username: ${{ secrets.CI_REGISTRY_USER }}
         password: ${{ secrets.CI_REGISTRY_TOKEN }}
-    defaults:
-      run:
-        shell: bash
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Crate hashes
-        id: src
-        uses: argyle-labs/.github/.github/actions/crate-hashes@main
+      - name: Build
+        uses: argyle-labs/.github/.github/actions/job-rust-build@main
         with:
-          image: ci-rust:1.95.0
-          workflow-file: .github/workflows/ci.yml
-      - name: Check pass cache per crate
-        id: pass
-        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
-        with:
-          mode: check-batch
-          job: build
-          also-require: test
-          hashes: ${{ steps.src.outputs.hashes }}
-          force: ${{ (inputs.force || github.event_name == 'schedule') && 'true' || 'false' }}
-          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
-          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - name: Select crates to build
-        id: sel
-        env:
-          MISSING: ${{ steps.pass.outputs.missing }}
-          CHANGED: ${{ needs.changes.outputs.packages }}
-        run: |
-          crates=$(jq -c --arg changed "$CHANGED" '
-            if $changed == "--workspace" then .
-            else ($changed | split(" ") | map(select(. != "" and . != "-p"))) as $w
-              | map(select(. as $c | $w | index($c)))
-            end' <<< "$MISSING")
-          echo "crates=$crates" >> "$GITHUB_OUTPUT"
-          echo "packages=$(jq -r 'map("-p " + .) | join(" ")' <<< "$crates")" >> "$GITHUB_OUTPUT"
-          if [ "$crates" = '[]' ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "All affected crates unchanged — reusing passes" | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Set up Rust (toolchain, sccache)
-        if: ${{ steps.sel.outputs.skip != 'true' }}
-        uses: argyle-labs/.github/.github/actions/rust-setup@main
-        with:
+          extra-paths: "orca-inventory-tests: README.md CRATE_RESPONSIBILITIES.md projects docs"
+          features: ""
+          force: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
           drop-cargo-config: 'false'
-          wrap-cc: 'true'
+          version-env: ORCA_RELEASE_VERSION
+          doctests: 'false'
+          size-check: 'false'
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-          env: |
-            ORCA_TEST_FAST_KDF=1
-      - name: Build test archive (cargo llvm-cov nextest-archive)
-        if: ${{ steps.sel.outputs.skip != 'true' }}
-        uses: argyle-labs/.github/.github/actions/cargo-build@main
-        with:
-          args: ${{ steps.sel.outputs.packages }} --all-features
-      - name: Record pass
-        if: ${{ success() && steps.sel.outputs.skip != 'true' }}
-        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
-        with:
-          mode: record-batch
-          job: build
-          hashes: ${{ steps.src.outputs.hashes }}
-          crates: ${{ steps.sel.outputs.crates }}
-          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
-          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - name: CI summary
-        uses: argyle-labs/.github/.github/actions/ci-summary@main
-        if: ${{ !cancelled() }}
 
   test:
-    needs: [changes, build]
+    needs: build
     runs-on: ci-large
     container:
       image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
       credentials:
         username: ${{ secrets.CI_REGISTRY_USER }}
         password: ${{ secrets.CI_REGISTRY_TOKEN }}
-    defaults:
-      run:
-        shell: bash
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Crate hashes
-        id: src
-        uses: argyle-labs/.github/.github/actions/crate-hashes@main
+      - name: Test
+        uses: argyle-labs/.github/.github/actions/job-rust-test@main
         with:
-          image: ci-rust:1.95.0
-          workflow-file: .github/workflows/ci.yml
-      - name: Check pass cache per crate
-        id: pass
-        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
-        with:
-          mode: check-batch
-          job: test
-          hashes: ${{ steps.src.outputs.hashes }}
-          force: ${{ (inputs.force || github.event_name == 'schedule') && 'true' || 'false' }}
-          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
-          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - name: Select crates to test
-        id: sel
-        env:
-          MISSING: ${{ steps.pass.outputs.missing }}
-          CHANGED: ${{ needs.changes.outputs.packages }}
-        run: |
-          crates=$(jq -c --arg changed "$CHANGED" '
-            if $changed == "--workspace" then .
-            else ($changed | split(" ") | map(select(. != "" and . != "-p"))) as $w
-              | map(select(. as $c | $w | index($c)))
-            end' <<< "$MISSING")
-          echo "crates=$crates" >> "$GITHUB_OUTPUT"
-          echo "packages=$(jq -r 'map("-p " + .) | join(" ")' <<< "$crates")" >> "$GITHUB_OUTPUT"
-          if [ "$crates" = '[]' ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "All affected crates unchanged — reusing passes" | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Set up Rust (toolchain, sccache)
-        if: ${{ steps.sel.outputs.skip != 'true' }}
-        uses: argyle-labs/.github/.github/actions/rust-setup@main
-        with:
+          extra-paths: "orca-inventory-tests: README.md CRATE_RESPONSIBILITIES.md projects docs"
+          force: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
           drop-cargo-config: 'false'
-          wrap-cc: 'true'
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-          env: |
-            ORCA_TEST_FAST_KDF=1
-      - name: Test + coverage (cargo nextest)
-        if: ${{ steps.sel.outputs.skip != 'true' }}
-        uses: argyle-labs/.github/.github/actions/cargo-test@main
-        with:
-          args: ${{ steps.sel.outputs.packages }} --all-features
-          doctests: 'false'
-      - name: Record pass
-        if: ${{ success() && steps.sel.outputs.skip != 'true' }}
-        uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
-        with:
-          mode: record-batch
-          job: test
-          hashes: ${{ steps.src.outputs.hashes }}
-          crates: ${{ steps.sel.outputs.crates }}
-          endpoint: ${{ vars.SCCACHE_ENDPOINT }}
-          access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-      - name: CI summary
-        uses: argyle-labs/.github/.github/actions/ci-summary@main
-        if: ${{ !cancelled() }}
 
   lint:
-    needs: changes
     runs-on: ci-large
     container:
       image: ${{ vars.CI_REGISTRY || 'gitea.scottkey.me' }}/argyle-labs/ci-rust:1.95.0
       credentials:
         username: ${{ secrets.CI_REGISTRY_USER }}
         password: ${{ secrets.CI_REGISTRY_TOKEN }}
-    defaults:
-      run:
-        shell: bash
+    env:
+      ORCA_FORBIDDEN_IP_PATTERNS: ${{ secrets.FORBIDDEN_IP_PATTERNS }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Rust (toolchain, sccache)
-        uses: argyle-labs/.github/.github/actions/rust-setup@main
+      - name: Lint
+        uses: argyle-labs/.github/.github/actions/job-rust-lint@main
         with:
+          extra-paths: "orca-inventory-tests: README.md CRATE_RESPONSIBILITIES.md projects docs"
+          features: ""
+          force: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
           drop-cargo-config: 'false'
-          wrap-cc: 'true'
+          scripts: ./scripts/check-no-real-ips.sh
+          cargo-checks: |
+            check -p orca-notifications --no-default-features
+            check -p orca-plugin-toolkit --no-default-features --features tools,notify
+            test -p orca-plugin-toolkit --features full --test doc_authoring_anchor
+          package-publishable: 'true'
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
-          env: |
-            ORCA_TEST_FAST_KDF=1
-      - name: Format (cargo fmt)
-        uses: argyle-labs/.github/.github/actions/cargo-fmt@main
-      - name: Clippy
-        uses: argyle-labs/.github/.github/actions/cargo-clippy@main
-        if: ${{ !cancelled() }}
-        with:
-          args: ${{ needs.changes.outputs.packages }} --all-targets --all-features
-      - name: Doctests (cargo test --doc)
-        if: ${{ !cancelled() }}
-        env:
-          ARGS: ${{ needs.changes.outputs.packages }} --all-features
-        run: |
-          export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
-          read -ra args <<< "$ARGS"
-          cargo test --locked "${args[@]}" --doc
-      - name: Lock file check
-        uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
-        if: ${{ !cancelled() }}
-      - name: ShellCheck
-        uses: argyle-labs/.github/.github/actions/shellcheck@main
-        if: ${{ !cancelled() }}
-      - name: actionlint
-        uses: argyle-labs/.github/.github/actions/actionlint@main
-        if: ${{ !cancelled() }}
-      - name: CI summary
-        uses: argyle-labs/.github/.github/actions/ci-summary@main
-        if: ${{ !cancelled() }}

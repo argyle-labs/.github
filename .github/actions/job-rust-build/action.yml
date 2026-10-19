@@ -1,9 +1,11 @@
 name: CI job — rust build
 description: >
-  The whole `build` job: every test binary compiled once, coverage-instrumented,
-  into the `nextest-archive` artifact that job-rust-test runs, then the
-  doctests against that same compiled tree. Skipped when this source hash
-  already passed both `build` and `test`. Run in the `ci-rust`
+  The whole `build` job: the test binaries of every crate without a `build` and
+  `test` pass for its crate hash (crate-select: changed crates plus their
+  reverse dependents) compiled once, coverage-instrumented, into the
+  `nextest-archive` artifact that job-rust-test runs, plus the `crate-selection`
+  artifact naming those crates; then those crates' doctests against the same
+  compiled tree. Skipped when no crate is selected. Run in the `ci-rust`
   container; checks out the repo itself.
 
 inputs:
@@ -19,10 +21,26 @@ inputs:
     description: 'The crate embeds ui/dist: hash `ui/` and place the `vite-dist` artifact before compiling (the job `needs:` build-ui).'
     required: false
     default: "false"
-  packages:
-    description: 'Cargo package selection, split on whitespace; `--all-features` is appended.'
+  extra-paths:
+    description: 'crate-hashes `extra-paths`: lines of `crate: path [path...]` hashed as that crate''s own files, `*` for every crate.'
     required: false
-    default: "--workspace"
+    default: ""
+  features:
+    description: 'Cargo feature arguments appended to the package selection.'
+    required: false
+    default: "--all-features"
+  force:
+    description: '`true` builds every crate regardless of recorded passes (also set by a `force` workflow_dispatch input).'
+    required: false
+    default: "false"
+  drop-cargo-config:
+    description: 'rust-setup `drop-cargo-config`.'
+    required: false
+    default: "true"
+  version-env:
+    description: 'Variable set to `<root Cargo.toml version>-dev+gci` before building, for build scripts that otherwise derive a version from git (a fixed value keeps them cached). Empty sets nothing.'
+    required: false
+    default: ""
   build-jobs:
     description: 'CARGO_BUILD_JOBS. Empty keeps cargo''s default parallelism.'
     required: false
@@ -61,14 +79,6 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Source hash
-      id: src
-      uses: argyle-labs/.github/.github/actions/source-hash@main
-      with:
-        actions: job-rust-build job-rust-test
-        image: ci-rust:${{ inputs.image-tag }}
-        workflow-file: ${{ inputs.workflow-file }}
-        extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
     - name: Test pass markers
       id: shards
       shell: bash
@@ -83,28 +93,30 @@ runs:
           echo "::error title=test-partitions::'$N' is not a positive integer"
           exit 1
         fi
-    - name: Check pass cache
-      id: pass
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+    - name: Select crates
+      id: sel
+      uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
-        mode: check
         job: build
         also-require: ${{ steps.shards.outputs.jobs }}
-        hash: ${{ steps.src.outputs.hash }}
-        force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+        image: ci-rust:${{ inputs.image-tag }}
+        workflow-file: ${{ inputs.workflow-file }}
+        extra-paths: |
+          ${{ inputs.extra-paths }}
+          ${{ inputs.ui == 'true' && '*: ui' || '' }}
+        force: ${{ (inputs.force == 'true' || github.event.inputs.force == 'true') && 'true' || 'false' }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
-    - name: Reuse unchanged pass
-      if: ${{ steps.pass.outputs.hit == 'true' }}
+    - name: Reuse recorded passes
+      if: ${{ steps.sel.outputs.selection == '' }}
       shell: bash
-      env:
-        PASS_SHA: ${{ steps.pass.outputs.sha }}
-      run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+      run: echo "Unchanged — reusing build + test pass for every crate" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
-      if: ${{ steps.pass.outputs.hit != 'true' }}
+      if: ${{ steps.sel.outputs.selection != '' }}
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
+        drop-cargo-config: ${{ inputs.drop-cargo-config }}
         fast-linker: 'true'
         wrap-cc: 'true'
         build-jobs: ${{ inputs.build-jobs }}
@@ -118,14 +130,37 @@ runs:
           CARGO_TERM_COLOR=always
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
+    - name: Pin workspace version
+      if: ${{ steps.sel.outputs.selection != '' && inputs.version-env != '' }}
+      shell: bash
+      env:
+        VAR: ${{ inputs.version-env }}
+      run: |
+        set -euo pipefail
+        v=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+        [ -n "$v" ]
+        echo "$VAR=${v}-dev+gci" >> "$GITHUB_ENV"
     - name: Build test archive (cargo llvm-cov nextest-archive)
-      if: ${{ steps.pass.outputs.hit != 'true' }}
+      if: ${{ steps.sel.outputs.selection != '' }}
       uses: argyle-labs/.github/.github/actions/cargo-build@main
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
-        args: ${{ inputs.packages }} --all-features
+        args: ${{ steps.sel.outputs.packages }} ${{ inputs.features }}
+    - name: Write crate selection
+      if: ${{ steps.sel.outputs.selection != '' }}
+      shell: bash
+      env:
+        MISSING: ${{ steps.sel.outputs.missing }}
+      run: printf '%s\n' "$MISSING" > crate-selection.json
+    - name: Upload crate selection artifact
+      if: ${{ steps.sel.outputs.selection != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: crate-selection
+        path: crate-selection.json
+        retention-days: 3
     - name: Release profile for size check
-      if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
+      if: ${{ steps.sel.outputs.selection != '' && inputs.size-check == 'true' }}
       uses: argyle-labs/.github/.github/actions/rust-release-profile@main
       with:
         strip: symbols
@@ -134,7 +169,7 @@ runs:
         opt-level: z
     - name: Build release bins for size check
       id: size-bins
-      if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
+      if: ${{ steps.sel.outputs.selection != '' && inputs.size-check == 'true' }}
       shell: bash
       env:
         OPENSSL_NO_VENDOR: "0"
@@ -163,10 +198,10 @@ runs:
     # nextest cannot run doctests. With cargo-llvm-cov's environment and target
     # dir, cargo finds the archive build's crates fresh and only rustdoc compiles.
     - name: Doctests (cargo test --doc)
-      if: ${{ steps.pass.outputs.hit != 'true' && inputs.doctests == 'true' }}
+      if: ${{ steps.sel.outputs.selection != '' && inputs.doctests == 'true' }}
       shell: bash
       env:
-        ARGS: ${{ inputs.packages }} --all-features
+        ARGS: ${{ steps.sel.outputs.packages }} ${{ inputs.features }}
       run: |
         export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
@@ -182,7 +217,7 @@ runs:
         export LLVM_PROFILE_FILE="${RUNNER_TEMP:-/tmp}/doctest-%p-%m.profraw"
         cargo test --locked ${args[@]+"${args[@]}"} --doc
     - name: Plugin size check
-      if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
+      if: ${{ steps.sel.outputs.selection != '' && inputs.size-check == 'true' }}
       uses: argyle-labs/.github/.github/actions/plugin-size-check@main
       with:
         base-ref: ${{ github.event.pull_request.base.sha }}
@@ -191,12 +226,13 @@ runs:
         bins: ${{ steps.size-bins.outputs.bins }}
         target: ${{ steps.size-bins.outputs.target }}
     - name: Record pass
-      if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+      if: ${{ success() && steps.sel.outputs.selection != '' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
-        mode: record
+        mode: record-batch
         job: build
-        hash: ${{ steps.src.outputs.hash }}
+        hashes: ${{ steps.sel.outputs.hashes }}
+        crates: ${{ steps.sel.outputs.missing }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}

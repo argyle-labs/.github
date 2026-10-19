@@ -2,8 +2,9 @@ name: CI job — rust test
 description: >
   The whole `test` job: runs job-rust-build's `nextest-archive` once under
   cargo-llvm-cov (results plus lcov and summary; coverage is report-only) and
-  compiles nothing. Skipped when this source hash already passed `test`. The
-  job `needs: build`.
+  compiles nothing. Runs only the crates without a `test` pass for their crate
+  hash that the build archived (its `crate-selection` artifact); skipped when
+  none remain. The job `needs: build`.
 
 inputs:
   image-tag:
@@ -18,10 +19,14 @@ inputs:
     description: 'The crate embeds ui/dist: hash `ui/` and place the `vite-dist` artifact, matching job-rust-build.'
     required: false
     default: "false"
-  packages:
-    description: 'Cargo package selection, split on whitespace; `--all-features` is appended.'
+  extra-paths:
+    description: 'crate-hashes `extra-paths`; must match job-rust-build''s.'
     required: false
-    default: "--workspace"
+    default: ""
+  force:
+    description: '`true` tests every archived crate regardless of recorded passes (also set by a `force` workflow_dispatch input).'
+    required: false
+    default: "false"
   partition:
     description: 'nextest shard `<k>/<n>` for a matrix of n test jobs; each shard keeps its own `test-<k>-of-<n>` pass marker and `lcov-<k>-of-<n>` artifact. job-rust-build''s `test-partitions` must be n.'
     required: false
@@ -34,6 +39,10 @@ inputs:
     description: 'CARGO_PROFILE_{DEV,TEST}_DEBUG. Empty keeps the profile default.'
     required: false
     default: "0"
+  drop-cargo-config:
+    description: 'rust-setup `drop-cargo-config`.'
+    required: false
+    default: "true"
   sccache-endpoint:
     description: 'S3 cache host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
     required: false
@@ -52,14 +61,6 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Source hash
-      id: src
-      uses: argyle-labs/.github/.github/actions/source-hash@main
-      with:
-        actions: job-rust-build job-rust-test
-        image: ci-rust:${{ inputs.image-tag }}
-        workflow-file: ${{ inputs.workflow-file }}
-        extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
     - name: Pass marker key
       id: key
       shell: bash
@@ -74,27 +75,59 @@ runs:
           echo "::error title=partition::'$PARTITION' is not <k>/<n> with 1 <= k <= n"
           exit 1
         fi
-    - name: Check pass cache
-      id: pass
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+    - name: Select crates
+      id: sel
+      uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
-        mode: check
         job: ${{ steps.key.outputs.job }}
-        hash: ${{ steps.src.outputs.hash }}
-        force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+        image: ci-rust:${{ inputs.image-tag }}
+        workflow-file: ${{ inputs.workflow-file }}
+        extra-paths: |
+          ${{ inputs.extra-paths }}
+          ${{ inputs.ui == 'true' && '*: ui' || '' }}
+        force: ${{ (inputs.force == 'true' || github.event.inputs.force == 'true') && 'true' || 'false' }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
-    - name: Reuse unchanged pass
-      if: ${{ steps.pass.outputs.hit == 'true' }}
+    - name: Download crate selection
+      if: ${{ steps.sel.outputs.selection != '' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: crate-selection
+    # Only crates the build archived can run; a lookup failure here must not
+    # record passes for crates the archive does not hold.
+    - name: Intersect with archived crates
+      id: run
+      if: ${{ steps.sel.outputs.selection != '' }}
       shell: bash
       env:
-        PASS_SHA: ${{ steps.pass.outputs.sha }}
-      run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+        MISSING: ${{ steps.sel.outputs.missing }}
+        HASHES: ${{ steps.sel.outputs.hashes }}
+      run: |
+        set -euo pipefail
+        crates=$(jq -c --argjson m "$MISSING" '[.[] | select(. as $c | $m | index($c))]' crate-selection.json)
+        n=$(jq length <<< "$crates")
+        if [ "$n" -eq 0 ]; then
+          filter=""
+        elif [ "$n" -eq "$(jq length <<< "$HASHES")" ]; then
+          filter=all
+        else
+          filter=$(jq -r 'map("package(=\(.))") | join("|")' <<< "$crates")
+        fi
+        {
+          echo "crates=$crates"
+          echo "filter=$filter"
+        } >> "$GITHUB_OUTPUT"
+        echo "Testing $n crate(s): $(jq -r 'join(" ")' <<< "$crates")" | tee -a "$GITHUB_STEP_SUMMARY"
+    - name: Reuse recorded passes
+      if: ${{ steps.run.outputs.filter == '' }}
+      shell: bash
+      run: echo "Unchanged — reusing test pass for every crate" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
-      if: ${{ steps.pass.outputs.hit != 'true' }}
+      if: ${{ steps.run.outputs.filter != '' }}
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
+        drop-cargo-config: ${{ inputs.drop-cargo-config }}
         fast-linker: 'true'
         wrap-cc: 'true'
         build-jobs: ${{ inputs.build-jobs }}
@@ -109,21 +142,21 @@ runs:
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
     - name: Test + coverage (cargo nextest)
-      if: ${{ steps.pass.outputs.hit != 'true' }}
+      if: ${{ steps.run.outputs.filter != '' }}
       uses: argyle-labs/.github/.github/actions/cargo-test@main
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
-        args: ${{ inputs.packages }} --all-features
         doctests: 'false'
-        nextest-args: --no-fail-fast
+        nextest-args: --no-fail-fast --no-tests=pass ${{ steps.run.outputs.filter != 'all' && format('-E {0}', steps.run.outputs.filter) || '' }}
         partition: ${{ inputs.partition }}
     - name: Record pass
-      if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+      if: ${{ success() && steps.run.outputs.filter != '' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
-        mode: record
+        mode: record-batch
         job: ${{ steps.key.outputs.job }}
-        hash: ${{ steps.src.outputs.hash }}
+        hashes: ${{ steps.sel.outputs.hashes }}
+        crates: ${{ steps.run.outputs.crates }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}

@@ -1,0 +1,103 @@
+name: Crate select
+description: >
+  The crates a job must run: crate-hashes, then ci-pass-cache check-batch.
+  Each crate's hash folds in its workspace dependency closure, so a changed
+  crate selects itself and every reverse dependent. A cache backend failure or
+  `force` selects every crate.
+
+inputs:
+  job:
+    description: 'Pass marker job kind (e.g. `build`, `test`, `lint-enforce`).'
+    required: true
+  also-require:
+    description: 'Other job kinds (space-separated) whose markers must ALSO exist for a crate to be skipped.'
+    required: false
+    default: ""
+  image:
+    description: 'CI image reference (e.g. `ci-rust:1.95.0`).'
+    required: false
+    default: ""
+  workflow-file:
+    description: 'Calling workflow file (repo-root relative).'
+    required: false
+    default: .github/workflows/ci.yml
+  extra-paths:
+    description: 'crate-hashes `extra-paths`: lines of `crate: path [path...]`, `*` for every crate.'
+    required: false
+    default: ""
+  force:
+    description: '`true` selects every crate.'
+    required: false
+    default: "false"
+  endpoint:
+    required: false
+    default: ""
+  access-key:
+    required: false
+    default: ""
+  secret-key:
+    required: false
+    default: ""
+
+outputs:
+  hashes:
+    description: 'JSON crate -> hash (crate-hashes).'
+    value: ${{ steps.src.outputs.hashes }}
+  missing:
+    description: 'JSON list of selected crates.'
+    value: ${{ steps.pass.outputs.missing }}
+  selection:
+    description: 'Empty when nothing is selected, `all` when every crate is, else `some`.'
+    value: ${{ steps.select.outputs.selection }}
+  packages:
+    description: 'Cargo package arguments: `--workspace` when every crate is selected, else `-p a -p b`.'
+    value: ${{ steps.select.outputs.packages }}
+  filterset:
+    description: 'nextest `-E` filterset over the selected crates; empty when every crate is selected.'
+    value: ${{ steps.select.outputs.filterset }}
+
+runs:
+  using: composite
+  steps:
+    - name: Crate hashes
+      id: src
+      uses: argyle-labs/.github/.github/actions/crate-hashes@main
+      with:
+        image: ${{ inputs.image }}
+        workflow-file: ${{ inputs.workflow-file }}
+        extra-paths: ${{ inputs.extra-paths }}
+    - name: Check pass cache
+      id: pass
+      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
+      with:
+        mode: check-batch
+        job: ${{ inputs.job }}
+        also-require: ${{ inputs.also-require }}
+        hashes: ${{ steps.src.outputs.hashes }}
+        force: ${{ inputs.force }}
+        endpoint: ${{ inputs.endpoint }}
+        access-key: ${{ inputs.access-key }}
+        secret-key: ${{ inputs.secret-key }}
+    - name: Select crates
+      id: select
+      shell: bash
+      env:
+        HASHES: ${{ steps.src.outputs.hashes }}
+        MISSING: ${{ steps.pass.outputs.missing }}
+        PACKAGES: ${{ steps.pass.outputs.packages }}
+      run: |
+        set -euo pipefail
+        n=$(jq length <<< "$MISSING")
+        if [ "$n" -eq 0 ]; then
+          sel="" pkgs="" filter=""
+        elif [ "$n" -eq "$(jq length <<< "$HASHES")" ]; then
+          sel=all pkgs=--workspace filter=""
+        else
+          sel=some pkgs=$PACKAGES filter=$(jq -r 'map("package(=\(.))") | join("|")' <<< "$MISSING")
+        fi
+        {
+          echo "selection=$sel"
+          echo "packages=$pkgs"
+          echo "filterset=$filter"
+        } >> "$GITHUB_OUTPUT"
+        echo "Selected $n crate(s): $(jq -r 'join(" ")' <<< "$MISSING")" | tee -a "$GITHUB_STEP_SUMMARY"
