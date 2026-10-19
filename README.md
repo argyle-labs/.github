@@ -328,6 +328,21 @@ Add `- name: <Tool>` / `uses: argyle-labs/.github/.github/actions/<tool>@main` t
 
 Composite actions cannot read `secrets`, so credentials come in as inputs set from `secrets.*` by the caller. `rust-setup` runs once per job and owns the job-wide cargo environment: `sccache-endpoint` (`vars.SCCACHE_ENDPOINT`), `sccache-access-key` / `sccache-secret-key` (`secrets.SCCACHE_S3_ACCESS_KEY` / `secrets.SCCACHE_S3_SECRET_KEY`), `wrap-cc: 'true'`, `fast-linker` (default `'false'`; the `job-rust-*` actions pass `'true'` to link Linux gnu targets with the image's mold via `COMPILER_PATH`; release jobs keep the default linker), `build-jobs`, `debuginfo` (default `'0'`), `env` (extra `KEY=VALUE` lines exported for the job; trusted input, it can set any variable, so it must come from the repo's own workflow file and never from event data), `orca-fetch-token`, `working-directory`, and `drop-cargo-config` (default `'true'`: deletes `.cargo/config.toml`, where plugins keep a local-dev path patch; orca passes `'false'` because its committed config carries `LIBSQLITE3_FLAGS`).
 
+### Persistent clippy target dir: `cargo-target-cache`
+
+sccache cannot cache incremental compiles, so clippy's check build recompiled every workspace crate each run. `job-rust-lint` runs `cargo-target-cache` after `rust-setup`. The action points `CARGO_TARGET_DIR` at `<root>/<owner_repo>/<branch>` and sets `CARGO_INCREMENTAL=1`, so each run re-checks only what changed. Registry deps still go through sccache. A branch's first run seeds its dir by copying the repo's `main` dir (`cp --reflink=auto`). Fork PRs skip the cache. When `root` (`target-cache` input, default `/ci-target-cache`) is not mounted, the action is a no-op and the job uses its own `target/`.
+
+Each runner host needs a cache directory on local disk (not NFS), mounted into job containers. In the act_runner `config.yaml`:
+
+```yaml
+container:
+  valid_volumes:
+    - /srv/ci-target-cache
+  options: -v /srv/ci-target-cache:/ci-target-cache
+```
+
+Then restart the runner. Each run prunes the cache before it starts, holding `flock` on `<root>/.lock`. It removes branch dirs whose `.ci-last-used` stamp is older than `max-age-days` (default 7), then deletes least-recently-used dirs while the root holds more than `max-gb` (default 100). Size the host directory for `max-gb` plus one seed copy. Concurrent jobs on the same branch serialize on cargo's own target-dir lock.
+
 ### Action catalogue
 
 Common inputs: `working-directory` (default `.`) on every action; `artifacts` (lines of `name:path`, at most 4, downloaded by name before the tool runs) on every action that compiles or builds. Cargo `args` are split on whitespace with no quoting: pass features comma-separated, e.g. `--features a,b`. Node `command` overrides the tool invocation (e.g. an npm script); it is `eval`ed, so it is trusted input only, from the repo's own workflow file.
@@ -351,7 +366,7 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 
 `name-suffix` keeps artifact names unique when a repo builds more than once per run; cargo-build and its cargo-test take the same suffix.
 
-Shared plumbing under `.github/actions/`: `rust-setup` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash`, `crate-hashes` and `ci-pass-cache` (the pass caches above), `registry-login`, `image-build` and `image-promote` (container images, above).
+Shared plumbing under `.github/actions/`: `rust-setup` and `cargo-target-cache` (above), `fetch-artifacts` (the `artifacts` handoff), `node-install` (`npm ci` with npm cache), `ci-summary` (phase timings, sccache stats), `source-hash`, `crate-hashes` and `ci-pass-cache` (the pass caches above), `registry-login`, `image-build` and `image-promote` (container images, above).
 
 ### Deprecated: `plugin-ci.yml`
 
