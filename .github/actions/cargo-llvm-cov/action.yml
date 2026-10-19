@@ -15,6 +15,10 @@ inputs:
     description: 'Extra `cargo nextest run` arguments.'
     required: false
     default: "--no-fail-fast"
+  partition:
+    description: 'nextest shard `<k>/<n>` (1-based), run as `--partition hash:<k>/<n>`; the lcov artifact gains `-<k>-of-<n>`. Empty runs every test.'
+    required: false
+    default: ""
   name-suffix:
     description: 'Appended to the `lcov` artifact name; must be unique per call when a repo runs tests more than once per run.'
     required: false
@@ -28,9 +32,11 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         NEXTEST_ARGS: ${{ inputs.nextest-args }}
+        PARTITION: ${{ inputs.partition }}
       run: |
         export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra nextest_args <<< "$NEXTEST_ARGS"
+        [ -z "$PARTITION" ] || nextest_args+=(--partition "hash:$PARTITION")
         # nextest canonicalizes the --extract-to dir, which a fresh checkout lacks.
         mkdir -p "${CARGO_TARGET_DIR:-target}/llvm-cov-target"
         cargo llvm-cov nextest --no-report "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
@@ -52,10 +58,19 @@ runs:
           echo '```'
         } | tee -a "$GITHUB_STEP_SUMMARY" || echo "::warning title=coverage::coverage summary failed; coverage is report-only"
 
+    - name: lcov artifact name
+      id: lcov
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        SUFFIX: ${{ inputs.name-suffix }}
+        PARTITION: ${{ inputs.partition }}
+      run: echo "name=lcov${SUFFIX}${PARTITION:+-${PARTITION%/*}-of-${PARTITION#*/}}" >> "$GITHUB_OUTPUT"
+
     - name: Upload lcov
       uses: actions/upload-artifact@v4
       if: ${{ !cancelled() && hashFiles(format('{0}/lcov.info', inputs.working-directory)) != '' }}
       with:
-        name: lcov${{ inputs.name-suffix }}
+        name: ${{ steps.lcov.outputs.name }}
         path: ${{ inputs.working-directory }}/lcov.info
         retention-days: 7

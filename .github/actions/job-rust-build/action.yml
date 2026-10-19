@@ -30,6 +30,10 @@ inputs:
     description: 'CARGO_PROFILE_{DEV,TEST}_DEBUG. Empty keeps the profile default.'
     required: false
     default: "0"
+  test-partitions:
+    description: 'Shard count n of the test job''s `partition` matrix; the skip then needs every `test-<k>-of-<n>` marker. Empty or 1 needs the single `test` marker.'
+    required: false
+    default: ""
   size-check:
     description: 'Run plugin-size-check (dependency count vs the PR base; one PR comment).'
     required: false
@@ -60,13 +64,27 @@ runs:
         image: ci-rust:${{ inputs.image-tag }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
+    - name: Test pass markers
+      id: shards
+      shell: bash
+      env:
+        N: ${{ inputs.test-partitions }}
+      run: |
+        if [ -z "$N" ] || [ "$N" = 1 ]; then
+          echo "jobs=test" >> "$GITHUB_OUTPUT"
+        elif [[ "$N" =~ ^[1-9][0-9]*$ ]]; then
+          echo "jobs=$(for k in $(seq 1 "$N"); do printf 'test-%s-of-%s ' "$k" "$N"; done)" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error title=test-partitions::'$N' is not a positive integer"
+          exit 1
+        fi
     - name: Check pass cache
       id: pass
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: check
         job: build
-        also-require: test
+        also-require: ${{ steps.shards.outputs.jobs }}
         hash: ${{ steps.src.outputs.hash }}
         force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
         endpoint: ${{ inputs.sccache-endpoint }}

@@ -212,9 +212,9 @@ GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL a
 | Action | Job | Runs | Inputs |
 |---|---|---|---|
 | `job-vite-build` | `build-ui` | `vite-build`, uploading `vite-dist` | `working-directory` (default `ui`) |
-| `job-rust-build` | `build` | `cargo-build`: every test binary, once, coverage-instrumented, into the nextest archive | `ui`, `packages`, `build-jobs`, `debuginfo`, `sccache-*` |
-| `job-rust-test` | `test` (`needs: build`) | `cargo-test` on the archive under cargo-llvm-cov: results plus lcov and summary; compiles nothing | as `job-rust-build` |
-| `job-rust-coverage` | `test` (`needs: build`), in place of `job-rust-test` | `cargo-llvm-cov` alone on the archive: results plus lcov artifact and summary table, no `cargo-test` wrapper; compiles nothing | `image-tag`, `workflow-file`, `ui`, `build-jobs`, `debuginfo`, `sccache-*` |
+| `job-rust-build` | `build` | `cargo-build`: every test binary, once, coverage-instrumented, into the nextest archive | `ui`, `packages`, `build-jobs`, `debuginfo`, `test-partitions` (shard count; skip needs every `test-<k>-of-<n>` marker), `sccache-*` |
+| `job-rust-test` | `test` (`needs: build`; matrix over `partition: <k>/<n>` to shard) | `cargo-test` on the archive under cargo-llvm-cov: results plus lcov and summary; compiles nothing | as `job-rust-build`, plus `partition` |
+| `job-rust-coverage` | `test` (`needs: build`), in place of `job-rust-test` | `cargo-llvm-cov` alone on the archive: results plus lcov artifact and summary table, no `cargo-test` wrapper; compiles nothing | `image-tag`, `workflow-file`, `ui`, `build-jobs`, `debuginfo`, `partition`, `sccache-*` |
 | `job-vite-test` | `test-ui` | `vitest`, `svelte-check` | `working-directory`, `sccache-*` |
 | `job-rust-lint` | `lint` | `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, `actionlint` | as `job-rust-build`, plus `lock-check` (`enforce` \| `warn`) |
 | `job-rust-doctest` | `lint-doctest` | `cargo test --doc` | as `job-rust-build` |
@@ -336,11 +336,11 @@ Common inputs: `working-directory` (default `.`) on every action; `artifacts` (l
 | Action | Runs | Extra inputs | Outputs |
 |---|---|---|---|
 | `cargo-build` | `cargo llvm-cov nextest-archive` (the build: test binaries, compiled once, coverage-instrumented; plain `cargo nextest archive` when `coverage: 'false'`) | `args`, `coverage` (default `'true'`), `name-suffix` | artifact `nextest-archive<name-suffix>` |
-| `cargo-test` | the archive, once, via `cargo-llvm-cov` (plain `cargo nextest run` when `coverage: 'false'`); then `cargo test --doc` unless `doctests: 'false'` | `args`, `coverage` (default `'true'`), `nextest-args`, `doctests` (default `'true'`), `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
+| `cargo-test` | the archive, once, via `cargo-llvm-cov` (plain `cargo nextest run` when `coverage: 'false'`); then `cargo test --doc` unless `doctests: 'false'` | `args`, `coverage` (default `'true'`), `nextest-args`, `partition`, `doctests` (default `'true'`), `name-suffix` | artifact `lcov<name-suffix>[-<k>-of-<n>]`, step-summary table |
 | `cargo-clippy` | `cargo clippy -- -D warnings` (also compiles bins/examples) | `args` | |
 | `cargo-fmt` | `cargo fmt --all --check` | | |
 | `cargo-lock-check` | Cargo.lock drift (path-patch entries, out of sync) | `mode`: `enforce` \| `warn` | |
-| `cargo-llvm-cov` | how `cargo-test` runs with coverage: the archive under `cargo llvm-cov nextest --no-report`, then a report-only lcov/summary | `nextest-args`, `name-suffix` | artifact `lcov<name-suffix>`, step-summary table |
+| `cargo-llvm-cov` | how `cargo-test` runs with coverage: the archive under `cargo llvm-cov nextest --no-report`, then a report-only lcov/summary | `nextest-args`, `partition` (`<k>/<n>` → `--partition hash:<k>/<n>`), `name-suffix` | artifact `lcov<name-suffix>[-<k>-of-<n>]`, step-summary table |
 | `vite-build` | `npx vite build` | `command`, `install`, `dir` (default `dist`), `artifact-name` (default `vite-dist`) | artifact of `dir` |
 | `svelte-check` | `npx svelte-check` (type check) | `command`, `install` | |
 | `tsc` | `npx tsc --noEmit` (type check) | `command`, `install` | |
