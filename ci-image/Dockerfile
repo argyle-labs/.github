@@ -70,7 +70,7 @@ RUN set -eux; \
     ln -s "/opt/zig-linux-${arch}-${ZIG_VERSION}/zig" /usr/local/bin/zig; \
     zig version
 
-# sccache (shared MinIO compile cache) + cargo-zigbuild + the coverage/test
+# sccache (shared Garage S3 compile cache) + cargo-zigbuild + the coverage/test
 # runners CI uses (`cargo llvm-cov nextest`). Prebuilt binaries where available
 # to keep the image build cheap.
 ARG SCCACHE_VERSION=v0.8.2
