@@ -40,8 +40,8 @@ srcs=$(mktemp)
 trap 'rm -f "$srcs"' EXIT
 meta=$(cargo metadata --locked --format-version 1 --no-deps)
 jq -r --arg mode "$mode" \
-      --argjson pkgs "$(jq -nc '$ARGS.positional' --args "${pkgs[@]}")" \
-      --argjson excl "$(jq -nc '$ARGS.positional' --args "${excludes[@]}")" '
+      --argjson pkgs "$(jq -nc '$ARGS.positional' --args ${pkgs[@]+"${pkgs[@]}"})" \
+      --argjson excl "$(jq -nc '$ARGS.positional' --args ${excludes[@]+"${excludes[@]}"})" '
   (if $mode == "default" then (.workspace_default_members // .workspace_members) else .workspace_members end) as $m
   | [.packages[]
      | select(.id as $id | $m | any(.[]; . == $id))] as $ws

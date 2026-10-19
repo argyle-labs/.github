@@ -149,7 +149,7 @@ runs:
         target=$(rustc -vV | sed -n 's/^host: //p')
         args=()
         while IFS= read -r b; do args+=(--bin "$b"); done <<< "$bins"
-        cargo build --release --locked "${args[@]}"
+        cargo build --release --locked ${args[@]+"${args[@]}"}
         dist="${RUNNER_TEMP:-/tmp}/size-dist"
         rm -rf "$dist" && mkdir -p "$dist"
         while IFS= read -r b; do cp "target/release/$b" "$dist/${b}-pr-${target}"; done <<< "$bins"
@@ -170,7 +170,7 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
-        has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" "${args[@]}")
+        has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" ${args[@]+"${args[@]}"})
         if [ "$has" != true ]; then
           echo "::notice::No doc-comment code blocks in the selected library targets; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 0
@@ -180,7 +180,7 @@ runs:
         eval "$cov_env"
         export CARGO_TARGET_DIR="$target/llvm-cov-target"
         export LLVM_PROFILE_FILE="${RUNNER_TEMP:-/tmp}/doctest-%p-%m.profraw"
-        cargo test --locked "${args[@]}" --doc
+        cargo test --locked ${args[@]+"${args[@]}"} --doc
     - name: Plugin size check
       if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
       uses: argyle-labs/.github/.github/actions/plugin-size-check@main

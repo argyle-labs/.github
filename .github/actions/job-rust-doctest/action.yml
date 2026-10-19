@@ -104,12 +104,12 @@ runs:
       run: |
         export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra args <<< "$ARGS"
-        has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" "${args[@]}")
+        has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" ${args[@]+"${args[@]}"})
         if [ "$has" != true ]; then
           echo "::notice::No doc-comment code blocks in the selected library targets; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
-        cargo test --locked "${args[@]}" --doc
+        cargo test --locked ${args[@]+"${args[@]}"} --doc
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main

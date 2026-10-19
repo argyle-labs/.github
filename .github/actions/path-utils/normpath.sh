@@ -2,7 +2,7 @@
 normpath() {
   local part parts segs=()
   IFS=/ read -ra parts <<< "$1"
-  for part in "${parts[@]}"; do
+  for part in ${parts[@]+"${parts[@]}"}; do
     case "$part" in
       ''|.) ;;
       ..) if [ "${#segs[@]}" -gt 0 ] && [ "${segs[${#segs[@]}-1]}" != .. ]; then unset 'segs[${#segs[@]}-1]'; else segs+=(..); fi ;;

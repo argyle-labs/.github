@@ -69,14 +69,14 @@ while IFS= read -r line; do
     echo "::error title=crate-hashes::extra-paths line needs a crate and at least one path: $line" >&2
     exit 1
   fi
-  for p in "${paths[@]}"; do
+  for p in ${paths[@]+"${paths[@]}"}; do
     if [ -z "$(git ls-files -- "$p")" ]; then
       echo "::error title=crate-hashes::extra-paths entry '$p' ($key) matches no tracked files" >&2
       exit 1
     fi
   done
   if [ "$key" = '*' ]; then
-    extra_all+=("${paths[@]}")
+    extra_all+=(${paths[@]+"${paths[@]}"})
   else
     extra[$key]="${extra[$key]:-} ${paths[*]}"
   fi
@@ -276,9 +276,9 @@ while IFS=$'\t' read -r name dir; do
   # Excludes apply to the crate dir only, never to its extra paths.
   own[$name]=$(
     {
-      git ls-files -s -- "$dir" "${excludes[@]}"
-      extras=("${extra_all[@]}" "${mine[@]}")
-      [ "${#extras[@]}" -eq 0 ] || git ls-files -s -- "${extras[@]}"
+      git ls-files -s -- "$dir" ${excludes[@]+"${excludes[@]}"}
+      extras=(${extra_all[@]+"${extra_all[@]}"} ${mine[@]+"${mine[@]}"})
+      [ "${#extras[@]}" -eq 0 ] || git ls-files -s -- ${extras[@]+"${extras[@]}"}
     } | sha256sum | cut -d' ' -f1
   )
 done <<< "$members"

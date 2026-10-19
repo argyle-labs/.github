@@ -73,8 +73,8 @@ runs:
         level=warning; [ "$MODE" = enforce ] && level=error
         {
           echo "### Cargo.lock drift (${MODE})"
-          for p in "${problems[@]}"; do echo "- $p"; done
+          for p in ${problems[@]+"${problems[@]}"}; do echo "- $p"; done
         } >> "$GITHUB_STEP_SUMMARY"
-        for p in "${problems[@]}"; do echo "::${level} title=Cargo.lock drift::$p"; done
+        for p in ${problems[@]+"${problems[@]}"}; do echo "::${level} title=Cargo.lock drift::$p"; done
         [ "$MODE" = enforce ] && exit 1
         exit 0
