@@ -1,0 +1,36 @@
+name: cargo-hakari check
+description: >
+  Fails when the cargo-hakari workspace-hack crate or its dependency lines are
+  stale. No-op without `.config/hakari.toml`. The workspace-hack makes a
+  `-p`-selected build resolve features as the full workspace build does.
+
+inputs:
+  working-directory:
+    description: 'Directory the tool runs in.'
+    required: false
+    default: "."
+  version:
+    description: 'cargo-hakari version installed when the image lacks it.'
+    required: false
+    default: "0.9.39"
+
+runs:
+  using: composite
+  steps:
+    - name: Workspace-hack up to date
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ ! -f .config/hakari.toml ]; then
+          echo "no .config/hakari.toml; skipping"
+          exit 0
+        fi
+        export t0=$SECONDS; trap 'echo "hakari|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        command -v cargo-hakari >/dev/null || cargo install --locked "cargo-hakari@$VERSION"
+        fix="run \`cargo hakari generate && cargo hakari manage-deps --yes\` and commit"
+        cargo hakari generate --diff || { echo "::error title=workspace-hack stale::$fix"; exit 1; }
+        cargo hakari manage-deps --dry-run || { echo "::error title=workspace-hack deps stale::$fix"; exit 1; }
+        cargo hakari verify

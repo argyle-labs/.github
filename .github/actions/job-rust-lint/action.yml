@@ -1,8 +1,11 @@
 name: CI job — rust lint
 description: >
-  The whole `lint` job: fmt, clippy, Cargo.lock drift and actionlint. Runs
-  beside `build` (clippy's check build cannot reuse the archive). Skipped when
-  this source hash already passed `lint` with the same lock-check mode.
+  The whole `lint` job. Always: repo `scripts` and actionlint. For crates
+  without a lint pass for their crate hash (crate-select: changed crates plus
+  their reverse dependents): fmt, clippy on just those crates, the cargo-hakari
+  workspace-hack check, `cargo-checks`, publishable-crate packaging and
+  Cargo.lock drift. Runs beside `build` (clippy's check build cannot reuse the
+  archive).
 
 inputs:
   image-tag:
@@ -17,10 +20,34 @@ inputs:
     description: 'The crate embeds ui/dist: place the `vite-dist` artifact before clippy (the job `needs:` build-ui).'
     required: false
     default: "false"
-  packages:
-    description: 'Cargo package selection, split on whitespace; `--all-features` is appended.'
+  extra-paths:
+    description: 'crate-hashes `extra-paths`: lines of `crate: path [path...]` hashed as that crate''s own files, `*` for every crate. Root rustfmt/clippy configs are added automatically.'
     required: false
-    default: "--workspace"
+    default: ""
+  features:
+    description: 'Cargo feature arguments appended to the clippy package selection.'
+    required: false
+    default: "--all-features"
+  force:
+    description: '`true` lints every crate regardless of recorded passes (also set by a `force` workflow_dispatch input).'
+    required: false
+    default: "false"
+  scripts:
+    description: 'Repo commands run first on every run, one per line (e.g. a tracked-tree guard). Pass any secret they need through the job `env`.'
+    required: false
+    default: ""
+  cargo-checks:
+    description: 'Extra cargo invocations run when any crate is selected, one per line, without the leading `cargo` (e.g. `check -p foo --no-default-features`).'
+    required: false
+    default: ""
+  package-publishable:
+    description: '`true` runs `cargo package --no-verify` over every crate whose `publish` lists `package-registry`.'
+    required: false
+    default: "false"
+  package-registry:
+    description: 'Registry `package-publishable` checks against.'
+    required: false
+    default: gitea
   build-jobs:
     description: 'CARGO_BUILD_JOBS. Empty keeps cargo''s default parallelism.'
     required: false
@@ -29,6 +56,10 @@ inputs:
     description: 'CARGO_PROFILE_{DEV,TEST}_DEBUG. Empty keeps the profile default.'
     required: false
     default: "0"
+  drop-cargo-config:
+    description: 'rust-setup `drop-cargo-config`.'
+    required: false
+    default: "true"
   sccache-endpoint:
     description: 'S3 cache host:port for sccache and the pass cache (pass `vars.SCCACHE_ENDPOINT`).'
     required: false
@@ -55,38 +86,55 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Source hash
-      id: src
-      uses: argyle-labs/.github/.github/actions/source-hash@main
+    - name: Repo scripts
+      if: ${{ inputs.scripts != '' }}
+      shell: bash
+      env:
+        SCRIPTS: ${{ inputs.scripts }}
+      run: |
+        set -euo pipefail
+        while IFS= read -r cmd; do
+          [ -n "${cmd//[[:space:]]/}" ] || continue
+          echo "::group::$cmd"
+          bash -c "$cmd"
+          echo "::endgroup::"
+        done <<< "$SCRIPTS"
+    - name: actionlint
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/actionlint@main
+    - name: Lint configs
+      id: cfg
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        files=$(git ls-files -- rustfmt.toml .rustfmt.toml clippy.toml .clippy.toml | tr '\n' ' ')
+        echo "extra=${files:+*: $files}" >> "$GITHUB_OUTPUT"
+    - name: Select crates
+      id: sel
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
-        actions: job-rust-lint
+        job: lint-${{ inputs.lock-check }}
         image: ci-rust:${{ inputs.image-tag }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: |
-          .github
-          ${{ inputs.ui == 'true' && 'ui' || '' }}
-    - name: Check pass cache
-      id: pass
-      uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
-      with:
-        mode: check
-        job: lint-${{ inputs.lock-check }}
-        hash: ${{ steps.src.outputs.hash }}
-        force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+          ${{ inputs.extra-paths }}
+          ${{ steps.cfg.outputs.extra }}
+          ${{ inputs.ui == 'true' && '*: ui' || '' }}
+        force: ${{ (inputs.force == 'true' || github.event.inputs.force == 'true') && 'true' || 'false' }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
-    - name: Reuse unchanged pass
-      if: ${{ steps.pass.outputs.hit == 'true' }}
+    - name: Reuse recorded passes
+      if: ${{ !cancelled() && steps.sel.outcome == 'success' && steps.sel.outputs.selection == '' }}
       shell: bash
-      env:
-        PASS_SHA: ${{ steps.pass.outputs.sha }}
-      run: echo "Unchanged source — reusing pass from ${PASS_SHA:-unknown}" | tee -a "$GITHUB_STEP_SUMMARY"
+      run: echo "Unchanged — reusing lint pass for every crate" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Set up Rust (toolchain, sccache)
       id: setup
-      if: ${{ steps.pass.outputs.hit != 'true' }}
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' }}
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
+        drop-cargo-config: ${{ inputs.drop-cargo-config }}
         fast-linker: 'true'
         wrap-cc: 'true'
         build-jobs: ${{ inputs.build-jobs }}
@@ -101,34 +149,64 @@ runs:
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
     - name: Persistent target dir
-      if: ${{ steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-target-cache@main
       with:
         root: ${{ inputs.target-cache }}
     - name: Format (cargo fmt)
-      if: ${{ steps.pass.outputs.hit != 'true' }}
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-fmt@main
     - name: Clippy
-      if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-clippy@main
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
-        args: ${{ inputs.packages }} --all-targets --all-features
+        args: ${{ steps.sel.outputs.packages }} --all-targets ${{ inputs.features }}
+    - name: Workspace-hack (cargo hakari)
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
+      uses: argyle-labs/.github/.github/actions/cargo-hakari-check@main
+    - name: Extra cargo checks
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' && inputs.cargo-checks != '' }}
+      shell: bash
+      env:
+        CHECKS: ${{ inputs.cargo-checks }}
+      run: |
+        set -euo pipefail
+        while IFS= read -r line; do
+          [ -n "${line//[[:space:]]/}" ] || continue
+          read -ra args <<< "$line"
+          echo "::group::cargo $line"
+          cargo "${args[@]}"
+          echo "::endgroup::"
+        done <<< "$CHECKS"
+    # Checks each publishable crate's manifest and file list; the full
+    # build-from-tarball verify runs at release, in `cargo publish`.
+    - name: Package publishable crates
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' && inputs.package-publishable == 'true' }}
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.package-registry }}
+      run: |
+        set -o pipefail
+        mapfile -t pkgs < <(cargo metadata --format-version 1 --no-deps --locked \
+          | jq -r --arg r "$REGISTRY" '.packages[] | select(.publish | index($r)) | "-p", .name')
+        # pipefail can't see into the process substitution; empty means it failed.
+        [ "${#pkgs[@]}" -gt 0 ] || { echo "no publishable crates found" >&2; exit 1; }
+        cargo package --no-verify --locked --registry "$REGISTRY" "${pkgs[@]}"
+    # Last: it deletes .cargo/config.toml, which the cargo steps above need.
     - name: Lock file check
-      if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-lock-check@main
       with:
         mode: ${{ inputs.lock-check }}
-    - name: actionlint
-      if: ${{ !cancelled() && steps.pass.outputs.hit != 'true' && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/actionlint@main
     - name: Record pass
-      if: ${{ success() && steps.pass.outputs.hit != 'true' }}
+      if: ${{ success() && steps.sel.outputs.selection != '' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
-        mode: record
+        mode: record-batch
         job: lint-${{ inputs.lock-check }}
-        hash: ${{ steps.src.outputs.hash }}
+        hashes: ${{ steps.sel.outputs.hashes }}
+        crates: ${{ steps.sel.outputs.missing }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
