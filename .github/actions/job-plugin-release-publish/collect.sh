@@ -37,7 +37,6 @@ for f in ${assets[@]+"${assets[@]}"}; do
 done
 IFS=, read -ra requested <<< "${TARGETS//[][\"[:space:]]/}"
 for t in ${requested[@]+"${requested[@]}"}; do
-  case "$TAG" in *-rc.*) case "$t" in *-apple-darwin) continue ;; esac ;; esac
   bins=(dist/*-"${TAG}-${t}")
   [ ${#bins[@]} -gt 0 ] || { echo "::error::no binary for requested target $t"; bad=1; }
 done
