@@ -214,6 +214,7 @@ GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL a
 | `job-vite-build` | `build-ui` | `vite-build`, uploading `vite-dist` | `working-directory` (default `ui`) |
 | `job-rust-build` | `build` | `cargo-build`: every test binary, once, coverage-instrumented, into the nextest archive | `ui`, `packages`, `build-jobs`, `debuginfo`, `sccache-*` |
 | `job-rust-test` | `test` (`needs: build`) | `cargo-test` on the archive under cargo-llvm-cov: results plus lcov and summary; compiles nothing | as `job-rust-build` |
+| `job-rust-coverage` | `test` (`needs: build`), in place of `job-rust-test` | `cargo-llvm-cov` alone on the archive: results plus lcov artifact and summary table, no `cargo-test` wrapper; compiles nothing | `image-tag`, `workflow-file`, `ui`, `build-jobs`, `debuginfo`, `sccache-*` |
 | `job-vite-test` | `test-ui` | `vitest`, `svelte-check` | `working-directory`, `sccache-*` |
 | `job-rust-lint` | `lint` | `cargo-fmt`, `cargo-clippy`, `cargo-lock-check`, `actionlint` | as `job-rust-build`, plus `lock-check` (`enforce` \| `warn`) |
 | `job-rust-doctest` | `lint-doctest` | `cargo test --doc` | as `job-rust-build` |
