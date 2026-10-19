@@ -100,7 +100,6 @@ owner() {
 }
 embed_macro_re='\b(include|include_str|include_bytes|include_dir|migrate)!\('
 embed_re='\b(include|include_str|include_bytes|include_dir|migrate)!\( *"[^"]+" *\)|#\[folder *= *"[^"]+"\]|\b(include|include_str|include_bytes|include_dir)!\( *(concat!\( *)?env!\( *"[^"]+"'
-# shellcheck source-path=SCRIPTDIR source=../path-utils/normpath.sh
 source "$(dirname "$0")/../path-utils/normpath.sh"
 idx() {
   local pre=${1%%"$2"*}
