@@ -1,0 +1,105 @@
+name: CI job — compose validate
+description: >
+  The whole compose `ci` job: every compose file must be well-formed YAML and,
+  when the docker compose CLI is present, a valid compose spec. Missing
+  `env_file:` targets get empty placeholders so the spec, not the absent
+  runtime environment, is validated.
+
+inputs:
+  paths:
+    description: 'Newline- or space-separated glob(s) of compose files to validate.'
+    required: false
+    default: "compose.yml compose.yaml docker-compose.yml docker-compose.yaml"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Discover compose files
+      id: find
+      env:
+        COMPOSE_PATHS: ${{ inputs.paths }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        found=""
+        for pat in $COMPOSE_PATHS; do
+          for f in $pat; do
+            [ -f "$f" ] && found="$found $f"
+          done
+        done
+        found="$(echo "$found" | xargs -n1 2>/dev/null | sort -u | xargs 2>/dev/null || true)"
+        if [ -z "$found" ]; then
+          echo "::error::no compose files found (looked for: ${COMPOSE_PATHS})"
+          exit 1
+        fi
+        echo "files=$found" >> "$GITHUB_OUTPUT"
+        echo "validating: $found"
+
+    - name: YAML well-formedness (always available)
+      env:
+        FILES: ${{ steps.find.outputs.files }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --user --break-system-packages pyyaml >/dev/null 2>&1 \
+          || pip install --user --break-system-packages pyyaml >/dev/null 2>&1 || true
+        python3 - <<'PY'
+        import os, sys, glob, yaml
+        files = os.environ["FILES"].split()
+        bad = 0
+        for f in files:
+            try:
+                with open(f) as fh:
+                    yaml.safe_load(fh)
+                print(f"yaml ok: {f}")
+            except Exception as e:
+                print(f"::error file={f}::invalid YAML: {e}")
+                bad += 1
+        sys.exit(1 if bad else 0)
+        PY
+
+    - name: Compose spec validation (docker compose config)
+      env:
+        FILES: ${{ steps.find.outputs.files }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! docker compose version >/dev/null 2>&1; then
+          echo "::warning::docker compose CLI not present on this runner — relying on the YAML gate. Install the compose plugin on the runner image for full spec validation."
+          exit 0
+        fi
+        rc=0
+        for f in $FILES; do
+          dir=$(dirname "$f")
+          python3 - "$f" "$dir" <<'PY'
+        import os, sys, yaml
+        compose, base = sys.argv[1], sys.argv[2]
+        with open(compose) as fh:
+            doc = yaml.safe_load(fh) or {}
+        def paths(ef):
+            if ef is None: return []
+            if isinstance(ef, str): return [ef]
+            out = []
+            for item in ef:
+                if isinstance(item, str): out.append(item)
+                elif isinstance(item, dict) and item.get("path"): out.append(item["path"])
+            return out
+        for svc in (doc.get("services") or {}).values():
+            if not isinstance(svc, dict): continue
+            for p in paths(svc.get("env_file")):
+                target = p if os.path.isabs(p) else os.path.join(base, p)
+                if not os.path.exists(target):
+                    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                    open(target, "a").close()
+                    print(f"placeholder env_file: {target}")
+        PY
+          echo "→ docker compose -f $f config -q"
+          if ! docker compose -f "$f" config -q; then
+            echo "::error file=$f::invalid compose spec"
+            rc=1
+          fi
+        done
+        exit $rc
