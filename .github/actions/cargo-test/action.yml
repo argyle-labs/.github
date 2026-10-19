@@ -27,6 +27,10 @@ inputs:
     description: 'Extra `cargo nextest run` arguments.'
     required: false
     default: "--no-fail-fast"
+  partition:
+    description: 'nextest shard `<k>/<n>` (1-based), run as `--partition hash:<k>/<n>`. Empty runs every test.'
+    required: false
+    default: ""
   coverage:
     description: "Run under cargo-llvm-cov ('true' or 'false'). Must match cargo-build's `coverage`."
     required: false
@@ -56,6 +60,7 @@ runs:
       with:
         working-directory: ${{ inputs.working-directory }}
         nextest-args: ${{ inputs.nextest-args }}
+        partition: ${{ inputs.partition }}
         name-suffix: ${{ inputs.name-suffix }}
 
     - name: Test
@@ -64,9 +69,11 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         NEXTEST_ARGS: ${{ inputs.nextest-args }}
+        PARTITION: ${{ inputs.partition }}
       run: |
         export t0=$SECONDS; trap 'echo "test|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
         read -ra nextest_args <<< "$NEXTEST_ARGS"
+        [ -z "$PARTITION" ] || nextest_args+=(--partition "hash:$PARTITION")
         cargo nextest run "${nextest_args[@]}" --archive-file nextest-archive.tar.zst --workspace-remap .
 
     - name: Doctests

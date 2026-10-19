@@ -22,6 +22,10 @@ inputs:
     description: 'Cargo package selection, split on whitespace; `--all-features` is appended.'
     required: false
     default: "--workspace"
+  partition:
+    description: 'nextest shard `<k>/<n>` for a matrix of n test jobs; each shard keeps its own `test-<k>-of-<n>` pass marker and `lcov-<k>-of-<n>` artifact. job-rust-build''s `test-partitions` must be n.'
+    required: false
+    default: ""
   build-jobs:
     description: 'CARGO_BUILD_JOBS. Empty keeps cargo''s default parallelism.'
     required: false
@@ -56,12 +60,26 @@ runs:
         image: ci-rust:${{ inputs.image-tag }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: ${{ inputs.ui == 'true' && 'ui' || '' }}
+    - name: Pass marker key
+      id: key
+      shell: bash
+      env:
+        PARTITION: ${{ inputs.partition }}
+      run: |
+        if [ -z "$PARTITION" ]; then
+          echo "job=test" >> "$GITHUB_OUTPUT"
+        elif [[ "$PARTITION" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] && [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ]; then
+          echo "job=test-${BASH_REMATCH[1]}-of-${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error title=partition::'$PARTITION' is not <k>/<n> with 1 <= k <= n"
+          exit 1
+        fi
     - name: Check pass cache
       id: pass
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: check
-        job: test
+        job: ${{ steps.key.outputs.job }}
         hash: ${{ steps.src.outputs.hash }}
         force: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
         endpoint: ${{ inputs.sccache-endpoint }}
@@ -97,12 +115,13 @@ runs:
         args: ${{ inputs.packages }} --all-features
         doctests: 'false'
         nextest-args: --no-fail-fast
+        partition: ${{ inputs.partition }}
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
       with:
         mode: record
-        job: test
+        job: ${{ steps.key.outputs.job }}
         hash: ${{ steps.src.outputs.hash }}
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
