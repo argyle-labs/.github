@@ -1,0 +1,62 @@
+name: CI job — shell lint
+description: >
+  The whole `lint-shell` job: `bash -n` then shellcheck v0.9.0 over every
+  tracked *.sh (or `files`). Runs on a host with docker; shellcheck runs from
+  the pinned koalaman/shellcheck:v0.9.0 image so results match the runners.
+
+inputs:
+  working-directory:
+    description: 'Directory the tools run in.'
+    required: false
+    default: "."
+  files:
+    description: 'Space-separated files; empty means every tracked *.sh.'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Resolve files
+      id: files
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        FILES: ${{ inputs.files }}
+      run: |
+        set -euo pipefail
+        if [ -n "$FILES" ]; then
+          list="$FILES"
+        else
+          list="$(git ls-files '*.sh' | tr '\n' ' ')"
+        fi
+        echo "list=$list" >> "$GITHUB_OUTPUT"
+    - name: bash -n
+      if: ${{ steps.files.outputs.list != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        LIST: ${{ steps.files.outputs.list }}
+      run: |
+        export t0=$SECONDS; trap 'echo "bash-n|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        read -ra files <<< "$LIST"
+        rc=0
+        for f in "${files[@]}"; do
+          bash -n "$f" || { echo "::error file=$f::bash -n failed"; rc=1; }
+        done
+        exit "$rc"
+    - name: shellcheck v0.9.0
+      if: ${{ !cancelled() && steps.files.outputs.list != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        LIST: ${{ steps.files.outputs.list }}
+      run: |
+        export t0=$SECONDS; trap 'echo "shellcheck|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        read -ra files <<< "$LIST"
+        docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.9.0 "${files[@]}"
+    - name: CI summary
+      if: ${{ !cancelled() }}
+      uses: argyle-labs/.github/.github/actions/ci-summary@main
