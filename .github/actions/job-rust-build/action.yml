@@ -1,8 +1,9 @@
 name: CI job — rust build
 description: >
   The whole `build` job: every test binary compiled once, coverage-instrumented,
-  into the `nextest-archive` artifact that job-rust-test runs. Skipped when this
-  source hash already passed both `build` and `test`. Run in the `ci-rust`
+  into the `nextest-archive` artifact that job-rust-test runs, then the
+  doctests against that same compiled tree. Skipped when this source hash
+  already passed both `build` and `test`. Run in the `ci-rust`
   container; checks out the repo itself.
 
 inputs:
@@ -34,6 +35,10 @@ inputs:
     description: 'Shard count n of the test job''s `partition` matrix; the skip then needs every `test-<k>-of-<n>` marker. Empty or 1 needs the single `test` marker.'
     required: false
     default: ""
+  doctests:
+    description: 'Run `cargo test --doc` after the archive build, reusing its compiled crates.'
+    required: false
+    default: "true"
   size-check:
     description: 'Run plugin-size-check: release-profile bin size vs the latest release asset, dependency count vs the PR base; one PR comment.'
     required: false
@@ -154,6 +159,27 @@ runs:
           echo "$bins"
           echo "EOF_BINS"
         } >> "$GITHUB_OUTPUT"
+    # nextest cannot run doctests. With cargo-llvm-cov's environment and target
+    # dir, cargo finds the archive build's crates fresh and only rustdoc compiles.
+    - name: Doctests (cargo test --doc)
+      if: ${{ steps.pass.outputs.hit != 'true' && inputs.doctests == 'true' }}
+      shell: bash
+      env:
+        ARGS: ${{ inputs.packages }} --all-features
+      run: |
+        export t0=$SECONDS; trap 'echo "doctest|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT
+        read -ra args <<< "$ARGS"
+        has=$(/bin/bash "$GITHUB_ACTION_PATH/../cargo-test/has-doctests.sh" "${args[@]}")
+        if [ "$has" != true ]; then
+          echo "::notice::No doc-comment code blocks in the selected library targets; skipping doctests" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        target=$(cargo metadata --locked --format-version 1 --no-deps | jq -r .target_directory)
+        cov_env=$(cargo llvm-cov show-env --export-prefix)
+        eval "$cov_env"
+        export CARGO_TARGET_DIR="$target/llvm-cov-target"
+        export LLVM_PROFILE_FILE="${RUNNER_TEMP:-/tmp}/doctest-%p-%m.profraw"
+        cargo test --locked "${args[@]}" --doc
     - name: Plugin size check
       if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
       uses: argyle-labs/.github/.github/actions/plugin-size-check@main
