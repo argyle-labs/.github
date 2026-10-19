@@ -39,6 +39,10 @@ inputs:
     description: 'MinIO host:port (vars.SCCACHE_ENDPOINT); http:// is assumed when no scheme is given.'
     required: false
     default: ""
+  region:
+    description: 'SigV4 region the S3 backend expects; falls back to env SCCACHE_REGION, then garage.'
+    required: false
+    default: ""
   bucket:
     required: false
     default: "sccache"
@@ -78,6 +82,7 @@ runs:
         FORCE: ${{ inputs.force }}
         ENDPOINT: ${{ inputs.endpoint }}
         BUCKET: ${{ inputs.bucket }}
+        S3_REGION: ${{ inputs.region || env.SCCACHE_REGION || 'garage' }}
         S3_ACCESS_KEY: ${{ inputs.access-key }}
         S3_SECRET_KEY: ${{ inputs.secret-key }}
       run: |
@@ -94,7 +99,7 @@ runs:
         trap 'rm -f "$cfg"' EXIT
         esc() { local v=${1//\\/\\\\}; printf '%s' "${v//\"/\\\"}"; }
         printf 'user = "%s:%s"\n' "$(esc "$S3_ACCESS_KEY")" "$(esc "$S3_SECRET_KEY")" > "$cfg"
-        s3() { curl -sS --max-time 20 --aws-sigv4 "aws:amz:us-east-1:s3" --config "$cfg" "$@"; }
+        s3() { curl -sS --max-time 20 --aws-sigv4 "aws:amz:$S3_REGION:s3" --config "$cfg" "$@"; }
         body="${RUNNER_TEMP:-/tmp}/ci-pass-$JOB"
 
         if [ "$MODE" = record ]; then
@@ -137,6 +142,7 @@ runs:
         FORCE: ${{ inputs.force }}
         ENDPOINT: ${{ inputs.endpoint }}
         BUCKET: ${{ inputs.bucket }}
+        S3_REGION: ${{ inputs.region || env.SCCACHE_REGION || 'garage' }}
         S3_ACCESS_KEY: ${{ inputs.access-key }}
         S3_SECRET_KEY: ${{ inputs.secret-key }}
       run: |

@@ -239,6 +239,7 @@ jobs:
           cache-key: release-${{ steps.sel.outputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
           orca-fetch-token: ${{ secrets.ORCA_FETCH_TOKEN }}
           sccache-endpoint: ${{ vars.SCCACHE_ENDPOINT }}
+          sccache-region: ${{ vars.SCCACHE_REGION }}
           sccache-access-key: ${{ secrets.SCCACHE_S3_ACCESS_KEY }}
           sccache-secret-key: ${{ secrets.SCCACHE_S3_SECRET_KEY }}
 
@@ -350,7 +351,7 @@ jobs:
             werr=$(awk '/^Cache write errors/ {print $NF}' <<< "$stats")
             wavg=$(awk '/^Average cache write/ {print $(NF-1)}' <<< "$stats")
             if [ "${werr:-0}" -gt 0 ] && [ "$wavg" = 0.000 ]; then
-              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check MinIO disk)."
+              echo "**sccache cache is READ-ONLY**: ${werr} cache write errors and no successful write; the cache did not fill (check the S3 backend disk and quota)."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
           if errs=$(grep -m 20 -iE 'error|warn|failed|panic' "${SCCACHE_ERROR_LOG:-}" 2>/dev/null); then
