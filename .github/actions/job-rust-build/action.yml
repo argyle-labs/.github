@@ -35,7 +35,7 @@ inputs:
     required: false
     default: ""
   size-check:
-    description: 'Run plugin-size-check (dependency count vs the PR base; one PR comment).'
+    description: 'Run plugin-size-check: release-profile bin size vs the latest release asset, dependency count vs the PR base; one PR comment.'
     required: false
     default: "true"
   sccache-endpoint:
@@ -118,12 +118,51 @@ runs:
       with:
         artifacts: ${{ inputs.ui == 'true' && 'vite-dist:ui/dist' || '' }}
         args: ${{ inputs.packages }} --all-features
+    - name: Release profile for size check
+      if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
+      with:
+        strip: symbols
+        lto: "true"
+        codegen-units: "1"
+        opt-level: z
+    - name: Build release bins for size check
+      id: size-bins
+      if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
+      shell: bash
+      env:
+        OPENSSL_NO_VENDOR: "0"
+      run: |
+        set -euo pipefail
+        bins=$(cargo metadata --no-deps --format-version 1 \
+          | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name' | sort -u)
+        if [ -z "$bins" ]; then
+          echo "no bin targets; size check counts dependencies only"
+          exit 0
+        fi
+        target=$(rustc -vV | sed -n 's/^host: //p')
+        args=()
+        while IFS= read -r b; do args+=(--bin "$b"); done <<< "$bins"
+        cargo build --release --locked "${args[@]}"
+        dist="${RUNNER_TEMP:-/tmp}/size-dist"
+        rm -rf "$dist" && mkdir -p "$dist"
+        while IFS= read -r b; do cp "target/release/$b" "$dist/${b}-pr-${target}"; done <<< "$bins"
+        {
+          echo "dist=$dist"
+          echo "target=$target"
+          echo "bins<<EOF_BINS"
+          echo "$bins"
+          echo "EOF_BINS"
+        } >> "$GITHUB_OUTPUT"
     - name: Plugin size check
       if: ${{ steps.pass.outputs.hit != 'true' && inputs.size-check == 'true' }}
       uses: argyle-labs/.github/.github/actions/plugin-size-check@main
       with:
         base-ref: ${{ github.event.pull_request.base.sha }}
         pr-number: ${{ github.event.pull_request.number }}
+        dist-dir: ${{ steps.size-bins.outputs.dist }}
+        bins: ${{ steps.size-bins.outputs.bins }}
+        target: ${{ steps.size-bins.outputs.target }}
     - name: Record pass
       if: ${{ success() && steps.pass.outputs.hit != 'true' }}
       uses: argyle-labs/.github/.github/actions/ci-pass-cache@main
