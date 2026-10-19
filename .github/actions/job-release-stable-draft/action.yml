@@ -17,7 +17,7 @@ runs:
   steps:
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@main
+      uses: argyle-labs/.github/.github/actions/release-tag@v1
       with:
         tag: ${{ inputs.tag }}
     - name: Base version
@@ -29,7 +29,7 @@ runs:
       run: echo "tag=v${VERSION%-rc.*}" >> "$GITHUB_OUTPUT"
     - name: Replace draft stable
       if: ${{ steps.rel.outputs.prerelease == 'true' }}
-      uses: argyle-labs/.github/.github/actions/release-draft@main
+      uses: argyle-labs/.github/.github/actions/release-draft@v1
       with:
         release-token: ${{ inputs.release-token }}
         tag: ${{ steps.base.outputs.tag }}

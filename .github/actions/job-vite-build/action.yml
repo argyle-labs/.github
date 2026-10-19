@@ -19,10 +19,10 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
     - name: Vite build
-      uses: argyle-labs/.github/.github/actions/vite-build@main
+      uses: argyle-labs/.github/.github/actions/vite-build@v1
       with:
         working-directory: ${{ inputs.working-directory }}
         command: ${{ inputs.command }}
     - name: CI summary
       if: ${{ !cancelled() }}
-      uses: argyle-labs/.github/.github/actions/ci-summary@main
+      uses: argyle-labs/.github/.github/actions/ci-summary@v1

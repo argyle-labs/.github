@@ -9,7 +9,7 @@ name: Cargo publish
 #   on: { workflow_dispatch: { inputs: { execute: { type: boolean, default: false } } } }
 #   jobs:
 #     publish:
-#       uses: argyle-labs/.github/.github/workflows/cargo-publish.yml@main
+#       uses: argyle-labs/.github/.github/workflows/cargo-publish.yml@v1
 #       with:
 #         ref: ${{ github.ref_name }}
 #         execute: ${{ inputs.execute }}

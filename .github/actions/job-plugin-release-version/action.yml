@@ -32,7 +32,7 @@ runs:
         fetch-depth: 0
     - name: Compute next version from tags
       id: cv
-      uses: argyle-labs/.github/.github/actions/compute-version@main
+      uses: argyle-labs/.github/.github/actions/compute-version@v1
       with:
         bump: ${{ inputs.bump }}
     - name: Pick channel version

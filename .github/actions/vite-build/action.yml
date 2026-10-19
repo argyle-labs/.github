@@ -31,13 +31,13 @@ runs:
   using: composite
   steps:
     - name: Fetch artifacts
-      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@v1
       with:
         artifacts: ${{ inputs.artifacts }}
 
     - name: Install npm deps (npm ci)
       if: ${{ inputs.install == 'true' }}
-      uses: argyle-labs/.github/.github/actions/node-install@main
+      uses: argyle-labs/.github/.github/actions/node-install@v1
       with:
         working-directory: ${{ inputs.working-directory }}
 

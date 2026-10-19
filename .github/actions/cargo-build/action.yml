@@ -32,12 +32,12 @@ runs:
   using: composite
   steps:
     - name: Fetch artifacts
-      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@v1
       with:
         artifacts: ${{ inputs.artifacts }}
 
     - name: Fetch dependencies
-      uses: argyle-labs/.github/.github/actions/cargo-fetch@main
+      uses: argyle-labs/.github/.github/actions/cargo-fetch@v1
       with:
         working-directory: ${{ inputs.working-directory }}
 

@@ -83,7 +83,7 @@ runs:
         fetch-depth: 0
     - name: Release tag
       id: rel
-      uses: argyle-labs/.github/.github/actions/release-tag@main
+      uses: argyle-labs/.github/.github/actions/release-tag@v1
       with:
         tag: ${{ inputs.tag || env.TAG }}
     - name: Skip darwin on release candidates
@@ -98,7 +98,7 @@ runs:
         path: ui/dist
     - id: build
       if: ${{ steps.rel.outputs.prerelease != 'true' || !endsWith(inputs.target, '-apple-darwin') }}
-      uses: argyle-labs/.github/.github/actions/plugin-build@main
+      uses: argyle-labs/.github/.github/actions/plugin-build@v1
       with:
         target: ${{ inputs.target }}
         version: ${{ inputs.version || steps.rel.outputs.version }}

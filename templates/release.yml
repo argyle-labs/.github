@@ -39,7 +39,7 @@ jobs:
         shell: bash
     steps:
       - name: Build x86_64-unknown-linux-gnu
-        uses: argyle-labs/.github/.github/actions/job-release-build@main
+        uses: argyle-labs/.github/.github/actions/job-release-build@v1
         with:
           target: x86_64-unknown-linux-gnu
           tag: ${{ env.TAG }}
@@ -57,7 +57,7 @@ jobs:
     runs-on: macos
     steps:
       - name: Build aarch64-apple-darwin
-        uses: argyle-labs/.github/.github/actions/job-release-build-macos@main
+        uses: argyle-labs/.github/.github/actions/job-release-build-macos@v1
         with:
           tag: ${{ env.TAG }}
           disable-lto-for-rc: 'true'
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Package deb/rpm/PKGBUILD/homebrew/plg
-        uses: argyle-labs/.github/.github/actions/job-release-package@main
+        uses: argyle-labs/.github/.github/actions/job-release-package@v1
         with:
           tag: ${{ env.TAG }}
 
@@ -77,7 +77,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Package .pkg
-        uses: argyle-labs/.github/.github/actions/job-release-package-macos@main
+        uses: argyle-labs/.github/.github/actions/job-release-package-macos@v1
         with:
           tag: ${{ env.TAG }}
 
@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Publish
-        uses: argyle-labs/.github/.github/actions/job-release-publish@main
+        uses: argyle-labs/.github/.github/actions/job-release-publish@v1
         with:
           tag: ${{ env.TAG }}
           version-commit: "false"
@@ -105,7 +105,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Draft stable
-        uses: argyle-labs/.github/.github/actions/job-release-stable-draft@main
+        uses: argyle-labs/.github/.github/actions/job-release-stable-draft@v1
         with:
           tag: ${{ env.TAG }}
           release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
@@ -123,7 +123,7 @@ jobs:
         shell: bash
     steps:
       - name: Publish crates
-        uses: argyle-labs/.github/.github/actions/job-release-crates@main
+        uses: argyle-labs/.github/.github/actions/job-release-crates@v1
         with:
           tag: ${{ env.TAG }}
           registry-token: ${{ secrets.CI_REGISTRY_TOKEN }}

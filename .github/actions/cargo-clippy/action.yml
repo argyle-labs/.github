@@ -22,7 +22,7 @@ runs:
   using: composite
   steps:
     - name: Fetch artifacts
-      uses: argyle-labs/.github/.github/actions/fetch-artifacts@main
+      uses: argyle-labs/.github/.github/actions/fetch-artifacts@v1
       with:
         artifacts: ${{ inputs.artifacts }}
 

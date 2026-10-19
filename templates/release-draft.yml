@@ -15,6 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Draft RC
-        uses: argyle-labs/.github/.github/actions/job-release-draft@main
+        uses: argyle-labs/.github/.github/actions/job-release-draft@v1
         with:
           release-token: ${{ secrets.ORCA_RELEASE_TOKEN }}
