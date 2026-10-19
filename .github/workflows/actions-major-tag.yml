@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -20,6 +22,7 @@ concurrency:
 
 jobs:
   move-major:
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +30,7 @@ jobs:
           fetch-depth: 0
       - name: Move vX to the release tag
         env:
-          VERSION: ${{ inputs.version || github.ref_name }}
+          VERSION: ${{ inputs.version || github.event.release.tag_name || github.ref_name }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then

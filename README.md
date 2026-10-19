@@ -185,7 +185,7 @@ Start from a template:
 | `CI_ACTIONS_REF` | Ref of `argyle-labs/.github` to run (`v1`, `v1.2.0`, a branch) | `v1` |
 | `GIT_SERVER_URL` | Git server to check it out from | the server running the workflow |
 
-GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL and `CI_ACTIONS_REF` to the chosen version. A `vX.Y.Z` tag push moves `vX` to it ([`actions-major-tag.yml`](.github/workflows/actions-major-tag.yml)).
+GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL and `CI_ACTIONS_REF` to the chosen version. A `vX.Y.Z` tag push or published `vX.Y.Z` release moves `vX` to it ([`actions-major-tag.yml`](.github/workflows/actions-major-tag.yml)); prereleases are skipped. Until the first `v1.0.0` release exists, `v1` does not resolve and callers must set `CI_ACTIONS_REF`.
 
 ```yaml
 - uses: actions/checkout@v4
