@@ -14,6 +14,8 @@ rel=$(cat "$fx/releases.json")
 eq "latest published asset" "$(release_baseline "$rel" orca-plugin-demo x86_64-unknown-linux-gnu)" "v0.2.1 10485760"
 eq "skips drafts, older release" "$(release_baseline "$rel" orca-plugin-demo x86_64-unknown-linux-musl)" "v0.2.0 8388608"
 eq "published prerelease" "$(release_baseline "$rel" orca-plugin-demo aarch64-apple-darwin)" "v0.2.2-rc.1 7340032"
+eq "pr baseline includes rcs" "$(baseline_channel 107 stable)" "any"
+eq "push baseline keeps channel" "$(baseline_channel "" stable)" "stable"
 eq "stable skips prerelease" "$(release_baseline "$rel" orca-plugin-demo aarch64-apple-darwin stable)" "v0.2.1 9437184"
 eq "no asset" "$(release_baseline "$rel" orca-plugin-demo aarch64-unknown-linux-gnu)" ""
 eq "empty api" "$(release_baseline "[]" orca-plugin-demo x86_64-unknown-linux-gnu)" ""

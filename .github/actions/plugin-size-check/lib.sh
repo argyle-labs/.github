@@ -25,6 +25,11 @@ release_baseline() {
       | "\($r.tag_name) \(.size)" ] | first // empty' <<< "$json"
 }
 
+baseline_channel() {
+  local pr=$1 channel=${2:-stable}
+  if [ -n "$pr" ]; then echo any; else echo "$channel"; fi
+}
+
 pct_tenths() {
   local now=$1 base=$2
   echo $(( (now - base) * 1000 / base ))
