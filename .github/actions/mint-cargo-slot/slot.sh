@@ -88,7 +88,7 @@ inner() {
     fi
   fi
   if [ "$use_sccache" = true ]; then
-    export RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
+    export RUSTC_WRAPPER="$(dirname "$guard")/rustc-wrapper.sh" CARGO_INCREMENTAL=0
   else
     # Empty overrides a global ~/.cargo/config.toml rustc-wrapper.
     export RUSTC_WRAPPER=
