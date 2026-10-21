@@ -194,10 +194,17 @@ jobs:
           : > "$SCCACHE_ERROR_LOG" 2>/dev/null || true
           if timeout 60 sccache --start-server; then
             echo "sccache server up ($SCCACHE_ENDPOINT/$SCCACHE_BUCKET)"
-            { echo "RUSTC_WRAPPER=sccache"; echo "CC=sccache cc"; echo "CXX=sccache c++"; } >> "$GITHUB_ENV"
+            echo "SCCACHE_UP=1" >> "$GITHUB_ENV"
           else
             echo "::warning title=sccache unavailable::sccache server did not start against the S3 cache backend; building UNCACHED. $(tail -n 5 "$SCCACHE_ERROR_LOG" 2>/dev/null | tr '\n' ' ')"
           fi
+
+      - name: sccache wrappers
+        if: env.SCCACHE_UP == '1'
+        uses: argyle-labs/.github/.github/actions/sccache-guard@main
+        with:
+          check: install
+          cc: 'true'
 
       - name: sccache read-only check
         uses: argyle-labs/.github/.github/actions/sccache-guard@main

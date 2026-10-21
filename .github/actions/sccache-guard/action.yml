@@ -2,16 +2,22 @@ name: sccache guard
 description: >
   Fail the job when the sccache backend is READ-ONLY (a warning on pull
   requests). `check: errlog` inspects the server's write-check result after
-  start; `check: stats` inspects write errors after a build.
+  start; `check: stats` inspects write errors after a build and warns when
+  the stall bypass fired. `check: install` exports RUSTC_WRAPPER (and CC/CXX
+  with `cc: true`) pointing at the stall-guarded sccache wrapper.
 
 inputs:
   check:
-    description: '`errlog` or `stats`.'
+    description: '`errlog`, `stats` or `install`.'
     required: true
   error-log:
     description: 'sccache error log for `errlog` (defaults to $SCCACHE_ERROR_LOG).'
     required: false
     default: ''
+  cc:
+    description: 'With `install`, also wrap CC/CXX.'
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -21,4 +27,7 @@ runs:
       env:
         CHECK: ${{ inputs.check }}
         LOG: ${{ inputs.error-log }}
-      run: /bin/bash "$GITHUB_ACTION_PATH/guard.sh" "$CHECK" "${LOG:-${SCCACHE_ERROR_LOG:-}}"
+        CC_WRAP: ${{ inputs.cc }}
+      run: |
+        if [ "$CHECK" = install ]; then arg=$CC_WRAP; else arg=${LOG:-${SCCACHE_ERROR_LOG:-}}; fi
+        /bin/bash "$GITHUB_ACTION_PATH/guard.sh" "$CHECK" "$arg"
