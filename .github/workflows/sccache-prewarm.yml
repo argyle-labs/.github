@@ -116,8 +116,8 @@ jobs:
         working-directory: warm-plugin
         env:
           OPENSSL_NO_VENDOR: "1"
-          CC: "${{ env.RUSTC_WRAPPER }} cc"
-          CXX: "${{ env.RUSTC_WRAPPER }} c++"
+          CC: ${{ env.SCCACHE_CC }}
+          CXX: ${{ env.SCCACHE_CXX }}
         run: cargo test --workspace --all-features --no-run
 
       # Same env as plugin-build's release step: vendored OpenSSL, zig's CC.
