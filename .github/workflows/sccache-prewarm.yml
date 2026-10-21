@@ -37,7 +37,6 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
   CARGO_INCREMENTAL: "0"
-  RUSTC_WRAPPER: sccache
   SCCACHE_BUCKET: sccache
   SCCACHE_ENDPOINT: ${{ vars.SCCACHE_ENDPOINT }}
   SCCACHE_S3_USE_SSL: "false"
@@ -107,13 +106,18 @@ jobs:
       - name: sccache preflight
         run: timeout 60 sccache --start-server
 
+      - name: sccache wrapper
+        uses: argyle-labs/.github/.github/actions/sccache-guard@main
+        with:
+          check: install
+
       # Same env and flags as plugin-ci's test phase.
       - name: Warm test build (plugin-ci profile)
         working-directory: warm-plugin
         env:
           OPENSSL_NO_VENDOR: "1"
-          CC: "sccache cc"
-          CXX: "sccache c++"
+          CC: "${{ env.RUSTC_WRAPPER }} cc"
+          CXX: "${{ env.RUSTC_WRAPPER }} c++"
         run: cargo test --workspace --all-features --no-run
 
       # Same env as plugin-build's release step: vendored OpenSSL, zig's CC.
