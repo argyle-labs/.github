@@ -414,7 +414,8 @@ runs:
       if: ${{ steps.host.outputs.slot != 'true' }}
       shell: bash
       env:
-        RUSTC_WRAPPER: ${{ steps.sccache.outputs.ok == 'true' && 'sccache' || '' }}
+        RUSTC_WRAPPER: ''
+        USE_SCCACHE: ${{ steps.sccache.outputs.ok }}
         CARGO_INCREMENTAL: ${{ steps.sccache.outputs.ok == 'true' && '0' || '' }}
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         RUSTFLAGS: ${{ contains(inputs.target, '-musl') && '-C target-feature=+crt-static' || '' }}
@@ -423,6 +424,7 @@ runs:
         TARGET: ${{ inputs.target }}
       run: |
         set -euo pipefail
+        [ "$USE_SCCACHE" = true ] && export RUSTC_WRAPPER="$GITHUB_ACTION_PATH/../sccache-guard/rustc-wrapper.sh"
         export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
         if [ "$NATIVE" = "true" ]; then builder="cargo build"; else builder="cargo zigbuild"; fi
         bin_flags=""
