@@ -33,11 +33,16 @@ case "${1:-}" in
     fi
     ;;
   install)
-    wrap="${RUNNER_TEMP:-/tmp}/sccache-rustc-wrapper.sh"
-    install -m 0755 "$(dirname "$0")/rustc-wrapper.sh" "$wrap" || exit 1
+    dir="${RUNNER_TEMP:-/tmp}/sccache-guard"
+    mkdir -p "$dir" || exit 1
+    for f in rustc-wrapper.sh cc-wrapper.sh cxx-wrapper.sh; do
+      install -m 0755 "$(dirname "$0")/$f" "$dir/$f" || exit 1
+    done
     {
-      echo "RUSTC_WRAPPER=$wrap"
-      if [ "${2:-}" = true ]; then echo "CC=$wrap cc"; echo "CXX=$wrap c++"; fi
+      echo "RUSTC_WRAPPER=$dir/rustc-wrapper.sh"
+      echo "SCCACHE_CC=$dir/cc-wrapper.sh"
+      echo "SCCACHE_CXX=$dir/cxx-wrapper.sh"
+      if [ "${2:-}" = true ]; then echo "CC=$dir/cc-wrapper.sh"; echo "CXX=$dir/cxx-wrapper.sh"; fi
     } >> "${GITHUB_ENV:-/dev/null}"
     ;;
   *) echo "usage: guard.sh errlog <file> | stats | install [cc]" >&2; exit 2 ;;
