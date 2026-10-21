@@ -211,7 +211,7 @@ runs:
             echo "SCCACHE_IDLE_TIMEOUT=0"
             echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
             echo "SCCACHE_ERROR_LOG=$err_log"
-            if [ "$WRAP_CC" = true ]; then echo "CC=sccache cc"; echo "CXX=sccache c++"; fi
+            if [ "$WRAP_CC" = true ]; then echo "CC=$GITHUB_ACTION_PATH/../sccache-guard/rustc-wrapper.sh cc"; echo "CXX=$GITHUB_ACTION_PATH/../sccache-guard/rustc-wrapper.sh c++"; fi
           fi
           if [ "$backend" = s3 ]; then
             echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
