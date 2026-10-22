@@ -1,0 +1,27 @@
+name: delete artifact
+description: >
+  Deletes this run's artifact named `name` through the Gitea API with the run's
+  token, so a consumed hand-off artifact does not persist. Best-effort: a
+  failure only warns.
+
+inputs:
+  name:
+    description: 'Artifact name to delete from the current run.'
+    required: true
+  token:
+    description: 'Token with actions write on the repo.'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Delete artifact
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        GITEA_TOKEN: ${{ inputs.token }}
+        API_URL: ${{ github.server_url }}/api/v1
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+      run: bash "${{ github.action_path }}/delete.sh"
