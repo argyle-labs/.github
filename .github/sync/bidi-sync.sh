@@ -158,7 +158,7 @@ main() {
   [ -n "$only_gh" ] && warn "GitHub-only repos (not synced — create on Gitea to include): $(echo "$only_gh" | tr '\n' ' ')"
 
   if [ -n "${ONLY_REPO:-}" ]; then sync_repo "$ONLY_REPO"; else
-    while IFS= read -r r; do [ -n "$r" ] && sync_repo "$r"; done <<< "$both"
+    while IFS= read -r r; do if [ -n "$r" ]; then sync_repo "$r"; fi; done <<< "$both"
   fi
 
   log "done — $CONFLICTS conflict(s)/error(s)"

@@ -84,5 +84,5 @@ runs:
         docker buildx imagetools inspect "$REPO:$first"
         {
           echo "### Published $REPO"
-          while IFS= read -r t; do [ -n "$t" ] && echo "- \`$REPO:$t\`"; done <<< "$TAGS"
+          while IFS= read -r t; do if [ -n "$t" ]; then echo "- \`$REPO:$t\`"; fi; done <<< "$TAGS"
         } >> "$GITHUB_STEP_SUMMARY"

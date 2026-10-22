@@ -428,7 +428,7 @@ runs:
         export t0=$SECONDS; trap 'echo "build|$((SECONDS - t0))|$?" >> "${RUNNER_TEMP:-/tmp}/plugin-build-phases"' EXIT
         if [ "$NATIVE" = "true" ]; then builder="cargo build"; else builder="cargo zigbuild"; fi
         bin_flags=""
-        while IFS= read -r b; do [ -n "$b" ] && bin_flags="$bin_flags --bin $b"; done <<< "$BINS"
+        while IFS= read -r b; do if [ -n "$b" ]; then bin_flags="$bin_flags --bin $b"; fi; done <<< "$BINS"
         export CARGO_BUILD_TARGET="$TARGET"
         echo "→ $builder --release --locked --target ${TARGET}$bin_flags"
         # shellcheck disable=SC2086

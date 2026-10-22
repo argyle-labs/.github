@@ -126,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           pkgs=()
-          while IFS= read -r c; do [ -n "$c" ] && pkgs+=(-p "$c"); done <<< "$ORDER"
+          while IFS= read -r c; do if [ -n "$c" ]; then pkgs+=(-p "$c"); fi; done <<< "$ORDER"
           cargo publish --registry gitea --dry-run "${pkgs[@]}"
           echo "dry-run OK — re-dispatch with execute=true to publish" | tee -a "$GITHUB_STEP_SUMMARY"
 

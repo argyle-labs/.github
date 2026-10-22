@@ -58,7 +58,7 @@ crates=$(count_crates .)
 releases="[]"
 bins=()
 if [ -n "${DIST_DIR:-}" ]; then
-  while IFS= read -r b; do [ -n "$b" ] && bins+=("$b"); done <<< "${BINS:-}"
+  while IFS= read -r b; do if [ -n "$b" ]; then bins+=("$b"); fi; done <<< "${BINS:-}"
   if [ "${#bins[@]}" -gt 0 ]; then
     releases=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/repos/$REPO/releases?limit=20" 2>/dev/null || echo "[]")
   fi
