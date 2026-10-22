@@ -1,0 +1,35 @@
+name: Plugin release job — extra artifact
+description: >
+  Packs a directory into <name>-<tag>.tar.zst + .sha256 and uploads both to the
+  tag's existing Gitea release, replacing same-named assets on rerun. Installs
+  zstd when the image lacks it. Run with `permissions: contents: write`.
+
+inputs:
+  name:
+    description: Asset base name, e.g. peacock-storybook.
+    required: true
+  path:
+    description: Directory to pack.
+    required: true
+  tag:
+    description: Release tag. Empty = env.TAG.
+    required: false
+    default: ""
+  release-token:
+    description: 'Pass `secrets.ORCA_RELEASE_TOKEN`. Empty = github.token.'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Pack and upload ${{ inputs.name }}
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        SRC: ${{ inputs.path }}
+        TAG: ${{ inputs.tag || env.TAG }}
+        GITEA_TOKEN: ${{ inputs.release-token || github.token }}
+        API_URL: ${{ github.api_url }}
+        REPO: ${{ github.repository }}
+      run: bash "$GITHUB_ACTION_PATH/upload.sh"

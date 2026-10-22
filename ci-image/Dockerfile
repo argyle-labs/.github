@@ -25,7 +25,7 @@ ARG TARGETARCH
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates curl git jq perl xz-utils musl-tools pkg-config sudo \
+        ca-certificates curl git jq perl xz-utils zstd musl-tools pkg-config sudo \
         libssl-dev mold; \
     rm -rf /var/lib/apt/lists/*
 # libssl-dev + mold serve the CI compile-speed path:
