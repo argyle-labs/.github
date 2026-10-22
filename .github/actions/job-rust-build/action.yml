@@ -118,7 +118,7 @@ runs:
       with:
         name: crate-hashes
         path: crate-hashes.json
-        retention-days: 3
+        retention-days: 1
     - name: Reuse recorded passes
       if: ${{ steps.sel.outputs.selection == '' }}
       shell: bash
@@ -169,7 +169,7 @@ runs:
       with:
         name: crate-selection
         path: crate-selection.json
-        retention-days: 3
+        retention-days: 1
     - name: Release profile for size check
       if: ${{ steps.sel.outputs.selection != '' && inputs.size-check == 'true' }}
       uses: argyle-labs/.github/.github/actions/rust-release-profile@main

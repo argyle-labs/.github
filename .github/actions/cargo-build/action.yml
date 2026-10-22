@@ -61,4 +61,4 @@ runs:
       with:
         name: nextest-archive${{ inputs.name-suffix }}
         path: ${{ inputs.working-directory }}/nextest-archive.tar.zst
-        retention-days: 3
+        retention-days: 1

@@ -210,6 +210,11 @@ runs:
         endpoint: ${{ inputs.sccache-endpoint }}
         access-key: ${{ inputs.sccache-access-key }}
         secret-key: ${{ inputs.sccache-secret-key }}
+    - name: Delete test archive
+      if: ${{ success() && inputs.partition == '' }}
+      uses: argyle-labs/.github/.github/actions/delete-artifact@main
+      with:
+        name: nextest-archive
     - name: CI summary
       if: ${{ !cancelled() }}
       uses: argyle-labs/.github/.github/actions/ci-summary@main
