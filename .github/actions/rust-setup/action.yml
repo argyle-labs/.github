@@ -85,6 +85,20 @@ inputs:
 runs:
   using: composite
   steps:
+    # The runner can start steps with umask 000, making every tempdir/file
+    # world-writable (dpkg-deb and tempdir permission checks reject that).
+    # GITHUB_ENV cannot carry a umask, so later bash steps source it via BASH_ENV.
+    - name: Pin umask 0022 for later steps
+      shell: bash
+      run: |
+        f="${RUNNER_TEMP:-/tmp}/ci-umask.sh"
+        chain=""
+        if [ -n "${BASH_ENV:-}" ] && [ "$BASH_ENV" != "$f" ]; then
+          chain=$(printf '. %q' "$BASH_ENV")
+        fi
+        printf 'umask 0022\n%s\n' "$chain" > "$f"
+        echo "BASH_ENV=$f" >> "$GITHUB_ENV"
+
     # The ci-rust container bakes the pinned toolchain (+ clippy/rustfmt), zig,
     # cargo-zigbuild and sccache; there every bootstrap below is skipped.
     - name: Detect prebaked toolchain
