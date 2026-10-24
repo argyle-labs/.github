@@ -86,6 +86,9 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Use latest released orca-plugin-toolkit
+      id: toolkit
+      uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
     - name: Repo scripts
       if: ${{ inputs.scripts != '' }}
       shell: bash
@@ -115,7 +118,7 @@ runs:
       uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
         job: lint-${{ inputs.lock-check }}
-        image: ci-rust:${{ inputs.image-tag }}
+        image: ci-rust:${{ inputs.image-tag }}${{ steps.toolkit.outputs.version && format(' orca-plugin-toolkit={0}', steps.toolkit.outputs.version) || '' }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: |
           ${{ inputs.extra-paths }}
@@ -148,9 +151,6 @@ runs:
           CARGO_TERM_COLOR=always
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
-    - name: Use latest released orca-plugin-toolkit
-      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-      uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
     - name: Persistent target dir
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
       uses: argyle-labs/.github/.github/actions/cargo-target-cache@main

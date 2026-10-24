@@ -3,7 +3,9 @@ description: >
   `cargo update` orca-plugin-toolkit and orca-plugin-toolkit-build to the
   latest released version allowed by Cargo.toml, so plugins build against the
   newest toolkit instead of whatever the committed lock recorded. Packages that
-  are absent from Cargo.lock or are workspace members are skipped.
+  are absent from Cargo.lock or are workspace members are skipped. Outputs the
+  resolved orca-plugin-toolkit version so callers can fold it into pass/cache
+  keys, which hash committed blobs and so never see this lock update.
 
 inputs:
   working-directory:
@@ -11,10 +13,16 @@ inputs:
     required: false
     default: "."
 
+outputs:
+  version:
+    description: 'Resolved orca-plugin-toolkit version; empty when skipped.'
+    value: ${{ steps.update.outputs.version }}
+
 runs:
   using: composite
   steps:
     - name: Update orca-plugin-toolkit to latest released
+      id: update
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
@@ -31,5 +39,7 @@ runs:
             continue
           fi
           cargo update -p "$p"
-          awk -v want="$p" '/^name = / { gsub(/"/, "", $3); n=$3 } /^version = / && n == want { gsub(/"/, "", $3); print want, $3; exit }' Cargo.lock
+          v=$(awk -v want="$p" '/^name = / { gsub(/"/, "", $3); n=$3 } /^version = / && n == want { gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
+          echo "$p $v"
+          [ "$p" = orca-plugin-toolkit ] && echo "version=$v" >> "$GITHUB_OUTPUT"
         done
