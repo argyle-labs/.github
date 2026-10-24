@@ -81,7 +81,9 @@ runs:
             -d "$body_json" "$rel_api")
           rel_id=$(echo "$created" | jq -r '.id')
         fi
-        [ -n "$rel_id" ] && [ "$rel_id" != "null" ] || { echo "::error::no Gitea release id"; exit 1; }
+        if [ -z "$rel_id" ] || [ "$rel_id" = "null" ]; then
+          echo "::error::no Gitea release id"; exit 1
+        fi
 
         shopt -s nullglob
         count=0

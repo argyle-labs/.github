@@ -46,8 +46,9 @@ runs:
         if [ -f Cargo.lock ]; then
           meta=$(cargo metadata --no-deps --format-version 1 2>/dev/null) \
             || probe_fail "cargo metadata --no-deps failed"
-          members=$(echo "$meta" | jq -r '.packages[].name') && [ -n "$members" ] \
-            || probe_fail "could not list workspace members"
+          if ! members=$(echo "$meta" | jq -r '.packages[].name') || [ -z "$members" ]; then
+            probe_fail "could not list workspace members"
+          fi
           # [[package]] blocks without a `source` that are not members of this
           # workspace came from a path patch.
           sourceless=$(awk '

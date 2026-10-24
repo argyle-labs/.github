@@ -105,7 +105,9 @@ runs:
           created=$(curl -fsS ${auth[@]+"${auth[@]}"} -X POST -d "$body_json" "$rel_api")
           rel_id=$(echo "$created" | jq -r '.id')
         fi
-        [ -n "$rel_id" ] && [ "$rel_id" != "null" ] || { echo "::error::no GitHub release id"; exit 1; }
+        if [ -z "$rel_id" ] || [ "$rel_id" = "null" ]; then
+          echo "::error::no GitHub release id"; exit 1
+        fi
 
         shopt -s nullglob
         count=0

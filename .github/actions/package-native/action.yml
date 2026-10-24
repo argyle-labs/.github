@@ -24,6 +24,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # dpkg-deb rejects a group/world-writable control dir.
+        umask 0022
         test -d dist-release || { echo "::error::dist-release/ missing — stage orca-<triple> binaries first"; exit 1; }
         # release-lib.sh is Bash-3.2 clean and side-effect-free on source
         # (sets REPO_ROOT/DIST_DIR). build_native_packages self-skips any format
