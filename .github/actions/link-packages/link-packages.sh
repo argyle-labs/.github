@@ -18,8 +18,16 @@ DRY_RUN="${DRY_RUN:-false}"
 MAX_PAGES=100
 
 safe='^[A-Za-z0-9._-]+$'
+
+dot_segment() {
+  [[ "/$1/" == */../* || "/$1/" == */./* || "$1" =~ ^\.+$ ]]
+}
+
 for v in "$OWNER" "$REPO_NAME" "$TYPE"; do
-  [[ "$v" =~ $safe ]] || { warn "invalid owner/repo/type '$v'; skipping package links"; exit 0; }
+  if [[ ! "$v" =~ $safe ]] || dot_segment "$v"; then
+    warn "invalid owner/repo/type '$v'; skipping package links"
+    exit 0
+  fi
 done
 
 [[ "$GITEA_TOKEN" =~ $safe ]] || { warn "token has unexpected characters; skipping package links"; exit 0; }
@@ -29,7 +37,7 @@ trap 'rm -f "$auth_cfg"' EXIT
 printf 'header = "Authorization: token %s"\n' "$GITEA_TOKEN" > "$auth_cfg"
 
 api() {
-  curl -sS --retry 3 --retry-all-errors --max-time 30 -K "$auth_cfg" "$@"
+  curl -sS --path-as-is --retry 3 --retry-all-errors --max-time 30 -K "$auth_cfg" "$@"
 }
 
 if [ -z "$NAMES" ]; then
@@ -58,7 +66,7 @@ name_re="$safe"
 
 planned=()
 for name in $NAMES; do
-  if [[ "$name" =~ $name_re ]]; then
+  if [[ "$name" =~ $name_re ]] && ! dot_segment "$name"; then
     planned+=("$name")
   else
     warn "skipping invalid package name '$name'"

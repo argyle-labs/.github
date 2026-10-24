@@ -35,7 +35,7 @@ jobs:
           REPO: ${{ inputs.repo }}
         run: |
           set -euo pipefail
-          [[ "$REPO" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid repo name '$REPO'"; exit 1; }
+          [[ "$REPO" =~ ^[A-Za-z0-9._-]+$ && ! "$REPO" =~ ^\.+$ ]] || { echo "::error::invalid repo name '$REPO'"; exit 1; }
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
