@@ -406,8 +406,8 @@ jobs:
       - name: Assemble checksums + install.sh
         run: |
           set -euo pipefail
-          ( cd dist-release && cat ./*.sha256 > checksums.sha256 2>/dev/null || true )
-          [ -f scripts/install.sh ] && cp scripts/install.sh dist-release/ || true
+          ( if cd dist-release; then cat ./*.sha256 > checksums.sha256 2>/dev/null || true; fi )
+          if [ -f scripts/install.sh ]; then cp scripts/install.sh dist-release/ || true; fi
 
       - uses: actions/upload-artifact@v4
         with:
