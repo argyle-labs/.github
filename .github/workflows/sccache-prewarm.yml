@@ -1,35 +1,35 @@
 name: sccache pre-warm
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Seed the shared sccache bucket for a pinned orca tag, so the first plugin CI
+# Seed the shared sccache bucket for a pinned orca-plugin-toolkit version, so the first plugin CI
 # or release after an orca bump fetches orca's crates from cache instead of
 # compiling them cold. Builds a skeleton plugin per canonical plugin-toolkit
 # feature profile, in the same ci-rust image and with the same compile env as
 # plugin-ci.yml (test build) and plugin-build (release build).
 #
 # Hits depend on the consumer resolving the SAME package source: a plugin pinned
-# `tag = "<orca_tag>"` shares keys with this warm; one pinned `branch = "main"`
-# has a different source id and does not. Dependency versions and features are
+# `version = "=<toolkit_version>"` from the gitea registry shares keys with this
+# warm; one pinned to another version or a git source does not. Dependency versions and features are
 # unified per plugin graph, so this is best-effort for plugins that add extra
 # features to shared crates.
 #
-# Dispatch after cutting an orca tag that plugins are about to pin.
+# Dispatch after publishing a toolkit version that plugins are about to pin.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:
     inputs:
-      orca_tag:
-        description: orca tag plugins pin plugin-toolkit to.
+      toolkit_version:
+        description: orca-plugin-toolkit version plugins pin to.
         type: string
-        default: v0.2.1-rc.10
+        default: 0.2.1-rc.47
       release_targets:
         description: Space-separated triples to warm a release build for (empty = test build only).
         type: string
         default: x86_64-unknown-linux-musl
 
 concurrency:
-  group: sccache-prewarm-${{ inputs.orca_tag }}
+  group: sccache-prewarm-${{ inputs.toolkit_version }}
   cancel-in-progress: false
 
 env:
@@ -76,18 +76,18 @@ jobs:
     steps:
       - name: Generate skeleton plugin
         env:
-          ORCA_TAG: ${{ inputs.orca_tag }}
+          TOOLKIT_VERSION: ${{ inputs.toolkit_version }}
           PROFILE: ${{ matrix.profile }}
         run: |
           set -euo pipefail
           dir="$GITHUB_WORKSPACE/warm-plugin"
           mkdir -p "$dir/src"
           if [ "$PROFILE" = default ]; then
-            dep="{ git = \"https://github.com/argyle-labs/orca\", tag = \"${ORCA_TAG}\" }"
+            dep="{ version = \"=${TOOLKIT_VERSION}\", registry = \"gitea\", package = \"orca-plugin-toolkit\" }"
           else
             IFS=, read -ra fs <<< "$PROFILE"
             feats=$(printf '"%s", ' "${fs[@]}"); feats=${feats%, }
-            dep="{ git = \"https://github.com/argyle-labs/orca\", tag = \"${ORCA_TAG}\", default-features = false, features = [${feats}] }"
+            dep="{ version = \"=${TOOLKIT_VERSION}\", registry = \"gitea\", package = \"orca-plugin-toolkit\", default-features = false, features = [${feats}] }"
           fi
           cat > "$dir/Cargo.toml" <<EOF
           [package]
