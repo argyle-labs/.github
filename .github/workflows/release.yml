@@ -392,7 +392,7 @@ jobs:
           find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── dist-release ──"; ls -la dist-release
 
-      - name: Build native packages (deb/rpm/PKGBUILD/homebrew/plg)
+      - name: Build OS packages (deb/rpm/PKGBUILD/homebrew/plg)
         uses: ./.ci/.github/actions/package-native
 
       - name: Assemble checksums + install.sh

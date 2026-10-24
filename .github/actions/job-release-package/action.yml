@@ -45,7 +45,7 @@ runs:
       env:
         REL_VERSION: ${{ steps.rel.outputs.version }}
       run: sed -i '0,/^version = ".*"/s//version = "'"$REL_VERSION"'"/' Cargo.toml
-    - name: Build native packages (package-native)
+    - name: Build OS packages (package-native)
       uses: argyle-labs/.github/.github/actions/package-native@main
     - name: Assemble checksums + install.sh
       shell: bash
