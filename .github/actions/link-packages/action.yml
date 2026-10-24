@@ -1,0 +1,52 @@
+name: Link packages to repository
+description: >
+  Links Gitea packages to a repository so they show on its Packages tab.
+  Already-linked packages are skipped; failures warn and never fail the job.
+  With `names` empty, links every unlinked package of `type` matching `query`.
+
+inputs:
+  token:
+    description: 'Gitea token with package scope and write on the repo (pass `secrets.CI_REGISTRY_TOKEN`).'
+    required: true
+  type:
+    description: Gitea package type (cargo, container, generic, npm, ...).
+    required: true
+  names:
+    description: Whitespace-separated package names. Empty = list via `query`.
+    required: false
+    default: ""
+  query:
+    description: Package name search used when `names` is empty.
+    required: false
+    default: ""
+  repository:
+    description: owner/repo to link to.
+    required: false
+    default: ${{ github.repository }}
+  owner:
+    description: Package owner. Empty = owner of `repository`.
+    required: false
+    default: ""
+  dry-run:
+    description: '"true" prints the planned links without linking.'
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Link packages
+      shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.token }}
+        API_URL: ${{ github.api_url }}
+        REPOSITORY: ${{ inputs.repository }}
+        TYPE: ${{ inputs.type }}
+        NAMES: ${{ inputs.names }}
+        QUERY: ${{ inputs.query }}
+        PKG_OWNER: ${{ inputs.owner }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -euo pipefail
+        repo_owner="${REPOSITORY%%/*}"
+        OWNER="${PKG_OWNER:-$repo_owner}" REPO_NAME="${REPOSITORY#*/}" "$GITHUB_ACTION_PATH/link-packages.sh"

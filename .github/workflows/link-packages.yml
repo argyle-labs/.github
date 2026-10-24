@@ -1,0 +1,78 @@
+name: link-packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: argyle-labs repo name to link packages to (e.g. orca)
+        required: true
+      type:
+        description: Gitea package type
+        required: true
+        default: cargo
+      query:
+        description: Package name prefix, used when names cannot be derived (e.g. orca-)
+        required: false
+        default: ""
+      names:
+        description: Whitespace-separated package names (overrides derivation and query)
+        required: false
+        default: ""
+      dry-run:
+        description: Print the planned links without linking
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate repo name
+        env:
+          REPO: ${{ inputs.repo }}
+        run: |
+          set -euo pipefail
+          [[ "$REPO" =~ ^[A-Za-z0-9._-]+$ && ! "$REPO" =~ ^\.+$ ]] || { echo "::error::invalid repo name '$REPO'"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out target repo
+        if: ${{ inputs.type == 'cargo' && inputs.names == '' }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: argyle-labs/${{ inputs.repo }}
+          token: ${{ secrets.CI_REGISTRY_TOKEN }}
+          path: target-repo
+          persist-credentials: false
+      - name: Derive crate names
+        id: derive
+        env:
+          NAMES: ${{ inputs.names }}
+        run: |
+          set -euo pipefail
+          names="$NAMES"
+          if [ -z "$names" ] && [ -f target-repo/Cargo.toml ] && command -v cargo >/dev/null && command -v jq >/dev/null; then
+            names="$(cargo metadata --manifest-path target-repo/Cargo.toml --format-version 1 --no-deps | jq -r '
+              .workspace_members as $m
+              | .packages[] | select(.id as $id | $m | index($id))
+              | select(.publish | index("gitea")) | .name' | tr '\n' ' ')" \
+              || { echo "::warning::cargo metadata failed; falling back to query"; names=""; }
+          fi
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+      - name: Require names or query
+        if: ${{ steps.derive.outputs.names == '' && inputs.query == '' }}
+        run: |
+          echo "::error::no names derived; supply names or query"
+          exit 1
+      - uses: ./.github/actions/link-packages
+        with:
+          token: ${{ secrets.CI_REGISTRY_TOKEN }}
+          type: ${{ inputs.type }}
+          names: ${{ steps.derive.outputs.names }}
+          query: ${{ inputs.query }}
+          repository: argyle-labs/${{ inputs.repo }}
+          dry-run: ${{ inputs.dry-run }}

@@ -57,3 +57,21 @@ runs:
       env:
         CARGO_REGISTRIES_GITEA_TOKEN: Bearer ${{ inputs.registry-token }}
       run: scripts/publish-crates.sh
+    - name: Collect published crate names
+      id: crates
+      shell: bash
+      run: |
+        set -euo pipefail
+        names="$(cargo metadata --format-version 1 --no-deps --locked | jq -r '
+          .workspace_members as $m
+          | .packages[] | select(.id as $id | $m | index($id))
+          | select(.publish | index("gitea")) | .name' | tr '\n' ' ')" \
+          || { echo "::warning title=link-packages::cargo metadata failed; skipping package links"; names=""; }
+        echo "names=$names" >> "$GITHUB_OUTPUT"
+    - name: Link crates to repository (link-packages)
+      if: ${{ steps.crates.outputs.names != '' && inputs.registry-token != '' }}
+      uses: argyle-labs/.github/.github/actions/link-packages@main
+      with:
+        token: ${{ inputs.registry-token }}
+        type: cargo
+        names: ${{ steps.crates.outputs.names }}
