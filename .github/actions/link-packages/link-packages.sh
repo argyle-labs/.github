@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -f
 
 warn() {
   echo "::warning title=link-packages::$1"
