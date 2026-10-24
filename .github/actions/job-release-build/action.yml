@@ -6,7 +6,8 @@ description: >
   tests it when the runner can exec it, and uploads `build-<target>`. Run in
   the `ci-rust` container; checks out the repo itself. Darwin targets use
   job-release-build-macos.
-  rc and stable tags build with the same profile: fat LTO, codegen-units 1.
+  rc and stable tags build with the same profile: Cargo.toml's for
+  asset-profile full, otherwise fat LTO, codegen-units 1, opt-level s.
 
 inputs:
   target:
@@ -24,7 +25,7 @@ inputs:
     required: false
     default: "[]"
   disable-lto-for-rc:
-    description: 'Deprecated no-op; rc builds use the stable profile (fat LTO, codegen-units 1).'
+    description: 'Deprecated no-op; rc builds use the stable profile.'
     required: false
     default: "false"
   orca-fetch-token:
@@ -83,12 +84,13 @@ runs:
         fetch-depth: 0
     - name: Release profile
       id: relprof
+      if: ${{ inputs.asset-profile != 'full' }}
       uses: argyle-labs/.github/.github/actions/rust-release-profile@main
       with:
-        strip: ${{ inputs.asset-profile != 'full' && 'symbols' || '' }}
+        strip: symbols
         lto: fat
         codegen-units: "1"
-        opt-level: ${{ inputs.asset-profile != 'full' && 's' || '' }}
+        opt-level: s
     - name: Set up Rust (toolchain, sccache)
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
