@@ -1,0 +1,35 @@
+name: plugin-toolkit latest
+description: >
+  `cargo update` orca-plugin-toolkit and orca-plugin-toolkit-build to the
+  latest released version allowed by Cargo.toml, so plugins build against the
+  newest toolkit instead of whatever the committed lock recorded. Packages that
+  are absent from Cargo.lock or are workspace members are skipped.
+
+inputs:
+  working-directory:
+    description: 'Cargo workspace root.'
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Update orca-plugin-toolkit to latest released
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        [ -f Cargo.lock ] || { echo "no Cargo.lock; skipping"; exit 0; }
+        for p in orca-plugin-toolkit orca-plugin-toolkit-build; do
+          sourced=$(awk -v want="$p" '
+            /^\[\[package\]\]/ { n=""; next }
+            /^name = /         { gsub(/"/, "", $3); n=$3 }
+            /^source = /       { if (n == want) { print "yes"; exit } }
+          ' Cargo.lock)
+          if [ "$sourced" != yes ]; then
+            echo "$p: not a sourced dependency; skipping"
+            continue
+          fi
+          cargo update -p "$p"
+          awk -v want="$p" '/^name = / { gsub(/"/, "", $3); n=$3 } /^version = / && n == want { gsub(/"/, "", $3); print want, $3; exit }' Cargo.lock
+        done

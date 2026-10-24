@@ -183,6 +183,9 @@ runs:
           CARGO_TERM_COLOR=always
           CARGO_NET_GIT_FETCH_WITH_CLI=true
           OPENSSL_NO_VENDOR=1
+    - name: Use latest released orca-plugin-toolkit
+      if: ${{ steps.run.outputs.filter != '' }}
+      uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
     - name: Fetch artifacts
       if: ${{ steps.run.outputs.filter != '' }}
       uses: argyle-labs/.github/.github/actions/fetch-artifacts@main

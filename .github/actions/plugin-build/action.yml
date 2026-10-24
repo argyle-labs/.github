@@ -405,6 +405,9 @@ runs:
         after=$(snap)
         [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with no .cargo/config.toml and commit"; diff <(echo "$before") <(echo "$after"); exit 1; }
 
+    - name: Use latest released orca-plugin-toolkit
+      uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
+
     - name: Fetch dependencies
       uses: argyle-labs/.github/.github/actions/cargo-fetch@main
       with:
