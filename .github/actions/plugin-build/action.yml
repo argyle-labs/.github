@@ -410,6 +410,26 @@ runs:
       with:
         phases-file: ${{ runner.temp }}/plugin-build-phases
 
+    - name: Forbid plugin-toolkit testing feature
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      run: |
+        set -euo pipefail
+        found=false
+        for pkg in orca-plugin-toolkit plugin-toolkit; do
+          if tree=$(cargo tree --locked --target "$TARGET" -e features,normal -i "$pkg" 2>/dev/null); then
+            found=true
+            if grep -qF "${pkg} feature \"testing\"" <<< "$tree"; then
+              echo "::error title=plugin-toolkit testing feature::release build enables ${pkg}/testing outside dev-dependencies"
+              grep -A20 -F "${pkg} feature \"testing\"" <<< "$tree" || true
+              exit 1
+            fi
+          fi
+        done
+        echo "plugin-toolkit testing feature: absent (toolkit in normal graph: $found)"
+
     - name: Build release binaries
       if: ${{ steps.host.outputs.slot != 'true' }}
       shell: bash
