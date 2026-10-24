@@ -6,6 +6,7 @@ description: >
   tests it when the runner can exec it, and uploads `build-<target>`. Run in
   the `ci-rust` container; checks out the repo itself. Darwin targets use
   job-release-build-macos.
+  rc and stable tags build with the same profile: fat LTO, codegen-units 1.
 
 inputs:
   target:
@@ -23,7 +24,7 @@ inputs:
     required: false
     default: "[]"
   disable-lto-for-rc:
-    description: '"true" sets CARGO_PROFILE_RELEASE_LTO=off when the version is an -rc.'
+    description: 'Deprecated no-op; rc builds use the stable profile (fat LTO, codegen-units 1).'
     required: false
     default: "false"
   orca-fetch-token:
@@ -80,21 +81,14 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    # Set before rust-setup so rust-cache, which keys on CARGO_* env, keeps RC
-    # and stable target dirs apart.
-    - name: Disable LTO for release candidates
-      if: ${{ inputs.disable-lto-for-rc == 'true' && steps.rel.outputs.prerelease == 'true' }}
-      shell: bash
-      run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
-    - name: Release size profile
+    - name: Release profile
       id: relprof
-      if: ${{ inputs.asset-profile != 'full' }}
       uses: argyle-labs/.github/.github/actions/rust-release-profile@main
       with:
-        strip: symbols
-        lto: ${{ steps.rel.outputs.prerelease == 'true' && 'thin' || 'fat' }}
-        codegen-units: ${{ steps.rel.outputs.prerelease == 'true' && '16' || '1' }}
-        opt-level: s
+        strip: ${{ inputs.asset-profile != 'full' && 'symbols' || '' }}
+        lto: fat
+        codegen-units: "1"
+        opt-level: ${{ inputs.asset-profile != 'full' && 's' || '' }}
     - name: Set up Rust (toolchain, sccache)
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:
