@@ -156,6 +156,25 @@ runs:
         username: ${{ inputs.registry-user }}
         password: ${{ inputs.registry-token }}
 
+    - name: Image package name
+      id: img
+      if: ${{ inputs.image-name != '' }}
+      shell: bash
+      env:
+        NAME: ${{ inputs.image-name }}
+      run: |
+        set -euo pipefail
+        n="${NAME,,}"
+        echo "name=${n#*/}" >> "$GITHUB_OUTPUT"
+
+    - name: Link image to repository (link-packages)
+      if: ${{ inputs.image-name != '' && inputs.registry-token != '' }}
+      uses: argyle-labs/.github/.github/actions/link-packages@main
+      with:
+        token: ${{ inputs.registry-token }}
+        type: container
+        names: ${{ steps.img.outputs.name }}
+
     - name: Publish Gitea release
       shell: bash
       env:

@@ -1,0 +1,27 @@
+name: link-packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: owner/repo to link packages to
+        required: true
+      type:
+        description: Gitea package type
+        required: true
+        default: cargo
+      query:
+        description: Package name search (e.g. orca-)
+        required: true
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/link-packages
+        with:
+          token: ${{ secrets.CI_REGISTRY_TOKEN }}
+          type: ${{ inputs.type }}
+          query: ${{ inputs.query }}
+          repository: ${{ inputs.repository }}
