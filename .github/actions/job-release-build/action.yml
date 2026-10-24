@@ -7,7 +7,7 @@ description: >
   the `ci-rust` container; checks out the repo itself. Darwin targets use
   job-release-build-macos.
   rc and stable tags build with the same profile: Cargo.toml's for
-  asset-profile full, otherwise fat LTO, codegen-units 1, opt-level s.
+  asset-profile full, otherwise fat LTO, codegen-units 1, opt-level z.
 
 inputs:
   target:
@@ -90,7 +90,7 @@ runs:
         strip: symbols
         lto: fat
         codegen-units: "1"
-        opt-level: s
+        opt-level: z
     - name: Set up Rust (toolchain, sccache)
       uses: argyle-labs/.github/.github/actions/rust-setup@main
       with:

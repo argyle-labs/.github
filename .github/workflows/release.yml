@@ -214,14 +214,6 @@ jobs:
           path: .ci
           token: ${{ secrets.ORCA_FETCH_TOKEN }}
 
-      # Thin LTO is ~85% of orca's final-crate build time (orca#755); stable
-      # keeps the Cargo.toml profile. orca only (full profile): plugins default
-      # to lto=false. Set before Rust setup so rust-cache, which keys on CARGO_*
-      # env, keeps RC and stable target dirs apart.
-      - name: Disable LTO for release candidates
-        if: steps.sel.outputs.skip != 'true' && inputs.asset-profile == 'full' && contains(needs.version.outputs.version, '-rc.')
-        run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
-
       - name: Release size profile
         id: relprof
         if: ${{ steps.sel.outputs.skip != 'true' && inputs.asset-profile != 'full' }}
@@ -230,7 +222,7 @@ jobs:
           strip: symbols
           lto: fat
           codegen-units: "1"
-          opt-level: s
+          opt-level: z
 
       - name: Rust setup
         if: steps.sel.outputs.skip != 'true'
@@ -454,18 +446,12 @@ jobs:
           echo "ORCA_RELEASE_VERSION=$REL_VERSION" >> "$GITHUB_ENV"
           rustup target add aarch64-apple-darwin || true
 
-      - name: Disable LTO for release candidates
-        if: contains(needs.version.outputs.version, '-rc.')
-        run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
-
       # Persistent per-slot target dir keeps deps warm across releases; the slot
-      # copies the binary back to target/<triple>/release/ for staging. RC and
-      # stable use separate scopes: the LTO mode changes every dep's artifact
-      # hash, so sharing a slot would hold both sets and trip the size cap.
+      # copies the binary back to target/<triple>/release/ for staging.
       - name: Build darwin binary natively
         uses: ./.ci/.github/actions/mint-cargo-slot
         with:
-          scope: ${{ contains(needs.version.outputs.version, '-rc.') && 'orca-rc' || 'orca' }}
+          scope: orca
           target: aarch64-apple-darwin
           bins: orca
           cap-gb: "6"
