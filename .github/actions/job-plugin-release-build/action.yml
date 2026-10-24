@@ -4,8 +4,8 @@ description: >
   fetches the prebuilt `ui-dist` when the repo has ui/package.json, then runs
   plugin-build (artifact `plugin-<target>`: <bin>-<tag>-<target> + .sha256).
   Linux targets run in the ci-rust container; darwin targets on the host.
-  -rc. tags build with thin LTO, 16 codegen units and opt-level s; the
-  profile-* inputs apply to stable tags. Every tag enforces the size budget.
+  Every tag, -rc. included, builds with the profile-* inputs and enforces the
+  size budget, so an rc ships the same binary as its stable.
 
 inputs:
   target:
@@ -56,15 +56,15 @@ inputs:
     required: false
     default: symbols
   profile-lto:
-    description: CARGO_PROFILE_RELEASE_LTO for stable tags. Empty = Cargo.toml profile.
+    description: CARGO_PROFILE_RELEASE_LTO. Empty = Cargo.toml profile.
     required: false
     default: "true"
   profile-codegen-units:
-    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS for stable tags. Empty = Cargo.toml profile.
+    description: CARGO_PROFILE_RELEASE_CODEGEN_UNITS. Empty = Cargo.toml profile.
     required: false
     default: "1"
   profile-opt-level:
-    description: CARGO_PROFILE_RELEASE_OPT_LEVEL for stable tags. Empty = Cargo.toml profile.
+    description: CARGO_PROFILE_RELEASE_OPT_LEVEL. Empty = Cargo.toml profile.
     required: false
     default: z
 
@@ -105,6 +105,6 @@ runs:
         sccache-endpoint: ${{ inputs.sccache-endpoint || env.SCCACHE_ENDPOINT }}
         sccache-region: ${{ inputs.sccache-region }}
         profile-strip: ${{ inputs.profile-strip }}
-        profile-lto: ${{ steps.rel.outputs.prerelease == 'true' && 'thin' || inputs.profile-lto }}
-        profile-codegen-units: ${{ steps.rel.outputs.prerelease == 'true' && '16' || inputs.profile-codegen-units }}
-        profile-opt-level: ${{ steps.rel.outputs.prerelease == 'true' && 's' || inputs.profile-opt-level }}
+        profile-lto: ${{ inputs.profile-lto }}
+        profile-codegen-units: ${{ inputs.profile-codegen-units }}
+        profile-opt-level: ${{ inputs.profile-opt-level }}
