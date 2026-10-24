@@ -64,6 +64,17 @@ jobs:
       - name: Self-test
         run: bash .github/actions/cargo-target-cache/test.sh
 
+  plugin-toolkit-latest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/plugin-toolkit-latest/test.sh
+
   source-hash:
     runs-on: ubuntu-latest
     defaults:

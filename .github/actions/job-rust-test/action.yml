@@ -100,7 +100,7 @@ runs:
       with:
         job: ${{ steps.key.outputs.job }}
         hashes: ${{ steps.buildhash.outputs.hashes }}
-        image: ci-rust:${{ inputs.image-tag }}${{ steps.toolkit.outputs.version && format(' orca-plugin-toolkit={0}', steps.toolkit.outputs.version) || '' }}
+        image: ci-rust:${{ inputs.image-tag }}${{ steps.toolkit.outputs.versions && format(' {0}', steps.toolkit.outputs.versions) || '' }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: |
           ${{ inputs.extra-paths }}

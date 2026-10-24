@@ -102,7 +102,7 @@ runs:
       with:
         job: build
         also-require: ${{ steps.shards.outputs.jobs }}
-        image: ci-rust:${{ inputs.image-tag }}${{ steps.toolkit.outputs.version && format(' orca-plugin-toolkit={0}', steps.toolkit.outputs.version) || '' }}
+        image: ci-rust:${{ inputs.image-tag }}${{ steps.toolkit.outputs.versions && format(' {0}', steps.toolkit.outputs.versions) || '' }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: |
           ${{ inputs.extra-paths }}
