@@ -6,6 +6,7 @@ description: >
   a .sha256, execs it to check the reported version, and uploads
   `build-<target>`. Uses orca's scripts/release-lib.sh. Checks out the repo
   itself. Not best-effort: darwin has no other binary source.
+  rc and stable tags build with the same profile: fat LTO, codegen-units 1.
 
 inputs:
   target:
@@ -20,11 +21,11 @@ inputs:
     required: false
     default: orca
   disable-lto-for-rc:
-    description: '"true" sets CARGO_PROFILE_RELEASE_LTO=off when the version is an -rc.'
+    description: 'Deprecated no-op; rc builds use the stable profile (fat LTO, codegen-units 1).'
     required: false
     default: "false"
   slot-scope:
-    description: 'mint-cargo-slot scope; "-rc" is appended for RC versions (LTO mode changes every dep hash).'
+    description: mint-cargo-slot scope, shared by rc and stable builds.
     required: false
     default: orca
   cap-gb:
@@ -62,14 +63,15 @@ runs:
         # needs it to bake the exact release version.
         echo "ORCA_RELEASE_VERSION=$REL_VERSION" >> "$GITHUB_ENV"
         rustup target add "$TARGET" || true
-    - name: Disable LTO for release candidates
-      if: ${{ inputs.disable-lto-for-rc == 'true' && steps.rel.outputs.prerelease == 'true' }}
-      shell: bash
-      run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+    - name: Release profile
+      uses: argyle-labs/.github/.github/actions/rust-release-profile@main
+      with:
+        lto: fat
+        codegen-units: "1"
     - name: Build darwin binary natively (mint-cargo-slot)
       uses: argyle-labs/.github/.github/actions/mint-cargo-slot@main
       with:
-        scope: ${{ steps.rel.outputs.prerelease == 'true' && format('{0}-rc', inputs.slot-scope) || inputs.slot-scope }}
+        scope: ${{ inputs.slot-scope }}
         target: ${{ inputs.target }}
         bins: ${{ inputs.bin }}
         cap-gb: ${{ inputs.cap-gb }}
