@@ -1,8 +1,7 @@
 # Skeleton plugin used only to warm CARGO_HOME in the ci-rust image. `full`
 # (default) + socketio + delegated-http enables every plugin-facing optional
-# dependency, so its lock is the union any plugin profile can pull. Bump the
-# version here together with TOOLKIT_VERSION in the Dockerfile, then regenerate
-# the lock with `cargo generate-lockfile`.
+# dependency, so its lock is the union any plugin profile can pull. The image
+# build updates the lock to the latest released toolkit (or TOOLKIT_VERSION).
 [package]
 name = "ci-warm"
 version = "0.0.0"
@@ -11,7 +10,7 @@ rust-version = "1.95"
 publish = false
 
 [dependencies]
-plugin-toolkit = { version = "=0.2.1-rc.47", registry = "gitea", package = "orca-plugin-toolkit", features = ["socketio", "delegated-http"] }
+plugin-toolkit = { version = ">=0.2.1-rc.47", registry = "gitea", package = "orca-plugin-toolkit", features = ["socketio", "delegated-http"] }
 
 [build-dependencies]
-plugin-toolkit-build = { version = "=0.2.1-rc.47", registry = "gitea", package = "orca-plugin-toolkit-build" }
+plugin-toolkit-build = { version = ">=0.2.1-rc.47", registry = "gitea", package = "orca-plugin-toolkit-build" }

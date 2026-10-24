@@ -97,16 +97,25 @@ RUN set -eux; \
 ENV CARGO_REGISTRIES_GITEA_INDEX=sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
 
 # Warm CARGO_HOME: the sparse index entries + .crate files for the union of
-# plugin dependencies at orca-plugin-toolkit TOOLKIT_VERSION. A job then
-# downloads only what drifted from this lock.
+# plugin dependencies at orca-plugin-toolkit TOOLKIT_VERSION (empty = the latest
+# released version, resolved at image build time). A job then downloads only
+# what drifted from this lock.
 # Extracted sources are dropped; re-extracting a .crate is cheap.
-ARG TOOLKIT_VERSION=0.2.1-rc.47
+ARG TOOLKIT_VERSION=
 COPY warm /tmp/ci-warm
 RUN set -eux; \
-    grep -q "version = \"=${TOOLKIT_VERSION}\"" /tmp/ci-warm/Cargo.toml; \
-    cargo fetch --locked --manifest-path /tmp/ci-warm/Cargo.toml; \
+    m=/tmp/ci-warm/Cargo.toml; \
+    if [ -n "${TOOLKIT_VERSION}" ]; then \
+        cargo update --manifest-path "$m" -p orca-plugin-toolkit --precise "${TOOLKIT_VERSION}"; \
+        cargo update --manifest-path "$m" -p orca-plugin-toolkit-build --precise "${TOOLKIT_VERSION}"; \
+    else \
+        cargo update --manifest-path "$m" -p orca-plugin-toolkit -p orca-plugin-toolkit-build; \
+    fi; \
+    cargo fetch --locked --manifest-path "$m"; \
+    awk '/^name = "orca-plugin-toolkit"$/ { getline; gsub(/"/, "", $3); print $3; exit }' /tmp/ci-warm/Cargo.lock \
+        | tee /usr/local/share/ci-warm-toolkit-version; \
     rm -rf /tmp/ci-warm "${CARGO_HOME}/registry/src"
 
 LABEL org.opencontainers.image.source="https://github.com/argyle-labs/.github" \
-      org.opencontainers.image.description="orca plugin CI/release toolchain (rust ${RUST_VERSION} + linux targets + zig + sccache + warm CARGO_HOME at orca-plugin-toolkit ${TOOLKIT_VERSION})" \
+      org.opencontainers.image.description="orca plugin CI/release toolchain (rust ${RUST_VERSION} + linux targets + zig + sccache + warm CARGO_HOME at orca-plugin-toolkit ${TOOLKIT_VERSION:-latest})" \
       org.opencontainers.image.licenses="MIT"
