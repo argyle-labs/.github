@@ -23,6 +23,14 @@ inputs:
     description: owner/repo to link to.
     required: false
     default: ${{ github.repository }}
+  owner:
+    description: Package owner. Empty = owner of `repository`.
+    required: false
+    default: ""
+  dry-run:
+    description: '"true" prints the planned links without linking.'
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -36,6 +44,9 @@ runs:
         TYPE: ${{ inputs.type }}
         NAMES: ${{ inputs.names }}
         QUERY: ${{ inputs.query }}
+        PKG_OWNER: ${{ inputs.owner }}
+        DRY_RUN: ${{ inputs.dry-run }}
       run: |
         set -euo pipefail
-        OWNER="${REPOSITORY%%/*}" REPO_NAME="${REPOSITORY#*/}" "$GITHUB_ACTION_PATH/link-packages.sh"
+        repo_owner="${REPOSITORY%%/*}"
+        OWNER="${PKG_OWNER:-$repo_owner}" REPO_NAME="${REPOSITORY#*/}" "$GITHUB_ACTION_PATH/link-packages.sh"

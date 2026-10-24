@@ -165,6 +165,7 @@ runs:
       run: |
         set -euo pipefail
         n="${NAME,,}"
+        echo "owner=${n%%/*}" >> "$GITHUB_OUTPUT"
         echo "name=${n#*/}" >> "$GITHUB_OUTPUT"
 
     - name: Link image to repository (link-packages)
@@ -173,6 +174,7 @@ runs:
       with:
         token: ${{ inputs.registry-token }}
         type: container
+        owner: ${{ steps.img.outputs.owner }}
         names: ${{ steps.img.outputs.name }}
 
     - name: Publish Gitea release

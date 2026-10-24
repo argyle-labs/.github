@@ -69,7 +69,7 @@ runs:
           || { echo "::warning title=link-packages::cargo metadata failed; skipping package links"; names=""; }
         echo "names=$names" >> "$GITHUB_OUTPUT"
     - name: Link crates to repository (link-packages)
-      if: ${{ steps.crates.outputs.names != '' }}
+      if: ${{ steps.crates.outputs.names != '' && inputs.registry-token != '' }}
       uses: argyle-labs/.github/.github/actions/link-packages@main
       with:
         token: ${{ inputs.registry-token }}
