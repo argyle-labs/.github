@@ -386,13 +386,13 @@ jobs:
           mkdir -p dist-release
           # The full profile staged orca-<triple>(+.sha256) under each artifact.
           find staged -type f \( -name 'orca-*' -o -name '*.sha256' \) -exec cp {} dist-release/ \;
-          # Artifact up/download strips the Unix +x bit; build_native_packages
+          # Artifact up/download strips the Unix +x bit; build_os_packages
           # requires `-x` and the deb/rpm payloads must be executable. Restore it
           # on the binaries (not the .sha256 sidecars).
           find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
           echo "── dist-release ──"; ls -la dist-release
 
-      - name: Build native packages (deb/rpm/PKGBUILD/homebrew/plg)
+      - name: Build OS packages (deb/rpm/PKGBUILD/homebrew/plg)
         uses: ./.ci/.github/actions/package-native
 
       - name: Assemble checksums + install.sh
@@ -525,12 +525,12 @@ jobs:
           set -euo pipefail
           source scripts/release-lib.sh
           write_cargo_version "$REL_VERSION"
-          # build_native_packages consumes the staged binary at
+          # build_os_packages consumes the staged binary at
           # dist-release/orca-<triple>; the artifact round-trip drops the +x bit
           # and it requires the host binary EXECUTABLE (host_target =
           # aarch64-apple-darwin on this runner), so restore it before packaging.
           chmod +x dist-release/orca-aarch64-apple-darwin
-          build_native_packages
+          if declare -F build_os_packages >/dev/null; then build_os_packages; else build_native_packages; fi
           echo "── dist-release (.pkg) ──"; ls -la dist-release/*.pkg || true
 
       - uses: actions/upload-artifact@v4
@@ -576,7 +576,7 @@ jobs:
 
       - name: Collect release assets
         # Allow-list by basename; any other file fails the release. orca-apk-staging
-        # is build_native_packages scratch; any other orca-*-staging dir means a
+        # is build_os_packages scratch; any other orca-*-staging dir means a
         # packager fell back to emitting sources, so it fails. The same binary
         # arrives in several artifacts, so identical copies dedupe and differing
         # ones fail. The full profile then checks a required-asset manifest.

@@ -37,7 +37,7 @@ runs:
         set -euo pipefail
         mkdir -p dist-release
         find staged -type f \( -name 'orca-*' -o -name '*.sha256' \) -exec cp {} dist-release/ \;
-        # Artifact round-trips drop +x; build_native_packages requires it.
+        # Artifact round-trips drop +x; build_os_packages requires it.
         find dist-release -type f -name 'orca-*' ! -name '*.sha256' -exec chmod +x {} +
         echo "── dist-release ──"; ls -la dist-release
     - name: Set package version
@@ -45,7 +45,7 @@ runs:
       env:
         REL_VERSION: ${{ steps.rel.outputs.version }}
       run: sed -i '0,/^version = ".*"/s//version = "'"$REL_VERSION"'"/' Cargo.toml
-    - name: Build native packages (package-native)
+    - name: Build OS packages (package-native)
       uses: argyle-labs/.github/.github/actions/package-native@main
     - name: Assemble checksums + install.sh
       shell: bash

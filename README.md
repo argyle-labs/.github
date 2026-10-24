@@ -233,7 +233,7 @@ GitHub leaves both unset; the Gitea org sets `GIT_SERVER_URL` to the Gitea URL a
 | `job-release-build` | `build-<target>` (`ci-rust` container) | `rust-setup`, `build-target`, stage + `.sha256`, smoke test on runner-arch targets, upload `build-<target>` | `target`, `version`, `tag`, `asset-profile`, `bins`, `disable-lto-for-rc`, `orca-fetch-token`, `sccache-*` | `artifact` |
 | `job-release-build-macos` | `build-<darwin target>` (macOS runner) | native build in `mint-cargo-slot`, version smoke test, upload `build-<target>` | `target`, `version`, `bin`, `disable-lto-for-rc`, `slot-scope`, `cap-gb` | `artifact` |
 | `job-release-package` | `package` | `package-native` (deb/rpm/PKGBUILD/homebrew/plg), `checksums.sha256`, `install.sh` | | `artifact` |
-| `job-release-package-macos` | `package-macos` (macOS, `continue-on-error`) | `.pkg` | `target`, `version` | `artifact` |
+| `job-release-package-macos` | `package-macos-pkg` (macOS, `continue-on-error`) | `.pkg` | `target`, `version` | `artifact` |
 | `job-release-publish` | `publish` | asset allow-list + per-target check, `write-release-version` + commit, `publish-gitea`, `mirror-github` | `version`…`mirror` from `version`, `targets`, `asset-profile`, `notes`, `release-token`, `github-token` | |
 | `job-release-crates` | `crates` (`ci-rust` container) | `scripts/publish-crates.sh` from the release tag | `registry-token` | |
 

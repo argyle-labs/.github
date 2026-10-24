@@ -54,7 +54,7 @@ runs:
       with:
         path: incoming
     # Allow-list by basename; any other file fails the release. orca-apk-staging
-    # is build_native_packages scratch; any other orca-*-staging dir means a
+    # is build_os_packages scratch; any other orca-*-staging dir means a
     # packager fell back to emitting sources. The same binary arrives in several
     # artifacts, so identical copies dedupe and differing ones fail.
     - name: Collect release assets
