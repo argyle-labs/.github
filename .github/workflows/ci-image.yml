@@ -53,7 +53,20 @@ env:
   IMAGE: argyle-labs/ci-rust
 
 jobs:
+  toolkit:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.latest.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Latest orca-plugin-toolkit
+        id: latest
+        uses: ./.github/actions/crate-latest
+        with:
+          crate: orca-plugin-toolkit
+
   build:
+    needs: toolkit
     strategy:
       fail-fast: true
       matrix:
@@ -74,6 +87,7 @@ jobs:
           file: ci-image/Dockerfile
           build-args: |
             RUST_VERSION=${{ env.RUST_VERSION }}
+            TOOLKIT_VERSION=${{ needs.toolkit.outputs.version }}
           registry: ${{ env.REGISTRY }}
           registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
           username: ${{ secrets.CI_REGISTRY_USER }}

@@ -74,19 +74,21 @@ jobs:
           - tools,db,containers
           - tools,db,http,graphql
     steps:
+      - uses: actions/checkout@v4
+      - name: Latest orca-plugin-toolkit
+        id: latest
+        if: inputs.toolkit_version == ''
+        uses: ./.github/actions/crate-latest
+        with:
+          crate: orca-plugin-toolkit
       - name: Generate skeleton plugin
         env:
-          TOOLKIT_VERSION: ${{ inputs.toolkit_version }}
+          TOOLKIT_VERSION: ${{ inputs.toolkit_version || steps.latest.outputs.version }}
           PROFILE: ${{ matrix.profile }}
         run: |
           set -euo pipefail
           dir="$GITHUB_WORKSPACE/warm-plugin"
           mkdir -p "$dir/src"
-          if [ -z "$TOOLKIT_VERSION" ]; then
-            TOOLKIT_VERSION=$(curl -fsSL --retry 3 --max-time 30 "${CARGO_REGISTRIES_GITEA_INDEX#sparse+}or/ca/orca-plugin-toolkit" \
-              | jq -r 'select(.yanked | not) | .vers' | tail -n 1)
-            [ -n "$TOOLKIT_VERSION" ] || { echo "::error::could not resolve latest orca-plugin-toolkit"; exit 1; }
-          fi
           echo "orca-plugin-toolkit ${TOOLKIT_VERSION}"
           if [ "$PROFILE" = default ]; then
             dep="{ version = \"=${TOOLKIT_VERSION}\", registry = \"gitea\", package = \"orca-plugin-toolkit\" }"

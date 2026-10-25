@@ -1,0 +1,36 @@
+name: crate latest
+description: >
+  Highest non-yanked version of a crate in a sparse cargo index (semver order,
+  prereleases below their release), so callers track the latest release even
+  when it is outside the range a `>=` requirement admits.
+
+inputs:
+  crate:
+    description: 'Crate name.'
+    required: true
+  index:
+    description: 'Sparse index URL; empty = CARGO_REGISTRIES_GITEA_INDEX, else the argyle-labs gitea index.'
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: 'Highest published version.'
+    value: ${{ steps.latest.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve latest ${{ inputs.crate }}
+      id: latest
+      shell: bash
+      env:
+        CRATE: ${{ inputs.crate }}
+        INDEX_URL: ${{ inputs.index }}
+      run: |
+        set -euo pipefail
+        [ -n "$INDEX_URL" ] || unset INDEX_URL
+        v=$(/bin/bash "$GITHUB_ACTION_PATH/latest.sh" "$CRATE")
+        [ -n "$v" ] || { echo "::error::no published version of $CRATE"; exit 1; }
+        echo "$CRATE $v"
+        echo "version=$v" >> "$GITHUB_OUTPUT"

@@ -98,14 +98,16 @@ ENV CARGO_REGISTRIES_GITEA_INDEX=sparse+https://gitea.scottkey.me/api/packages/a
 
 # Warm CARGO_HOME: the sparse index entries + .crate files for the union of
 # plugin dependencies at orca-plugin-toolkit TOOLKIT_VERSION (empty = the latest
-# released version, resolved at image build time). A job then downloads only
-# what drifted from this lock.
+# released version; ci-image.yml passes the highest published version so the
+# layer cache busts when a new toolkit ships). A job then downloads only what
+# drifted from this lock.
 # Extracted sources are dropped; re-extracting a .crate is cheap.
 ARG TOOLKIT_VERSION=
 COPY warm /tmp/ci-warm
 RUN set -eux; \
     m=/tmp/ci-warm/Cargo.toml; \
     if [ -n "${TOOLKIT_VERSION}" ]; then \
+        sed -i -E '/orca-plugin-toolkit/ s/version = "[^"]*"/version = "='"${TOOLKIT_VERSION}"'"/' "$m"; \
         cargo update --manifest-path "$m" -p orca-plugin-toolkit --precise "${TOOLKIT_VERSION}"; \
         cargo update --manifest-path "$m" -p orca-plugin-toolkit-build --precise "${TOOLKIT_VERSION}"; \
     else \

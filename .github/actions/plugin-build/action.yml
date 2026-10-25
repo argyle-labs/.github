@@ -78,8 +78,7 @@ outputs:
   orca-source:
     description: >-
       Cargo.lock `source` of plugin-toolkit as resolved by this build (e.g.
-      registry+sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/).
-      Empty
+      sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/). Empty
       when it is path-sourced or absent.
     value: ${{ steps.orca-src.outputs.source }}
 
