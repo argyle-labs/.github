@@ -11,9 +11,9 @@ via `container:`. Epic: [.github#53](https://gitea.scottkey.me/argyle-labs/.gith
 - `zig` + `cargo-zigbuild` (cross), `sccache`, `cargo-nextest`, `cargo-llvm-cov`, `cargo-hack`, `cargo-hakari`
 - `jq`, `zstd`, `libssl-dev`, `mold` (CI links with it via `rust-setup`'s `fast-linker`)
 - A warm `CARGO_HOME`: `cargo fetch` of `warm/Cargo.lock` (every plugin-facing
-  `plugin-toolkit` dependency) plus the orca git db at `ORCA_TAG`. When the
-  pinned orca tag moves, bump the tag in `warm/Cargo.toml` and `ORCA_TAG` in the
-  Dockerfile together and regenerate the lock (`cargo generate-lockfile`).
+  `plugin-toolkit` dependency), pinned at image build time to the required
+  `--build-arg TOOLKIT_VERSION=<ver>` and `TOOLKIT_BUILD_VERSION=<ver>`. The
+  resolved version is recorded in `/usr/local/share/ci-warm-toolkit-version`.
 
 ## Tags
 `ci-rust:<rust-version>` (pinned) and `ci-rust:latest` (current toolchain).

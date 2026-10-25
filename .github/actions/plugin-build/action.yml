@@ -78,7 +78,7 @@ outputs:
   orca-source:
     description: >-
       Cargo.lock `source` of plugin-toolkit as resolved by this build (e.g.
-      git+https://github.com/argyle-labs/orca?tag=v0.2.1-rc.10#<sha>). Empty
+      sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/). Empty
       when it is path-sourced or absent.
     value: ${{ steps.orca-src.outputs.source }}
 
@@ -487,7 +487,7 @@ runs:
       run: |
         src=$(awk '
           /^\[\[package\]\]/            { want=0; next }
-          /^name = "plugin-toolkit"$/ { want=1; next }
+          /^name = "(orca-)?plugin-toolkit"$/ { want=1; next }
           want && /^source = /        { gsub(/"/, "", $3); print $3; exit }
         ' Cargo.lock 2>/dev/null || true)
         echo "plugin-toolkit source: ${src:-<none>}"

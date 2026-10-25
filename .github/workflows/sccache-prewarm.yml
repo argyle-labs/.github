@@ -1,40 +1,39 @@
 name: sccache pre-warm
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Seed the shared sccache bucket for a pinned orca tag, so the first plugin CI
+# Seed the shared sccache bucket for an orca-plugin-toolkit version, so the first plugin CI
 # or release after an orca bump fetches orca's crates from cache instead of
 # compiling them cold. Builds a skeleton plugin per canonical plugin-toolkit
 # feature profile, in the same ci-rust image and with the same compile env as
 # plugin-ci.yml (test build) and plugin-build (release build).
 #
-# Hits depend on the consumer resolving the SAME package source: a plugin pinned
-# `tag = "<orca_tag>"` shares keys with this warm; one pinned `branch = "main"`
-# has a different source id and does not. Dependency versions and features are
+# Hits depend on the consumer resolving the SAME orca-plugin-toolkit version as
+# this warm (default: the highest published); a plugin resolving another version
+# or a git source does not. Dependency versions and features are
 # unified per plugin graph, so this is best-effort for plugins that add extra
 # features to shared crates.
 #
-# Dispatch after cutting an orca tag that plugins are about to pin.
+# Dispatch after publishing a toolkit version.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:
     inputs:
-      orca_tag:
-        description: orca tag plugins pin plugin-toolkit to.
+      toolkit_version:
+        description: orca-plugin-toolkit version to warm (empty = latest released).
         type: string
-        default: v0.2.1-rc.10
+        default: ""
       release_targets:
         description: Space-separated triples to warm a release build for (empty = test build only).
         type: string
         default: x86_64-unknown-linux-musl
 
 concurrency:
-  group: sccache-prewarm-${{ inputs.orca_tag }}
+  group: sccache-prewarm-${{ inputs.toolkit_version || 'latest' }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GITEA_INDEX: sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
   CARGO_INCREMENTAL: "0"
   SCCACHE_BUCKET: sccache
@@ -74,20 +73,28 @@ jobs:
           - tools,db,containers
           - tools,db,http,graphql
     steps:
+      - uses: actions/checkout@v4
+      - name: Latest orca-plugin-toolkit
+        id: latest
+        if: inputs.toolkit_version == ''
+        uses: ./.github/actions/crate-latest
+        with:
+          crate: orca-plugin-toolkit
       - name: Generate skeleton plugin
         env:
-          ORCA_TAG: ${{ inputs.orca_tag }}
+          TOOLKIT_VERSION: ${{ inputs.toolkit_version || steps.latest.outputs.version }}
           PROFILE: ${{ matrix.profile }}
         run: |
           set -euo pipefail
           dir="$GITHUB_WORKSPACE/warm-plugin"
           mkdir -p "$dir/src"
+          echo "orca-plugin-toolkit ${TOOLKIT_VERSION}"
           if [ "$PROFILE" = default ]; then
-            dep="{ git = \"https://github.com/argyle-labs/orca\", tag = \"${ORCA_TAG}\" }"
+            dep="{ version = \"=${TOOLKIT_VERSION}\", registry = \"gitea\", package = \"orca-plugin-toolkit\" }"
           else
             IFS=, read -ra fs <<< "$PROFILE"
             feats=$(printf '"%s", ' "${fs[@]}"); feats=${feats%, }
-            dep="{ git = \"https://github.com/argyle-labs/orca\", tag = \"${ORCA_TAG}\", default-features = false, features = [${feats}] }"
+            dep="{ version = \"=${TOOLKIT_VERSION}\", registry = \"gitea\", package = \"orca-plugin-toolkit\", default-features = false, features = [${feats}] }"
           fi
           cat > "$dir/Cargo.toml" <<EOF
           [package]

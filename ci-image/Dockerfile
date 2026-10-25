@@ -97,18 +97,41 @@ RUN set -eux; \
 ENV CARGO_REGISTRIES_GITEA_INDEX=sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/
 
 # Warm CARGO_HOME: the sparse index entries + .crate files for the union of
-# plugin dependencies, and the orca git db/checkout at ORCA_TAG. A job then
-# downloads only what drifted from this lock, and a plugin pinned to another
-# orca rev fetches a delta into the existing git db instead of a full clone.
+# plugin dependencies at orca-plugin-toolkit TOOLKIT_VERSION and
+# orca-plugin-toolkit-build TOOLKIT_BUILD_VERSION. Both are required;
+# ci-image.yml passes the highest published versions so the layer cache busts
+# when a new toolkit ships. A job then downloads only what drifted from this lock.
 # Extracted sources are dropped; re-extracting a .crate is cheap.
-ARG ORCA_TAG=v0.2.1-rc.10
+ARG TOOLKIT_VERSION=
+ARG TOOLKIT_BUILD_VERSION=
 COPY warm /tmp/ci-warm
 RUN set -eux; \
-    grep -q "tag = \"${ORCA_TAG}\"" /tmp/ci-warm/Cargo.toml; \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch --locked --manifest-path /tmp/ci-warm/Cargo.toml; \
-    ls -d "${CARGO_HOME}"/git/db/orca-*; \
-    rm -rf /tmp/ci-warm "${CARGO_HOME}/registry/src"
+    : "${TOOLKIT_VERSION:?pass --build-arg TOOLKIT_VERSION=<highest published orca-plugin-toolkit>}"; \
+    : "${TOOLKIT_BUILD_VERSION:?pass --build-arg TOOLKIT_BUILD_VERSION=<highest published orca-plugin-toolkit-build>}"; \
+    export CARGO_NET_RETRY=5; \
+    retry() { \
+        n=1; \
+        until timeout "${T:-120}" "$@" > /tmp/retry.log 2>&1; do \
+            rc=$?; cat /tmp/retry.log; \
+            if [ "$rc" -ne 124 ] && ! grep -qiE 'network|timed? ?out|connection|could not resolve|failed to (download|get|fetch|query|update)|spurious|tls|ssl|reset by peer|50[234]' /tmp/retry.log; then return "$rc"; fi; \
+            [ "$n" -ge 3 ] && return "$rc"; \
+            sleep $((n * 15)); n=$((n + 1)); \
+        done; \
+        cat /tmp/retry.log; \
+    }; \
+    m=/tmp/ci-warm/Cargo.toml; \
+    sed -i -E '/package = "orca-plugin-toolkit"/ s/version = "[^"]*"/version = "='"${TOOLKIT_VERSION}"'"/' "$m"; \
+    grep -F 'package = "orca-plugin-toolkit"' "$m" | grep -qF "version = \"=${TOOLKIT_VERSION}\""; \
+    sed -i -E '/package = "orca-plugin-toolkit-build"/ s/version = "[^"]*"/version = "='"${TOOLKIT_BUILD_VERSION}"'"/' "$m"; \
+    grep -F 'package = "orca-plugin-toolkit-build"' "$m" | grep -qF "version = \"=${TOOLKIT_BUILD_VERSION}\""; \
+    retry cargo update --manifest-path "$m" -p orca-plugin-toolkit --precise "${TOOLKIT_VERSION}"; \
+    retry cargo update --manifest-path "$m" -p orca-plugin-toolkit-build --precise "${TOOLKIT_BUILD_VERSION}"; \
+    T=600 retry cargo fetch --locked --manifest-path "$m"; \
+    v=$(awk '/^name = "orca-plugin-toolkit"$/ { getline; gsub(/"/, "", $3); print $3; exit }' /tmp/ci-warm/Cargo.lock); \
+    [ "$v" = "${TOOLKIT_VERSION}" ]; \
+    echo "$v" > /usr/local/share/ci-warm-toolkit-version; \
+    rm -rf /tmp/ci-warm /tmp/retry.log "${CARGO_HOME}/registry/src"
 
 LABEL org.opencontainers.image.source="https://github.com/argyle-labs/.github" \
-      org.opencontainers.image.description="orca plugin CI/release toolchain (rust ${RUST_VERSION} + linux targets + zig + sccache + warm CARGO_HOME at orca ${ORCA_TAG})" \
+      org.opencontainers.image.description="orca plugin CI/release toolchain (rust ${RUST_VERSION} + linux targets + zig + sccache + warm CARGO_HOME at orca-plugin-toolkit ${TOOLKIT_VERSION})" \
       org.opencontainers.image.licenses="MIT"
