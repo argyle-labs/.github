@@ -110,8 +110,8 @@ size_history_sanitize() {
 
 size_history_merge() {
   local history=$1 entries=$2 tag=$3
-  jq -c -n --argjson h "$(size_history_sanitize "$history")" --argjson e "$(size_history_sanitize "$entries")" --arg tag "$tag" \
-    '[$h[] | select(.tag != $tag)] + $e'
+  jq -c -s --arg tag "$tag" '[.[0][] | select(.tag != $tag)] + .[1]' \
+    <(size_history_sanitize "$history") <(size_history_sanitize "$entries")
 }
 
 md_clean() {
@@ -151,8 +151,8 @@ size_section() {
       warn) echo "::warning title=release-size::${name} ${target}: ${why}" >&2 ;;
     esac
     rows+=("| ${name} | ${target} | ${sz} | ${bs} | ${sd} | ${crates:--} | ${cd} | $(status_icon "$status") ${status}${why:+: ${why//[<|\`]/}} |")
-  done < <(jq -r --argjson b "$(size_history_sanitize "$base")" '
-    .[] as $e | ([$b[] | select(.bin == $e.bin and .target == $e.target)] | first) as $p
+  done < <(jq -r --slurpfile bs <(size_history_sanitize "$base") '
+    $bs[0] as $b | .[] as $e | ([$b[] | select(.bin == $e.bin and .target == $e.target)] | first) as $p
     | [$e.bin, $e.target, $e.size, ($e.crates // ""), ($p.size // ""), ($p.crates // "")] | map(tostring) | @tsv' \
     <<< "$(size_history_sanitize "$entries")")
   if [ "$top_t" -ge 0 ]; then top="⚠ size grew $(fmt_tenths "$top_t") since ${base_tag}"; fi

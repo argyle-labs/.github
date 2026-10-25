@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/lib.sh"
-trap 'echo "::warning title=release-size::failed at line ${LINENO}: ${BASH_COMMAND}"' ERR
+trap '[ "$BASH_SUBSHELL" -gt 0 ] || { echo "::warning title=release-size::failed at line ${LINENO}: ${BASH_COMMAND}"; exit "${over_budget:-0}"; }' ERR
 
 tag=${TAG:?}
 body_tag=${BODY_TAG:-$tag}
@@ -30,13 +30,12 @@ done
 max_bytes=""
 is_uint "$max_mib" && max_bytes=$(( max_mib * 1048576 ))
 
-releases="[]"
 for page in $(seq 1 20); do
-  resp=$(curl -fsS ${auth[@]+"${auth[@]}"} "$api/releases?limit=50&page=$page")
-  jq -e 'type == "array"' <<< "$resp" >/dev/null
-  releases=$(jq -c -n --argjson a "$releases" --argjson b "$resp" '$a + $b')
-  [ "$(jq length <<< "$resp")" -eq 50 ] || break
+  curl -fsS ${auth[@]+"${auth[@]}"} "$api/releases?limit=50&page=$page" > "$tmp/page-$page.json"
+  jq -e 'type == "array"' "$tmp/page-$page.json" >/dev/null
+  [ "$(jq length "$tmp/page-$page.json")" -eq 50 ] || break
 done
+releases=$(for f in $(seq 1 "$page"); do cat "$tmp/page-$f.json"; done | jq -c -s 'add // []')
 
 release_of() { jq -c --arg t "$1" '[.[] | select(.tag_name == $t)] | first // empty' <<< "$releases"; }
 fetch_history() {
@@ -52,7 +51,7 @@ fetch_history() {
 }
 
 rel=$(release_of "$tag")
-[ -n "$rel" ] || { echo "::error title=release-size::no release $tag"; exit 1; }
+[ -n "$rel" ] || { echo "::warning title=release-size::no release $tag"; exit 0; }
 
 if [ -n "${DIST_DIR:-}" ]; then
   prev_hist=$(jq -L "$SEMVER_LIB" -c --arg t "$tag" --arg n "$history_name" "$SIZE_SEMVER"'
@@ -103,12 +102,16 @@ if [ -n "$base_tag" ]; then
   fi
 fi
 
-section=$(size_section "$entries" "$base" "$base_tag" "$size_pct" "$warn_pct" "$crate_max" "$max_bytes" "$max_crates")
+section=$(size_section "$entries" "$base" "$base_tag" "$size_pct" "$warn_pct" "$crate_max" "$max_bytes" "$max_crates" 2> "$tmp/annotations")
+cat "$tmp/annotations" >&2
+over_budget=0
+! grep -q '^::error' "$tmp/annotations" || over_budget=1
 echo "$section" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 target_rel=$(release_of "$body_tag")
-[ -n "$target_rel" ] || { echo "::warning title=release-size::no release $body_tag to annotate"; exit 0; }
+[ -n "$target_rel" ] || { echo "::warning title=release-size::no release $body_tag to annotate"; exit "$over_budget"; }
 body=$(body_with_section "$(jq -r '.body // ""' <<< "$target_rel")" "$section")
 curl -fsS -X PATCH ${auth[@]+"${auth[@]}"} -H "Content-Type: application/json" \
   "$api/releases/$(jq -r .id <<< "$target_rel")" -d "$(jq -n --arg b "$body" '{body:$b}')" >/dev/null
 echo "→ size section on $body_tag (baseline ${base_tag:-none})"
+exit "$over_budget"

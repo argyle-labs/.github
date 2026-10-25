@@ -199,6 +199,7 @@ case "\$args" in
   *"-X DELETE"*) echo "\$args" >> "$rs/deleted" ;;
   *"-X POST"*) f=\${args#*attachment=@}; cp "\${f%%;*}" "$rs/uploaded.json" ;;
   *history-rc1.json*) cat "$fx/history-rc1.json" ;;
+  *"releases?limit=50&page="*) f="$rs/page-\${args##*page=}.json"; if [ -f "\$f" ]; then cat "\$f"; else cat "$rs/releases.json"; fi ;;
   *releases*) cat "$rs/releases.json" ;;
   *) exit 22 ;;
 esac
@@ -267,12 +268,31 @@ sv='[{"tag_name":"v0.10.0","draft":false,"prerelease":false},{"tag_name":"v0.9.0
 eq "semver baseline" "$(size_baseline_tag "$sv" v0.11.0)" "v0.10.0"
 eq "baseline below current only" "$(size_baseline_tag "$sv" v0.9.1)" "v0.9.0"
 
+big=$(head -c 40000 /dev/zero | tr '\0' x)
+jq -c -n --arg b "$big" '[range(50) | {id: (1000 + .), tag_name: "v9.9.\(.)-old", draft: false, prerelease: false, body: $b, assets: []}]' > "$rs/page-1.json"
+cp "$rs/page-1.json" "$rs/page-2.json"
+cp "$fx/channels.json" "$rs/page-3.json"
+rm -f "$rs"/patch-*
+rsrun TAG=v0.4.0-rc.2 DIST_DIR=dist SIZES_DIR=sizes || { cat "$rs/out" >&2; fail=1; }
+eq "paged releases beyond ARG_MAX" "$(grep -c 'Baseline: .v0.4.0-rc.1.\.$' <<< "$(jq -r .body "$rs/patch-5" 2>/dev/null)")" "1"
+eq "paged releases no argv error" "$(grep -c 'Argument list too long' "$rs/out" || true)" "0"
+rm -f "$rs"/page-*.json
+
+bighist=$(jq -c -n '[range(30000) | {tag: "v0.0.\(.)", target: "x86_64-unknown-linux-gnu", bin: "orca-plugin-demo", size: 1, crates: 1}]')
+eq "merge history beyond ARG_MAX" "$(size_history_merge "$bighist" '[{"tag":"v1","target":"t","bin":"b","size":1,"crates":1}]' v1 | jq length)" "30001"
+eq "section base beyond ARG_MAX" "$(size_section '[{"tag":"v1","target":"t","bin":"b","size":1,"crates":1}]' "$bighist" v0 20 5 15 "" "" 2>&1 | grep -c '^| b | t |')" "1"
+
+rm -f "$rs"/patch-*
+if rsrun TAG=v0.4.0-rc.2 DIST_DIR=dist SIZES_DIR=sizes BUDGET_MIB=10; then got=pass; else got=fail; fi
+eq "budget exceeded fails step" "$got" "fail"
+eq "budget exceeded still annotates" "$([ -s "$rs/patch-5" ] && echo yes)" "yes"
+
 cp "$fx/channels.json" "$rs/releases.json"
 rm -f "$rs"/patch-*
 printf '#!/usr/bin/env bash\nexit 22\n' > "$rs/bin/curl.fail"
 mv "$rs/bin/curl" "$rs/bin/curl.ok"; mv "$rs/bin/curl.fail" "$rs/bin/curl"; chmod +x "$rs/bin/curl"
 if rsrun TAG=v0.4.0-rc.2 DIST_DIR=dist SIZES_DIR=sizes; then got=pass; else got=fail; fi
-eq "curl failure fails step" "$got" "fail"
+eq "curl failure warns, step passes" "$got" "pass"
 eq "curl failure ::warning" "$(grep -c '^::warning title=release-size::failed at line' "$rs/out")" "1"
 eq "curl failure no patch" "$(find "$rs" -maxdepth 1 -name 'patch-*' | wc -l | tr -d ' ')" "0"
 eq "curl called" "$([ -s "$rs/argv" ] && echo yes)" "yes"
