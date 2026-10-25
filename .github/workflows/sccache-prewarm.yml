@@ -7,10 +7,9 @@ name: sccache pre-warm
 # feature profile, in the same ci-rust image and with the same compile env as
 # plugin-ci.yml (test build) and plugin-build (release build).
 #
-# Hits depend on the consumer resolving the SAME package version: plugin CI
-# updates orca-plugin-toolkit to the latest released version before building,
-# so warming the latest (the default) shares keys with it; a plugin resolving
-# another version or a git source does not. Dependency versions and features are
+# Hits depend on the consumer resolving the SAME orca-plugin-toolkit version as
+# this warm (default: the highest published); a plugin resolving another version
+# or a git source does not. Dependency versions and features are
 # unified per plugin graph, so this is best-effort for plugins that add extra
 # features to shared crates.
 #

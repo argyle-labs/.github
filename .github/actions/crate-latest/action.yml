@@ -29,6 +29,13 @@ runs:
         INDEX_URL: ${{ inputs.index }}
       run: |
         set -euo pipefail
+        missing=()
+        for t in curl jq; do command -v "$t" >/dev/null || missing+=("$t"); done
+        if [ "${#missing[@]}" -gt 0 ]; then
+          sudo=(); [ "$(id -u)" = 0 ] || sudo=(sudo)
+          "${sudo[@]+"${sudo[@]}"}" apt-get update -qq
+          "${sudo[@]+"${sudo[@]}"}" apt-get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
+        fi
         [ -n "$INDEX_URL" ] || unset INDEX_URL
         v=$(/bin/bash "$GITHUB_ACTION_PATH/latest.sh" "$CRATE")
         [ -n "$v" ] || { echo "::error::no published version of $CRATE"; exit 1; }
