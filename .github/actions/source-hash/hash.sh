@@ -31,6 +31,7 @@ while IFS= read -r line; do
 done <<< "$EXTRA_PATHS"
 GITHUB_ACTION_PATH=${GITHUB_ACTION_PATH:-$(cd "$(dirname "$0")" && pwd)}
 shared=$GITHUB_ACTION_PATH/../..
+# shellcheck source=/dev/null
 source "$GITHUB_ACTION_PATH/../path-utils/normpath.sh"
 if [ -z "$ACTIONS" ]; then
   actions=$(cd "$shared" && find actions workflows lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)

@@ -43,5 +43,7 @@ accepts empty-passthrough '' 0.1.0!
 rejects newline '0.2.1-rc.1\nx'
 rejects semicolon '0.2.1-rc.1;rm -rf /'
 rejects leading-zero 01.2.3
+rejects malformed-below-valid 1.0.0 1.x.0
+rejects empty-version 1.0.0 ''
 
 exit "$fail"

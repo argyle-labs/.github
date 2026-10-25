@@ -59,4 +59,17 @@ yes "rc tag" semver_valid_tag --rc v1.2.3-rc.4
 no "rc tag rejects stable" semver_valid_tag --rc v1.2.3
 no "tag newline" semver_valid_tag --stable $'v1.2.3\nv9.9.9'
 
+lib=$(cd "$(dirname "$0")" && pwd)
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+rc=0; (SEMVER_LIB=/nonexistent semver_valid 1.2.3) 2>"$err" || rc=$?
+is "module path error not invalid" "$([ "$rc" -gt 1 ] && echo yes)" yes
+is "module path error reported" "$(grep -c '::error::semver.sh: jq failed' "$err")" 1
+rc=0; (SEMVER_LIB=/nonexistent semver_max </dev/null) 2>"$err" || rc=$?
+is "max module path error fails" "$([ "$rc" -ne 0 ] && echo yes)" yes
+is "max module path error reported" "$(grep -c '::error::semver.sh: jq failed' "$err")" 1
+rc=0; env PATH=/nonexistent /bin/bash -c ". \"\$1\"" _ "$lib/semver.sh" 2>"$err" || rc=$?
+is "jq missing fails source" "$rc" 1
+is "jq missing reported" "$(grep -c '::error::semver.sh: jq not found' "$err")" 1
+
 exit "$fail"

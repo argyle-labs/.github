@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 
-SEMVER_LIB=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SEMVER_LIB=${SEMVER_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
+
+command -v jq >/dev/null || { echo "::error::semver.sh: jq not found" >&2; return 1; }
 
 semver_jq() {
-  jq -L "$SEMVER_LIB" "$@"
+  local rc=0
+  jq -L "$SEMVER_LIB" "$@" || rc=$?
+  [ "$rc" -le 1 ] || echo "::error::semver.sh: jq failed (exit $rc, module path $SEMVER_LIB)" >&2
+  return "$rc"
 }
 
 semver_valid() {
@@ -25,7 +30,9 @@ semver_valid_tag() {
 }
 
 semver_max() {
-  local f=valid
+  local f=valid rc=0
   case ${1-} in --stable|--rc) f=${1#--} ;; esac
-  semver_jq -Rnr "include \"semver\"; [inputs | select(ltrimstr(\"v\") | $f)] | max"
+  semver_jq -Rnr "include \"semver\"; [inputs | select(ltrimstr(\"v\") | $f)] | max" || rc=$?
+  [ "$rc" -ne 1 ] || echo "::error::semver.sh: jq failed (exit 1, module path $SEMVER_LIB)" >&2
+  return "$rc"
 }
