@@ -114,6 +114,13 @@ publish orca-plugin-toolkit-build 0.2.1
 fails no-requirement '[dependencies]
 serde = "1"'
 
+publish orca-plugin-toolkit-build '0.2.1-rc.1\nx'
+fails newline-version
+
+publish orca-plugin-toolkit-build '0.2.1-rc.1;rm -rf /'
+fails semicolon-version
+
+publish orca-plugin-toolkit-build 0.2.1
 EXTRA_LOCK=orca-plugin-toolkit fails duplicate-lock-entries
 
 CARGO_FAIL="error: package ID specification did not match any packages" fails non-transient-cargo-error
