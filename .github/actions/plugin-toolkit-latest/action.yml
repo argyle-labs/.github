@@ -1,11 +1,14 @@
 name: plugin-toolkit latest
 description: >
-  `cargo update` orca-plugin-toolkit and orca-plugin-toolkit-build to the
-  latest released version allowed by Cargo.toml, so plugins build against the
-  newest toolkit instead of whatever the committed lock recorded. Packages that
-  are absent from Cargo.lock or are workspace members are skipped. Outputs the
-  resolved versions so callers can fold them into pass/cache keys, which hash
-  committed blobs and so never see this lock update.
+  Pin orca-plugin-toolkit and orca-plugin-toolkit-build to the highest
+  published version in their registry (crate-latest), for this build only: the
+  working-copy requirement becomes `=<ver>` and the lock is moved with
+  `cargo update --precise`. Resolving from the index rather than the `>=`
+  requirement keeps advancing across patch/minor prereleases, which cargo's
+  prerelease matching would not. Git-sourced copies get a plain `cargo update`;
+  workspace members and absent crates are skipped. Outputs `crate@version` for
+  both so callers can fold them into pass/cache keys, which hash committed blobs
+  and never see this update.
 
 inputs:
   working-directory:
