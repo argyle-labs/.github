@@ -20,7 +20,7 @@ v=$(curl -fsSL --retry 3 --retry-all-errors --max-time 30 "$index/$path" | jq -r
         (if $i then [0, ($v[$i + 1:] | split(".") | map(if test("^[0-9]+$") then [0, tonumber] else [1, .] end))] else [1] end) ];
   map(select(.yanked | not) | .vers) | sort_by(key) | last // empty
 ')
-semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 if [ -n "$v" ] && ! [[ $v =~ $semver ]]; then
   printf '::error::%s: index returned non-semver version %q\n' "$crate" "$v" >&2
   exit 1
