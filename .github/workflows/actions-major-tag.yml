@@ -33,11 +33,14 @@ jobs:
           VERSION: ${{ inputs.version || github.event.release.tag_name || github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$VERSION" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+          # shellcheck source=/dev/null
+          . .github/lib/semver.sh
+          if ! semver_valid_tag --stable "$VERSION"; then
             echo "::error::'$VERSION' is not vX.Y.Z"
             exit 1
           fi
-          major="v${BASH_REMATCH[1]}"
+          major=${VERSION#v}
+          major="v${major%%.*}"
           sha="$(git rev-parse "refs/tags/${VERSION}^{commit}")"
           git config user.name  "actions-major-tag"
           git config user.email "actions-major-tag@argyle-labs.local"

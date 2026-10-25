@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../../lib/semver.sh"
+
 toml_get() {
   local file=$1 table=$2 key=$3
   [ -f "$file" ] || return 0
@@ -81,16 +84,15 @@ is_uint() {
   [[ ${1:-} =~ ^[0-9]{1,15}$ ]]
 }
 
-SIZE_SEMVER='def sv: capture("^v(?<a>[0-9]+)\\.(?<b>[0-9]+)\\.(?<c>[0-9]+)(-rc\\.(?<r>[0-9]+))?$")
-  | [(.a, .b, .c | tonumber), (if .r then 0 else 1 end), ((.r // "0") | tonumber)];'
+SIZE_SEMVER='include "semver"; def sv: ltrimstr("v") | key; def release_tag: startswith("v") and (ltrimstr("v") | stable or rc);'
 
 size_baseline_tag() {
   local json=$1 tag=$2
-  jq -r --arg tag "$tag" "$SIZE_SEMVER"'
+  jq -L "$SEMVER_LIB" -r --arg tag "$tag" "$SIZE_SEMVER"'
     ($tag | sv) as $cur
     | ($tag | test("-rc\\.")) as $rc
     | [ .[] | select((.draft | not) and ($rc or (.prerelease | not)))
-        | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"))
+        | select(.tag_name | release_tag)
         | select((.tag_name | sv) < $cur) ]
     | max_by(.tag_name | sv) | .tag_name // empty' <<< "$json"
 }

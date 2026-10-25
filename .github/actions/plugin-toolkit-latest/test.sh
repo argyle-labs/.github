@@ -114,6 +114,21 @@ publish orca-plugin-toolkit-build 0.2.1
 fails no-requirement '[dependencies]
 serde = "1"'
 
+rejects() {
+  local name=$1 dir
+  dir=$(fixture "$name")
+  run "$dir" 2>"$root/err" && rc=0 || rc=$?
+  is "$name: non-zero exit" "$([ "$rc" -ne 0 ] && echo yes || echo no)" yes
+  is "$name: non-semver error" "$(grep -c 'non-semver version' "$root/err")" 1
+}
+
+publish orca-plugin-toolkit-build '0.2.1-rc.1\nx'
+rejects newline-version
+
+publish orca-plugin-toolkit-build '0.2.1-rc.1;rm -rf /'
+rejects semicolon-version
+
+publish orca-plugin-toolkit-build 0.2.1
 EXTRA_LOCK=orca-plugin-toolkit fails duplicate-lock-entries
 
 CARGO_FAIL="error: package ID specification did not match any packages" fails non-transient-cargo-error

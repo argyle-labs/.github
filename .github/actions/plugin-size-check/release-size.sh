@@ -55,10 +55,10 @@ rel=$(release_of "$tag")
 [ -n "$rel" ] || { echo "::error title=release-size::no release $tag"; exit 1; }
 
 if [ -n "${DIST_DIR:-}" ]; then
-  prev_hist=$(jq -c --arg t "$tag" --arg n "$history_name" "$SIZE_SEMVER"'
+  prev_hist=$(jq -L "$SEMVER_LIB" -c --arg t "$tag" --arg n "$history_name" "$SIZE_SEMVER"'
     ($t | sv) as $cur
     | [ .[] | select((.draft | not) and any(.assets[]?; .name == $n))
-        | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"))
+        | select(.tag_name | release_tag)
         | select((.tag_name | sv) < $cur) ]
     | max_by(.tag_name | sv) // empty' <<< "$releases")
   history="[]"

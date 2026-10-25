@@ -43,12 +43,12 @@ runs:
         BUMP: ${{ inputs.bump }}
       run: |
         set -euo pipefail
+        # shellcheck source=/dev/null
+        . "$GITHUB_ACTION_PATH/../../lib/semver.sh"
         git fetch --tags --quiet || true
 
         bump="$BUMP"
-        latest_stable=$(git tag -l 'v[0-9]*' \
-          | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
-          | sort -V | tail -1)
+        latest_stable=$(git tag -l 'v[0-9]*' | semver_max --stable)
         latest_stable=${latest_stable:-v0.0.0}
 
         IFS='.' read -r major minor patch <<< "${latest_stable#v}"
@@ -60,7 +60,7 @@ runs:
         esac
         next_stable="${major}.${minor}.${patch}"
 
-        latest_rc=$(git tag -l "v${next_stable}-rc.*" | sort -V | tail -1)
+        latest_rc=$(git tag -l "v${next_stable}-rc.*" | semver_max --rc)
         if [ -z "$latest_rc" ]; then
           n=1; prev_rc="$latest_stable"
         else

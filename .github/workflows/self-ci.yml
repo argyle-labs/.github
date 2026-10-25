@@ -18,6 +18,17 @@ jobs:
         if: ${{ !cancelled() }}
         uses: ./.github/actions/shellcheck
 
+  semver-lib:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/lib/test.sh
+
   job-release-version:
     runs-on: ubuntu-latest
     defaults:
@@ -74,6 +85,17 @@ jobs:
         uses: actions/checkout@v4
       - name: Self-test
         run: bash .github/actions/plugin-toolkit-latest/test.sh
+
+  crate-latest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/crate-latest/test.sh
 
   source-hash:
     runs-on: ubuntu-latest
