@@ -53,6 +53,19 @@ env:
   IMAGE: argyle-labs/ci-rust
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.check.outputs.rust }}
+    steps:
+      - name: Validate rust_version
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad rust_version: $RUST_VERSION"; exit 1; }
+          echo "rust=$RUST_VERSION" >> "$GITHUB_OUTPUT"
+
   toolkit:
     runs-on: ubuntu-latest
     outputs:
@@ -72,7 +85,7 @@ jobs:
           crate: orca-plugin-toolkit-build
 
   build:
-    needs: toolkit
+    needs: [version, toolkit]
     strategy:
       fail-fast: true
       matrix:
@@ -92,7 +105,7 @@ jobs:
           context: ci-image
           file: ci-image/Dockerfile
           build-args: |
-            RUST_VERSION=${{ env.RUST_VERSION }}
+            RUST_VERSION=${{ needs.version.outputs.rust }}
             TOOLKIT_VERSION=${{ needs.toolkit.outputs.version }}
             TOOLKIT_BUILD_VERSION=${{ needs.toolkit.outputs.build-version }}
           registry: ${{ env.REGISTRY }}
@@ -101,17 +114,32 @@ jobs:
           password: ${{ secrets.CI_REGISTRY_TOKEN }}
 
   merge:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Image tags
+        id: tags
+        shell: bash
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          RUST_VERSION: ${{ needs.version.outputs.rust }}
+        run: |
+          set -euo pipefail
+          [[ "$RUST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad rust_version: $RUST_VERSION"; exit 1; }
+          if [ "$REF" = refs/heads/main ]; then
+            printf 'tags<<EOF\n%s\nlatest\nEOF\n' "$RUST_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            suffix=$(tr -c 'A-Za-z0-9_.\n-' '-' <<< "$REF_NAME")
+            suffix=${suffix:0:$((127 - ${#RUST_VERSION}))}
+            echo "tags=${RUST_VERSION}-${suffix}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Merge platform digests
         uses: ./.github/actions/job-image-merge
         with:
           image: ${{ env.IMAGE }}
-          tags: |
-            ${{ env.RUST_VERSION }}
-            latest
+          tags: ${{ steps.tags.outputs.tags }}
           registry: ${{ env.REGISTRY }}
           registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
           username: ${{ secrets.CI_REGISTRY_USER }}
