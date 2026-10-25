@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../../lib/semver.sh"
 tag=$(printf '%s' "${TAG:-}" | tr -d '[:space:]')
 [ -n "$tag" ] && [ "${tag#v}" = "$tag" ] && tag="v$tag"
-if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+if semver_valid_tag --rc "$tag"; then
   pre=true
-elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+elif semver_valid_tag --stable "$tag"; then
   pre=false
 else
   echo "::error::tag '$TAG' is neither vX.Y.Z-rc.N nor vX.Y.Z"
