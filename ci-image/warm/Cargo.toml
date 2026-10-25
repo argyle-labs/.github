@@ -1,7 +1,7 @@
 # Skeleton plugin used only to warm CARGO_HOME in the ci-rust image. `full`
 # (default) + socketio + delegated-http enables every plugin-facing optional
 # dependency, so its lock is the union any plugin profile can pull. The image
-# build updates the lock to the latest released toolkit (or TOOLKIT_VERSION).
+# build pins the lock to TOOLKIT_VERSION / TOOLKIT_BUILD_VERSION.
 [package]
 name = "ci-warm"
 version = "0.0.0"

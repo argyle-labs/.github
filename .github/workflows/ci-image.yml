@@ -57,6 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.latest.outputs.version }}
+      build-version: ${{ steps.latest-build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - name: Latest orca-plugin-toolkit
@@ -64,6 +65,11 @@ jobs:
         uses: ./.github/actions/crate-latest
         with:
           crate: orca-plugin-toolkit
+      - name: Latest orca-plugin-toolkit-build
+        id: latest-build
+        uses: ./.github/actions/crate-latest
+        with:
+          crate: orca-plugin-toolkit-build
 
   build:
     needs: toolkit
@@ -88,6 +94,7 @@ jobs:
           build-args: |
             RUST_VERSION=${{ env.RUST_VERSION }}
             TOOLKIT_VERSION=${{ needs.toolkit.outputs.version }}
+            TOOLKIT_BUILD_VERSION=${{ needs.toolkit.outputs.build-version }}
           registry: ${{ env.REGISTRY }}
           registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
           username: ${{ secrets.CI_REGISTRY_USER }}
