@@ -105,13 +105,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Image tags
+        id: tags
+        shell: bash
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" = refs/heads/main ]; then
+            printf 'tags<<EOF\n%s\nlatest\nEOF\n' "$RUST_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            suffix=$(tr -c 'A-Za-z0-9_.\n-' '-' <<< "$REF_NAME")
+            echo "tags=${RUST_VERSION}-${suffix}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Merge platform digests
         uses: ./.github/actions/job-image-merge
         with:
           image: ${{ env.IMAGE }}
-          tags: |
-            ${{ env.RUST_VERSION }}
-            latest
+          tags: ${{ steps.tags.outputs.tags }}
           registry: ${{ env.REGISTRY }}
           registry-http: ${{ vars.CI_REGISTRY_HTTP || 'false' }}
           username: ${{ secrets.CI_REGISTRY_USER }}
