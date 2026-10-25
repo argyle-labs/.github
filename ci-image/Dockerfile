@@ -111,7 +111,7 @@ RUN set -eux; \
     export CARGO_NET_RETRY=5; \
     retry() { \
         n=1; \
-        until timeout 120 "$@" > /tmp/retry.log 2>&1; do \
+        until timeout "${T:-120}" "$@" > /tmp/retry.log 2>&1; do \
             rc=$?; cat /tmp/retry.log; \
             if [ "$rc" -ne 124 ] && ! grep -qiE 'network|timed? ?out|connection|could not resolve|failed to (download|get|fetch|query|update)|spurious|tls|ssl|reset by peer|50[234]' /tmp/retry.log; then return "$rc"; fi; \
             [ "$n" -ge 3 ] && return "$rc"; \
@@ -121,12 +121,15 @@ RUN set -eux; \
     }; \
     m=/tmp/ci-warm/Cargo.toml; \
     sed -i -E '/package = "orca-plugin-toolkit"/ s/version = "[^"]*"/version = "='"${TOOLKIT_VERSION}"'"/' "$m"; \
+    grep -F 'package = "orca-plugin-toolkit"' "$m" | grep -qF "version = \"=${TOOLKIT_VERSION}\""; \
     sed -i -E '/package = "orca-plugin-toolkit-build"/ s/version = "[^"]*"/version = "='"${TOOLKIT_BUILD_VERSION}"'"/' "$m"; \
+    grep -F 'package = "orca-plugin-toolkit-build"' "$m" | grep -qF "version = \"=${TOOLKIT_BUILD_VERSION}\""; \
     retry cargo update --manifest-path "$m" -p orca-plugin-toolkit --precise "${TOOLKIT_VERSION}"; \
     retry cargo update --manifest-path "$m" -p orca-plugin-toolkit-build --precise "${TOOLKIT_BUILD_VERSION}"; \
-    retry cargo fetch --locked --manifest-path "$m"; \
-    awk '/^name = "orca-plugin-toolkit"$/ { getline; gsub(/"/, "", $3); print $3; exit }' /tmp/ci-warm/Cargo.lock \
-        | tee /usr/local/share/ci-warm-toolkit-version; \
+    T=600 retry cargo fetch --locked --manifest-path "$m"; \
+    v=$(awk '/^name = "orca-plugin-toolkit"$/ { getline; gsub(/"/, "", $3); print $3; exit }' /tmp/ci-warm/Cargo.lock); \
+    [ "$v" = "${TOOLKIT_VERSION}" ]; \
+    echo "$v" > /usr/local/share/ci-warm-toolkit-version; \
     rm -rf /tmp/ci-warm /tmp/retry.log "${CARGO_HOME}/registry/src"
 
 LABEL org.opencontainers.image.source="https://github.com/argyle-labs/.github" \
