@@ -37,7 +37,6 @@ runs:
         prerelease: "false"
     - name: Size section on draft stable
       if: ${{ steps.rel.outputs.prerelease == 'true' }}
-      continue-on-error: true
       shell: bash
       env:
         GITEA_TOKEN: ${{ inputs.release-token }}

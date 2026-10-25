@@ -287,6 +287,17 @@ if rsrun TAG=v0.4.0-rc.2 DIST_DIR=dist SIZES_DIR=sizes BUDGET_MIB=10; then got=p
 eq "budget exceeded fails step" "$got" "fail"
 eq "budget exceeded still annotates" "$([ -s "$rs/patch-5" ] && echo yes)" "yes"
 
+broken="$work/broken/actions/plugin-size-check"
+mkdir -p "$broken"
+cp -R "$here/../../lib" "$work/broken/lib"
+cp "$here/release-size.sh" "$here/lib.sh" "$broken/"
+printf '%s\n' 'size_section() { echo "::error title=release-size::boom" >&2; return 1; }' >> "$broken/lib.sh"
+rm -f "$rs"/patch-*
+if (cd "$rs" && env PATH="$rs/bin:$PATH" GITHUB_STEP_SUMMARY="$rs/summary" REPO=argyle-labs/demo TAG=v0.4.0-rc.2 \
+  bash "$broken/release-size.sh") >"$rs/out" 2>&1; then got=pass; else got=fail; fi
+eq "section failure keeps budget fail" "$got" "fail"
+eq "section failure prints ::error" "$(grep -c '^::error title=release-size::boom' "$rs/out")" "1"
+
 cp "$fx/channels.json" "$rs/releases.json"
 rm -f "$rs"/patch-*
 printf '#!/usr/bin/env bash\nexit 22\n' > "$rs/bin/curl.fail"

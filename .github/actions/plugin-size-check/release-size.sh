@@ -102,10 +102,12 @@ if [ -n "$base_tag" ]; then
   fi
 fi
 
-section=$(size_section "$entries" "$base" "$base_tag" "$size_pct" "$warn_pct" "$crate_max" "$max_bytes" "$max_crates" 2> "$tmp/annotations")
+rc=0
+section=$(size_section "$entries" "$base" "$base_tag" "$size_pct" "$warn_pct" "$crate_max" "$max_bytes" "$max_crates" 2> "$tmp/annotations") || rc=$?
 cat "$tmp/annotations" >&2
 over_budget=0
 ! grep -q '^::error' "$tmp/annotations" || over_budget=1
+[ "$rc" -eq 0 ] || { echo "::warning title=release-size::size section failed ($rc)"; exit "$over_budget"; }
 echo "$section" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 target_rel=$(release_of "$body_tag")
