@@ -7,7 +7,9 @@ description: >
   past `size-pct` / `crates` growth or an absolute budget, warns past
   `warn-pct`. `[size-check]` in `size-budget.toml` overrides the thresholds and
   must carry a `reason`. Writes a step summary table and, on a PR, one
-  updated PR comment.
+  updated PR comment. After a release is published, `release-size.sh` only
+  warns on report errors and fails only when a row fails, i.e. an absolute
+  budget or `size-pct` / `crates` growth is exceeded.
 
 inputs:
   target:
