@@ -196,6 +196,10 @@ runs:
         # pipefail can't see into the process substitution; empty means it failed.
         [ "${#pkgs[@]}" -gt 0 ] || { echo "no publishable crates found" >&2; exit 1; }
         cargo package --no-verify --locked --registry "$REGISTRY" "${pkgs[@]}"
+    - name: Restore committed Cargo files
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
+      shell: bash
+      run: git ls-files -z -- Cargo.lock '*Cargo.lock' '*Cargo.toml' | xargs -0 git checkout --
     # Last: it deletes .cargo/config.toml, which the cargo steps above need.
     - name: Lock file check
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
