@@ -259,6 +259,9 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
+      - name: Use latest released orca-plugin-toolkit
+        uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
+
       - name: Fetch dependencies
         run: |
           export t0=$SECONDS; trap 'echo "fetch|$((SECONDS - t0))|$?" >> /tmp/ci-phases' EXIT

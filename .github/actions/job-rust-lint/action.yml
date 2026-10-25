@@ -86,6 +86,9 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Use latest released orca-plugin-toolkit
+      id: toolkit
+      uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
     - name: Repo scripts
       if: ${{ inputs.scripts != '' }}
       shell: bash
@@ -115,7 +118,7 @@ runs:
       uses: argyle-labs/.github/.github/actions/crate-select@main
       with:
         job: lint-${{ inputs.lock-check }}
-        image: ci-rust:${{ inputs.image-tag }}
+        image: ci-rust:${{ inputs.image-tag }}${{ steps.toolkit.outputs.versions && format(' {0}', steps.toolkit.outputs.versions) || '' }}
         workflow-file: ${{ inputs.workflow-file }}
         extra-paths: |
           ${{ inputs.extra-paths }}
@@ -193,6 +196,10 @@ runs:
         # pipefail can't see into the process substitution; empty means it failed.
         [ "${#pkgs[@]}" -gt 0 ] || { echo "no publishable crates found" >&2; exit 1; }
         cargo package --no-verify --locked --registry "$REGISTRY" "${pkgs[@]}"
+    - name: Restore committed Cargo files
+      if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}
+      shell: bash
+      run: git ls-files -z -- Cargo.lock '*Cargo.lock' '*Cargo.toml' | xargs -0 git checkout --
     # Last: it deletes .cargo/config.toml, which the cargo steps above need.
     - name: Lock file check
       if: ${{ !cancelled() && steps.sel.outputs.selection != '' && steps.setup.outcome == 'success' }}

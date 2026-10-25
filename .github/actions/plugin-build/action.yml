@@ -175,8 +175,6 @@ runs:
         fi
         echo "RUSTUP_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
 
-    # Skipped on macOS: the build there uses a CARGO_TARGET_DIR outside the
-    # workspace that rust-cache does not track.
     - name: Release size profile
       id: relprof
       uses: argyle-labs/.github/.github/actions/rust-release-profile@main
@@ -185,12 +183,6 @@ runs:
         lto: ${{ inputs.profile-lto }}
         codegen-units: ${{ inputs.profile-codegen-units }}
         opt-level: ${{ inputs.profile-opt-level }}
-
-    - name: Cache cargo (rust-cache)
-      uses: Swatinem/rust-cache@v2
-      if: ${{ runner.os != 'macOS' }}
-      with:
-        key: ${{ inputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
 
     - name: Install sccache
       if: ${{ steps.host.outputs.use_sccache == 'true' && steps.host.outputs.prebaked != 'true' }}
@@ -404,6 +396,17 @@ runs:
         cargo update --workspace
         after=$(snap)
         [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with no .cargo/config.toml and commit"; diff <(echo "$before") <(echo "$after"); exit 1; }
+
+    - name: Use latest released orca-plugin-toolkit
+      uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
+
+    # Skipped on macOS: the build there uses a CARGO_TARGET_DIR outside the
+    # workspace that rust-cache does not track.
+    - name: Cache cargo (rust-cache)
+      uses: Swatinem/rust-cache@v2
+      if: ${{ runner.os != 'macOS' }}
+      with:
+        key: ${{ inputs.target }}${{ steps.relprof.outputs.key && format('-{0}', steps.relprof.outputs.key) || '' }}
 
     - name: Fetch dependencies
       uses: argyle-labs/.github/.github/actions/cargo-fetch@main
