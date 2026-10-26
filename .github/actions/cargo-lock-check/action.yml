@@ -41,7 +41,7 @@ runs:
           fi
           echo "::warning title=Cargo.lock drift check partially skipped::$1"
         }
-        fix="regenerate with \`cargo update --workspace\` with no .cargo/config.toml present, then commit Cargo.lock"
+        fix="regenerate with \`cargo update --workspace\` with no .cargo/config.toml present (gitea registry defined in ~/.cargo/config.toml), then commit Cargo.lock"
         command -v jq >/dev/null || probe_fail "jq not available in this image"
         if [ -f Cargo.lock ]; then
           meta=$(cargo metadata --no-deps --format-version 1 2>/dev/null) \
