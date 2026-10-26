@@ -160,7 +160,21 @@ Every plugin registers with orca through one generic surface — `service.*` (`l
 
 ## Developing a plugin
 
-Each plugin is its own repo: an out-of-process subprocess whose only orca dependency is `plugin-toolkit`, declaring its index metadata in `Cargo.toml` (`description` + `[package.metadata.orca].category`). See the [orca plugin authoring guide](https://github.com/argyle-labs/orca/blob/main/docs/plugin-authoring.md), and [docker](https://github.com/argyle-labs/docker) or [unraid](https://github.com/argyle-labs/unraid) as worked references.
+Each plugin is its own repo: an out-of-process subprocess whose only orca dependency is `orca-plugin-toolkit` from orca's git `main`, declaring its index metadata in `Cargo.toml` (`description` + `[package.metadata.orca].category`). See the [orca plugin authoring guide](https://github.com/argyle-labs/orca/blob/main/docs/plugin-authoring.md), and [docker](https://github.com/argyle-labs/docker) or [unraid](https://github.com/argyle-labs/unraid) as worked references.
+
+### Local setup
+
+orca's crates name their sibling dependencies with `registry = "gitea"`, so building a plugin locally needs that registry defined. Put this in your user-level `~/.cargo/config.toml`:
+
+```toml
+[registries.gitea]
+index = "sparse+https://gitea.scottkey.me/api/packages/argyle-labs/cargo/"
+
+[net]
+git-fetch-with-cli = true
+```
+
+`git-fetch-with-cli` lets cargo fetch the private orca git dependency with your git credentials. CI defines the same index through `CARGO_REGISTRIES_GITEA_INDEX` and deletes any repo `.cargo/config.toml`, since that file holds local `[patch]` overrides. Keep the registry in the user-level file, not the repo one, and regenerate `Cargo.lock` with no repo `.cargo/config.toml` present (`cargo update --workspace`) before committing it.
 
 Release binaries are signed with minisign (`<asset>.minisig`, trusted comment `plugin=<name> version=<version> sha256=<hex>`); the public key is [`keys/plugin-release.pub`](keys/plugin-release.pub). To rotate: add the new key, sign with both during the overlap, then remove the old one.
 

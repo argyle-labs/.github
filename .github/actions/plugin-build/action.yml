@@ -395,7 +395,7 @@ runs:
         before=$(snap)
         cargo update --workspace
         after=$(snap)
-        [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with no .cargo/config.toml and commit"; diff <(echo "$before") <(echo "$after"); exit 1; }
+        [ "$before" = "$after" ] || { echo "::error::cargo update --workspace changed non-member lock entries (stale/drifted Cargo.lock) — regenerate with cargo update --workspace with no .cargo/config.toml present (gitea registry defined in ~/.cargo/config.toml), then commit Cargo.lock"; diff <(echo "$before") <(echo "$after"); exit 1; }
 
     - name: Use latest released orca-plugin-toolkit
       uses: argyle-labs/.github/.github/actions/plugin-toolkit-latest@main
