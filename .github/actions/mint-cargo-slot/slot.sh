@@ -45,11 +45,13 @@ self_heal_stale_dev_targets() {
       continue
     fi
     repo="$(basename "$(dirname "$t")")"
-    if lockf -k -s -t 0 "$t/.cargo-lock" rm -rf "$t" 2>/dev/null; then
-      echo "self-heal: cleared stale $repo/target (untouched ${SLOT_JANITOR_DAYS}+d)"
-    else
-      echo "self-heal: skipping $repo/target — cargo lock held or deletion failed"
+    open_files="$(lsof +D "$t" 2>/dev/null || true)"
+    if [ -n "$open_files" ]; then
+      echo "self-heal: skipping $repo/target — files open under it"
+      continue
     fi
+    rm -rf "$t"
+    echo "self-heal: cleared stale $repo/target (untouched ${SLOT_JANITOR_DAYS}+d)"
   done
 }
 
