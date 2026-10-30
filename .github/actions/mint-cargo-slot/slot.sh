@@ -37,6 +37,7 @@ base="$root/$SLOT_SCOPE/$SLOT_TARGET"
 
 # Reclaims ~/code/*/target dirs this script otherwise knows nothing about —
 # the 2026-10-29 incident had slot caches fine but those grown to hundreds of GB.
+# lsof only sees this user's own open files, fine for a single-user dev host.
 self_heal_stale_dev_targets() {
   devroot="$HOME/code"
   [ -d "$devroot" ] || return 0
@@ -50,7 +51,10 @@ self_heal_stale_dev_targets() {
       echo "self-heal: skipping $repo/target — files open under it"
       continue
     fi
-    rm -rf "$t"
+    if ! rm -rf "$t" 2>/dev/null; then
+      echo "::warning::self-heal: failed to remove $repo/target"
+      continue
+    fi
     echo "self-heal: cleared stale $repo/target (untouched ${SLOT_JANITOR_DAYS}+d)"
   done
 }
