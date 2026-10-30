@@ -35,6 +35,20 @@ root="$HOME/Library/Caches/orca-ci/target"
 guard="$(cd "$(dirname "$0")/../sccache-guard" && pwd)/guard.sh"
 base="$root/$SLOT_SCOPE/$SLOT_TARGET"
 
+# Reclaims ~/code/*/target dirs this script otherwise knows nothing about —
+# the 2026-10-29 incident had slot caches fine but those grown to hundreds of GB.
+self_heal_stale_dev_targets() {
+  devroot="$HOME/code"
+  [ -d "$devroot" ] || return 0
+  find "$devroot" -mindepth 2 -maxdepth 2 -type d -name target 2>/dev/null | while IFS= read -r t; do
+    if find "$t" -maxdepth 3 -type f -mtime -"$SLOT_JANITOR_DAYS" -print -quit 2>/dev/null | grep -q .; then
+      continue
+    fi
+    echo "self-heal: clearing stale $(basename "$(dirname "$t")")/target (untouched ${SLOT_JANITOR_DAYS}+d)"
+    rm -rf "$t"
+  done
+}
+
 # Runs under lockf with the slot lock held; the kernel drops the lock if this
 # process dies, so there is no stale-lock state to clean up.
 inner() {
@@ -51,6 +65,10 @@ inner() {
   fi
 
   free_kb=$(df -Pk "$slot" | awk 'NR == 2 {print $4}')
+  if [ "$free_kb" -lt $((SLOT_MIN_FREE_GB * 1048576)) ]; then
+    self_heal_stale_dev_targets || true
+    free_kb=$(df -Pk "$slot" | awk 'NR == 2 {print $4}')
+  fi
   if [ "$free_kb" -lt $((SLOT_MIN_FREE_GB * 1048576)) ]; then
     echo "::error title=Low disk on build host::$((free_kb / 1048576))G free under $root; need at least ${SLOT_MIN_FREE_GB}G to build"
     return 1
