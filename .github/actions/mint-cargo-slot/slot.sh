@@ -44,8 +44,12 @@ self_heal_stale_dev_targets() {
     if find "$t" -maxdepth 3 -type f -mtime -"$SLOT_JANITOR_DAYS" -print -quit 2>/dev/null | grep -q .; then
       continue
     fi
-    echo "self-heal: clearing stale $(basename "$(dirname "$t")")/target (untouched ${SLOT_JANITOR_DAYS}+d)"
-    rm -rf "$t"
+    repo="$(basename "$(dirname "$t")")"
+    if lockf -k -s -t 0 "$t/.cargo-lock" rm -rf "$t" 2>/dev/null; then
+      echo "self-heal: cleared stale $repo/target (untouched ${SLOT_JANITOR_DAYS}+d)"
+    else
+      echo "self-heal: skipping $repo/target — cargo lock held or deletion failed"
+    fi
   done
 }
 
