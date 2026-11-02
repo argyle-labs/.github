@@ -16,6 +16,9 @@ cat > "$work/quota.log" <<'T'
 [2026-11-01T00:00:01Z ERROR sccache::server] cache write failed: S3 PutObject status code 403: QuotaExceeded: bucket quota exceeded
 [2026-11-01T00:00:02Z ERROR sccache::server] request https://s3/x?X-Amz-Credential=GK0123456789abcdef&X-Amz-Signature=deadbeefcafe failed
 [2026-11-01T00:00:03Z DEBUG sccache::server] Authorization: AWS4-HMAC-SHA256 Credential=GKsecretsecretsecret, secret_access_key=hunter2
+[2026-11-01T00:00:04Z ERROR sccache::server] s3 secret 5f3c0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab in bucket orca-sccache
+[2026-11-01T00:00:05Z ERROR sccache::server] s3 aws secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY rejected
+[2026-11-01T00:00:06Z ERROR sccache::server] s3 Authorization: Bearer tok3nvalue123 rejected
 T
 
 fail=0
@@ -38,6 +41,11 @@ expect fail "read-only on push names the cause" push "$ro" QuotaExceeded ""
 expect fail "credentials scrubbed" push "$ro" "X-Amz-Signature=***" deadbeefcafe
 expect fail "secret key scrubbed" push "$ro" "::error" hunter2
 expect fail "access key id scrubbed" push "$ro" "::error" GK0123456789abcdef
+expect fail "bucket name survives" push "$ro" orca-sccache ""
+expect fail "status code survives" push "$ro" "status code 403" ""
+expect fail "bare hex secret scrubbed" push "$ro" "s3 secret ***" 5f3c0123456789abcdef
+expect fail "base64 secret scrubbed" push "$ro" "aws secret ***" wJalrXUtnFEMI
+expect fail "bearer token scrubbed" push "$ro" "Authorization: ***" tok3nvalue123
 expect pass "read-only on pull_request warns" pull_request "$ro" "::warning title=sccache READ-ONLY" ""
 expect pass "some writes succeeded" push '{"stats":{"cache_write_errors":3,"cache_writes":10}}' "" READ-ONLY
 expect pass "no write errors" push '{"stats":{"cache_write_errors":0,"cache_writes":0}}' "" READ-ONLY
@@ -52,6 +60,24 @@ if [ "$got" = fail ] && [[ "$out" == *"X-Amz-Signature=***"* ]] && [[ "$out" != 
   echo "ok: errlog output scrubbed (fail)"
 else
   echo "FAIL: errlog output should be scrubbed, got $got: $out" >&2
+  fail=1
+fi
+
+out=$(AWS_SECRET_ACCESS_KEY=awssecretval AWS_SESSION_TOKEN=sesstok SCCACHE_S3_KEY_PREFIX=pfx \
+  SCCACHE_S3_SECRET=s3secretval SCCACHE_BUCKET=orca-sccache GITHUB_EVENT_NAME=push GITHUB_STEP_SUMMARY='' \
+  bash "$script" errlog "$work/none.log" 2>&1) || true
+if [[ "$out" == *"::add-mask::awssecretval"* ]] && [[ "$out" == *"::add-mask::sesstok"* ]] \
+  && [[ "$out" == *"::add-mask::s3secretval"* ]] && [[ "$out" == *"::add-mask::pfx"* ]] && [[ "$out" != *orca-sccache* ]]; then
+  echo "ok: add-mask emitted for set secret env vars"
+else
+  echo "FAIL: add-mask lines missing, got: $out" >&2
+  fail=1
+fi
+out=$(env -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN GITHUB_EVENT_NAME=push bash "$script" errlog "$work/none.log" 2>&1) || true
+if [[ "$out" != *add-mask* ]]; then
+  echo "ok: no add-mask for unset vars"
+else
+  echo "FAIL: add-mask emitted for unset vars: $out" >&2
   fail=1
 fi
 

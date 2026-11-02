@@ -6,7 +6,18 @@ scrub() {
       s/((?:X-Amz-)?(?:Signature|Credential|Security-Token)=)[^&\s",]*/$1***/gi;
       s/(Authorization:?\s*)\S+(\s+\S+)?/$1***/gi;
       s/((?:secret|token|password|access_key|key_id)\w*"?\s*[:=]\s*"?)[^"&\s,]+/$1***/gi;
-      s/\b(AKIA|ASIA|GK)[A-Za-z0-9]{12,}/$1***/g'
+      s/\b(AKIA|ASIA|GK)[A-Za-z0-9]{12,}/$1***/g;
+      s/\b[0-9a-f]{40,}\b/***/gi;
+      s{(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])}{***}g'
+}
+
+mask_env() {
+  local v
+  for v in AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN $(compgen -v SCCACHE_S3_); do
+    case "$v" in
+      AWS_*|*KEY*|*SECRET*|*TOKEN*|*PASSWORD*) [ -n "${!v:-}" ] && echo "::add-mask::${!v}" ;;
+    esac
+  done
 }
 
 s3_cause() {
@@ -30,6 +41,10 @@ readonly_fail() {
     *) echo "::error title=sccache READ-ONLY::$msg"; return 1 ;;
   esac
 }
+
+case "${1:-}" in
+  errlog|stats) mask_env ;;
+esac
 
 case "${1:-}" in
   errlog)
