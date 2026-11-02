@@ -43,4 +43,16 @@ expect pass "some writes succeeded" push '{"stats":{"cache_write_errors":3,"cach
 expect pass "no write errors" push '{"stats":{"cache_write_errors":0,"cache_writes":0}}' "" READ-ONLY
 expect pass "unparseable stats" push 'garbage' "" READ-ONLY
 
+cat > "$work/write.log" <<'T'
+[2026-11-01T00:00:00Z ERROR sccache::server] storage write check failed
+  PUT https://s3/x?X-Amz-Credential=GK0123456789abcdef%2Fus-east-1&X-Amz-Signature=deadbeefcafe
+T
+out=$(GITHUB_EVENT_NAME=push GITHUB_STEP_SUMMARY='' bash "$script" errlog "$work/write.log" 2>&1) && got=pass || got=fail
+if [ "$got" = fail ] && [[ "$out" == *"X-Amz-Signature=***"* ]] && [[ "$out" != *deadbeefcafe* ]] && [[ "$out" != *GK0123456789abcdef* ]]; then
+  echo "ok: errlog output scrubbed (fail)"
+else
+  echo "FAIL: errlog output should be scrubbed, got $got: $out" >&2
+  fail=1
+fi
+
 exit "$fail"

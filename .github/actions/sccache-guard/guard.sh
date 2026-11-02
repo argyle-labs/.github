@@ -1,15 +1,19 @@
 #!/bin/bash
 set -uo pipefail
 
+scrub() {
+  perl -pe '
+      s/((?:X-Amz-)?(?:Signature|Credential|Security-Token)=)[^&\s",]*/$1***/gi;
+      s/(Authorization:?\s*)\S+(\s+\S+)?/$1***/gi;
+      s/((?:secret|token|password|access_key|key_id)\w*"?\s*[:=]\s*"?)[^"&\s,]+/$1***/gi;
+      s/\b(AKIA|ASIA|GK)[A-Za-z0-9]{12,}/$1***/g'
+}
+
 s3_cause() {
   [ -r "${1:-}" ] || return 0
   grep -iE 'quota|denied|forbidden|unauthori[sz]ed|nosuchbucket|invalidaccesskey|signaturedoesnotmatch|status[ _-]?code|[^0-9](403|404|500|503)[^0-9]|s3|error' "$1" \
     | tail -n 5 \
-    | perl -pe '
-      s/((?:X-Amz-)?(?:Signature|Credential|Security-Token)=)[^&\s",]*/$1***/gi;
-      s/(Authorization:?\s*)\S+(\s+\S+)?/$1***/gi;
-      s/((?:secret|token|password|access_key|key_id)\w*"?\s*[:=]\s*"?)[^"&\s,]+/$1***/gi;
-      s/\b(AKIA|ASIA|GK)[A-Za-z0-9]{12,}/$1***/g' \
+    | scrub \
     | cut -c1-300 \
     | tr '\n' ' '
 }
@@ -31,7 +35,7 @@ case "${1:-}" in
   errlog)
     log=${2:-}
     ro=$(grep -A 5 'storage write check failed' "${2:-}" 2>/dev/null) || exit 0
-    readonly_fail "backend write check failed: $(echo "$ro" | tr '\n' ' ')"
+    readonly_fail "backend write check failed: $(echo "$ro" | scrub | tr '\n' ' ')"
     ;;
   stats)
     flag=${SCCACHE_BYPASS_FLAG:-${RUNNER_TEMP:-/tmp}/sccache-bypass-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-${GITHUB_JOB:-job}}
