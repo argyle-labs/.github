@@ -14,11 +14,24 @@ chmod +x "$work/bin/sccache"
 cat > "$work/quota.log" <<'T'
 [2026-11-01T00:00:00Z INFO sccache::server] server started
 [2026-11-01T00:00:01Z ERROR sccache::server] cache write failed: S3 PutObject status code 403: QuotaExceeded: bucket quota exceeded
-[2026-11-01T00:00:02Z ERROR sccache::server] request https://s3/x?X-Amz-Credential=GK0123456789abcdef&X-Amz-Signature=deadbeefcafe failed
-[2026-11-01T00:00:03Z DEBUG sccache::server] Authorization: AWS4-HMAC-SHA256 Credential=GKsecretsecretsecret, secret_access_key=hunter2
-[2026-11-01T00:00:04Z ERROR sccache::server] s3 secret 5f3c0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab in bucket orca-sccache
-[2026-11-01T00:00:05Z ERROR sccache::server] s3 aws secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY rejected
-[2026-11-01T00:00:06Z ERROR sccache::server] s3 Authorization: Bearer tok3nvalue123 rejected
+[2026-11-01T00:00:02Z ERROR sccache::compiler] rustc error: could not compile foo
+[2026-11-01T00:00:03Z ERROR sccache::compiler] rustc error: could not compile bar
+[2026-11-01T00:00:04Z ERROR sccache::server] s3 client error: connection reset
+[2026-11-01T00:00:05Z ERROR sccache::compiler] error reading dep-info
+[2026-11-01T00:00:06Z ERROR sccache::compiler] error: linker failed
+[2026-11-01T00:00:07Z ERROR sccache::compiler] error: build script failed
+T
+
+cat > "$work/secrets.log" <<'T'
+[2026-11-01T00:00:02Z ERROR sccache::server] AccessDenied request https://s3/x?X-Amz-Credential=GK0123456789abcdef&X-Amz-Signature=deadbeefcafe failed
+[2026-11-01T00:00:03Z DEBUG sccache::server] AccessDenied Authorization: AWS4-HMAC-SHA256 Credential=GKsecretsecretsecret, secret_access_key=hunter2
+[2026-11-01T00:00:04Z ERROR sccache::server] status code 403: s3 secret 5f3c0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab in bucket orca-sccache
+[2026-11-01T00:00:05Z ERROR sccache::server] Forbidden: s3 aws secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY rejected
+[2026-11-01T00:00:06Z ERROR sccache::server] Forbidden: s3 Authorization: Bearer tok3nvalue123 rejected
+T
+
+cat > "$work/sig.log" <<'T'
+[2026-11-01T00:00:01Z ERROR sccache::server] PutObject: SignatureDoesNotMatch
 T
 
 fail=0
@@ -38,20 +51,22 @@ expect() {
 
 ro='{"stats":{"cache_write_errors":74,"cache_writes":0}}'
 expect fail "read-only on push names the cause" push "$ro" QuotaExceeded ""
-expect fail "credentials scrubbed" push "$ro" "X-Amz-Signature=***" deadbeefcafe
-expect fail "secret key scrubbed" push "$ro" "::error" hunter2
-expect fail "access key id scrubbed" push "$ro" "::error" GK0123456789abcdef
-expect fail "bucket name survives" push "$ro" orca-sccache ""
-expect fail "status code survives" push "$ro" "status code 403" ""
-expect fail "bare hex secret scrubbed" push "$ro" "s3 secret ***" 5f3c0123456789abcdef
-expect fail "base64 secret scrubbed" push "$ro" "aws secret ***" wJalrXUtnFEMI
-expect fail "bearer token scrubbed" push "$ro" "Authorization: ***" tok3nvalue123
+expect fail "credentials scrubbed" push "$ro" "X-Amz-Signature=***" deadbeefcafe "$work/secrets.log"
+expect fail "secret key scrubbed" push "$ro" "::error" hunter2 "$work/secrets.log"
+expect fail "access key id scrubbed" push "$ro" "::error" GK0123456789abcdef "$work/secrets.log"
+expect fail "bucket name survives" push "$ro" orca-sccache "" "$work/secrets.log"
+expect fail "status code survives" push "$ro" "status code 403" "" "$work/secrets.log"
+expect fail "bare hex secret scrubbed" push "$ro" "s3 secret ***" 5f3c0123456789abcdef "$work/secrets.log"
+expect fail "base64 secret scrubbed" push "$ro" "aws secret ***" wJalrXUtnFEMI "$work/secrets.log"
+expect fail "bearer token scrubbed" push "$ro" "Authorization: ***" tok3nvalue123 "$work/secrets.log"
 expect pass "read-only on pull_request warns" pull_request "$ro" "::warning title=sccache READ-ONLY" ""
 expect pass "some writes succeeded" push '{"stats":{"cache_write_errors":3,"cache_writes":10}}' "" READ-ONLY
 expect pass "no write errors" push '{"stats":{"cache_write_errors":0,"cache_writes":0}}' "" READ-ONLY
 expect fail "pretty-printed stats parsed" push $'{\n  "stats": {\n    "cache_write_errors" : 74,\n    "cache_writes" : 0\n  }\n}' "::error title=sccache READ-ONLY" "stats unreadable"
 expect pass "pretty-printed stats with writes" push $'{\n  "stats": {\n    "cache_write_errors": 3,\n    "cache_writes": 10\n  }\n}' "" "stats unreadable"
 expect fail "unreadable stats + quota log on push" push 'garbage' "stats unreadable" ""
+expect fail "cause survives later unrelated errors" push "$ro" QuotaExceeded "linker failed"
+expect fail "unreadable stats + SignatureDoesNotMatch" push 'garbage' SignatureDoesNotMatch "" "$work/sig.log"
 expect fail "unreadable stats + quota log names cause" push 'garbage' "QuotaExceeded" hunter2
 expect pass "unreadable stats + quota log on pull_request" pull_request 'garbage' "::warning title=sccache READ-ONLY" "::error"
 printf '[2026-11-01T00:00:00Z INFO sccache::server] server started\n' > "$work/clean.log"

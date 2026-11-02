@@ -20,9 +20,11 @@ mask_env() {
   done
 }
 
+s3_fail_re='storage write check failed|QuotaExceeded|AccessDenied|Forbidden|Unauthori[sz]ed|NoSuchBucket|InvalidAccessKeyId|SignatureDoesNotMatch|[^0-9]403[^0-9]'
+
 s3_cause() {
   [ -r "${1:-}" ] || return 0
-  grep -iE 'quota|denied|forbidden|unauthori[sz]ed|nosuchbucket|invalidaccesskey|signaturedoesnotmatch|status[ _-]?code|[^0-9](403|404|500|503)[^0-9]|s3|error' "$1" \
+  { grep -iE "$s3_fail_re" "$1" || grep -iE 'quota|denied|status[ _-]?code|[^0-9](404|500|503)[^0-9]|s3|error' "$1"; } \
     | tail -n 5 \
     | scrub \
     | cut -c1-300 \
@@ -45,7 +47,7 @@ readonly_fail() {
 stats_fallback() {
   echo "::warning title=sccache guard::stats unreadable; read-only check skipped — falling back to error log"
   local ro
-  ro=$(grep -iE 'storage write check failed|QuotaExceeded|AccessDenied' "${log:-}" 2>/dev/null | tail -n 5) || exit 0
+  ro=$(grep -iE "$s3_fail_re" "${log:-}" 2>/dev/null | tail -n 5) || exit 0
   readonly_fail "error log reports write failures: $(echo "$ro" | scrub | cut -c1-300 | tr '\n' ' ')"
   exit
 }
