@@ -1,8 +1,40 @@
 #!/bin/bash
 set -uo pipefail
 
+scrub() {
+  perl -pe '
+      s/((?:X-Amz-)?(?:Signature|Credential|Security-Token)=)[^&\s",]*/$1***/gi;
+      s/(Authorization:?\s*)\S+(\s+\S+)?/$1***/gi;
+      s/((?:secret|token|password|access_key|key_id)\w*"?\s*[:=]\s*"?)[^"&\s,]+/$1***/gi;
+      s/\b(AKIA|ASIA|GK)[A-Za-z0-9]{12,}/$1***/g;
+      s/\b[0-9a-f]{40,}\b/***/gi;
+      s{(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])}{***}g'
+}
+
+mask_env() {
+  local v
+  for v in AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN $(compgen -v SCCACHE_S3_); do
+    case "$v" in
+      AWS_*|*KEY*|*SECRET*|*TOKEN*|*PASSWORD*) [ -n "${!v:-}" ] && echo "::add-mask::${!v}" ;;
+    esac
+  done
+}
+
+s3_fail_re='storage write check failed|QuotaExceeded|AccessDenied|Forbidden|Unauthori[sz]ed|NoSuchBucket|InvalidAccessKeyId|SignatureDoesNotMatch|[^0-9]403[^0-9]'
+
+s3_cause() {
+  [ -r "${1:-}" ] || return 0
+  { grep -iE "$s3_fail_re" "$1" || grep -iE 'quota|denied|status[ _-]?code|[^0-9](404|500|503)[^0-9]|s3|error' "$1"; } \
+    | tail -n 5 \
+    | scrub \
+    | cut -c1-300 \
+    | tr '\n' ' '
+}
+
 readonly_fail() {
-  msg="sccache cache is READ-ONLY: $1; the cache will not fill (check the S3 cache backend disk, quota and credentials)."
+  cause=$(s3_cause "${log:-}")
+  msg="sccache cache is READ-ONLY: $1; the cache will not fill. ${cause:+Last S3 errors: $cause}"
+  msg=${msg% }
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "**$msg**" >> "$GITHUB_STEP_SUMMARY"
   fi
@@ -12,10 +44,23 @@ readonly_fail() {
   esac
 }
 
+stats_fallback() {
+  echo "::warning title=sccache guard::stats unreadable; read-only check skipped — falling back to error log"
+  local ro
+  ro=$(grep -iE "$s3_fail_re" "${log:-}" 2>/dev/null | tail -n 5) || exit 0
+  readonly_fail "error log reports write failures: $(echo "$ro" | scrub | cut -c1-300 | tr '\n' ' ')"
+  exit
+}
+
+case "${1:-}" in
+  errlog|stats) mask_env ;;
+esac
+
 case "${1:-}" in
   errlog)
+    log=${2:-}
     ro=$(grep -A 5 'storage write check failed' "${2:-}" 2>/dev/null) || exit 0
-    readonly_fail "backend write check failed: $(echo "$ro" | tr '\n' ' ')"
+    readonly_fail "backend write check failed: $(echo "$ro" | scrub | tr '\n' ' ')"
     ;;
   stats)
     flag=${SCCACHE_BYPASS_FLAG:-${RUNNER_TEMP:-/tmp}/sccache-bypass-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-${GITHUB_JOB:-job}}
@@ -24,11 +69,13 @@ case "${1:-}" in
       exit 0
     fi
     command -v sccache >/dev/null 2>&1 || exit 0
-    stats=$(sccache --show-stats 2>&1) || exit 0
-    werr=$(echo "$stats" | awk '/^Cache write errors/ {print $NF}')
-    wavg=$(echo "$stats" | awk '/^Average cache write/ {print $(NF-1)}')
+    log=${2:-${SCCACHE_ERROR_LOG:-}}
+    stats=$(sccache --show-stats --stats-format json 2>/dev/null) || stats_fallback
+    werr=$(echo "$stats" | grep -oE '"cache_write_errors"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+$')
+    wok=$(echo "$stats" | grep -oE '"cache_writes"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+$')
     case "$werr" in ''|*[!0-9]*) werr=0 ;; esac
-    if [ "$werr" -gt 0 ] && [ "$wavg" = 0.000 ]; then
+    case "$wok" in ''|*[!0-9]*) stats_fallback ;; esac
+    if [ "$werr" -gt 0 ] && [ "$wok" -eq 0 ]; then
       readonly_fail "${werr} cache write errors and no successful write"
     fi
     ;;
