@@ -7,6 +7,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 cat > "$work/bin/sccache" <<'T'
 #!/bin/bash
+[ "$*" = "--show-stats --stats-format json" ] || exit 1
 cat "$STATS"
 T
 chmod +x "$work/bin/sccache"

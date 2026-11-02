@@ -123,7 +123,11 @@ jobs:
         run: bash .github/actions/crate-hashes/test.sh
 
   sccache-guard:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runs-on: [ubuntu-latest, macos]
+    runs-on: ${{ matrix.runs-on }}
     defaults:
       run:
         shell: bash
