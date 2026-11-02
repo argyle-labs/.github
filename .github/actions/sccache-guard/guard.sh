@@ -42,6 +42,14 @@ readonly_fail() {
   esac
 }
 
+stats_fallback() {
+  echo "::warning title=sccache guard::stats unreadable; read-only check skipped — falling back to error log"
+  local ro
+  ro=$(grep -iE 'storage write check failed|QuotaExceeded|AccessDenied' "${log:-}" 2>/dev/null | tail -n 5) || exit 0
+  readonly_fail "error log reports write failures: $(echo "$ro" | scrub | cut -c1-300 | tr '\n' ' ')"
+  exit
+}
+
 case "${1:-}" in
   errlog|stats) mask_env ;;
 esac
@@ -60,11 +68,11 @@ case "${1:-}" in
     fi
     command -v sccache >/dev/null 2>&1 || exit 0
     log=${2:-${SCCACHE_ERROR_LOG:-}}
-    stats=$(sccache --show-stats --stats-format json 2>/dev/null) || exit 0
-    werr=$(echo "$stats" | grep -o '"cache_write_errors":[0-9]*' | cut -d: -f2)
-    wok=$(echo "$stats" | grep -o '"cache_writes":[0-9]*' | cut -d: -f2)
+    stats=$(sccache --show-stats --stats-format json 2>/dev/null) || stats_fallback
+    werr=$(echo "$stats" | grep -oE '"cache_write_errors"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+$')
+    wok=$(echo "$stats" | grep -oE '"cache_writes"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+$')
     case "$werr" in ''|*[!0-9]*) werr=0 ;; esac
-    case "$wok" in ''|*[!0-9]*) exit 0 ;; esac
+    case "$wok" in ''|*[!0-9]*) stats_fallback ;; esac
     if [ "$werr" -gt 0 ] && [ "$wok" -eq 0 ]; then
       readonly_fail "${werr} cache write errors and no successful write"
     fi

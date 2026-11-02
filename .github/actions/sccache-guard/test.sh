@@ -23,11 +23,11 @@ T
 
 fail=0
 expect() {
-  local want=$1 name=$2 event=$3 stats=$4 must=$5 mustnot=$6 got=pass out
+  local want=$1 name=$2 event=$3 stats=$4 must=$5 mustnot=$6 log=${7:-$work/quota.log} got=pass out
   printf '%s' "$stats" > "$work/stats.json"
   out=$(PATH="$work/bin:$PATH" STATS="$work/stats.json" GITHUB_EVENT_NAME=$event \
     SCCACHE_BYPASS_FLAG="$work/none" GITHUB_STEP_SUMMARY='' \
-    bash "$script" stats "$work/quota.log" 2>&1) || got=fail
+    bash "$script" stats "$log" 2>&1) || got=fail
   if [ "$got" = "$want" ] && [[ "$out" == *"$must"* ]] && { [ -z "$mustnot" ] || [[ "$out" != *"$mustnot"* ]]; }; then
     echo "ok: $name ($want)"
   else
@@ -49,7 +49,13 @@ expect fail "bearer token scrubbed" push "$ro" "Authorization: ***" tok3nvalue12
 expect pass "read-only on pull_request warns" pull_request "$ro" "::warning title=sccache READ-ONLY" ""
 expect pass "some writes succeeded" push '{"stats":{"cache_write_errors":3,"cache_writes":10}}' "" READ-ONLY
 expect pass "no write errors" push '{"stats":{"cache_write_errors":0,"cache_writes":0}}' "" READ-ONLY
-expect pass "unparseable stats" push 'garbage' "" READ-ONLY
+expect fail "pretty-printed stats parsed" push $'{\n  "stats": {\n    "cache_write_errors" : 74,\n    "cache_writes" : 0\n  }\n}' "::error title=sccache READ-ONLY" "stats unreadable"
+expect pass "pretty-printed stats with writes" push $'{\n  "stats": {\n    "cache_write_errors": 3,\n    "cache_writes": 10\n  }\n}' "" "stats unreadable"
+expect fail "unreadable stats + quota log on push" push 'garbage' "stats unreadable" ""
+expect fail "unreadable stats + quota log names cause" push 'garbage' "QuotaExceeded" hunter2
+expect pass "unreadable stats + quota log on pull_request" pull_request 'garbage' "::warning title=sccache READ-ONLY" "::error"
+printf '[2026-11-01T00:00:00Z INFO sccache::server] server started\n' > "$work/clean.log"
+expect pass "unreadable stats + clean log warns" push 'garbage' "::warning title=sccache guard::stats unreadable" READ-ONLY "$work/clean.log"
 
 cat > "$work/write.log" <<'T'
 [2026-11-01T00:00:00Z ERROR sccache::server] storage write check failed
