@@ -121,3 +121,14 @@ jobs:
         uses: actions/checkout@v4
       - name: Self-test
         run: bash .github/actions/crate-hashes/test.sh
+
+  sccache-guard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test
+        run: bash .github/actions/sccache-guard/test.sh
